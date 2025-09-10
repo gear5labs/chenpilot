@@ -3,18 +3,29 @@
   "version": "1.0.0",
   "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon src/index.ts",
-    "start":"node dist/index.js",
-    "build":"tsc"
+    "test": "echo \"No tests yet\"",
+    "dev": "node --env-file=.env --loader ts-node/esm src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p ./tsconfig.json"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.61.0",
+    "@atomiqlabs/chain-starknet": "^5.1.0",
+    "@atomiqlabs/sdk": "^6.0.0",
+    "@atomiqlabs/storage-sqlite": "^3.0.0",
+    "dotenv": "^17.2.2",
     "nodemon": "^3.1.9",
+    "starknet": "^7.6.4"
+  },
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "eslint": "^9.35.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.9.2"
   }
 }
