@@ -1,0 +1,20 @@
+export const ETHTokenAddress =
+  "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7";
+
+export const STRKTokenAddress =
+  "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
+
+export const SKTokenAddress =
+  "0x0620e07581e4b797d2dbe6f1ef507899cdd186cc19a96791ac18335a17359c4f";
+
+export const DAITokenAddress =
+  "0x00da114221cb83fa859dbdb4c44beeaa0bb37c7537ad5ae66fe5e0efd20e6eb3";
+
+export const ARGENT_DUMMY_CONTRACT_MAINNET_ADDRESS =
+  "0x001c515f991f706039696a54f6f33730e9b0e8cc5d04187b13c2c714401acfd4";
+
+export const ARGENT_DUMMY_CONTRACT_SEPOLIA_ADDRESS =
+  "0x88d3cc4377a6cdfd27545a11548bd070c4e2e1e3df3d402922dbc4350b416";
+
+export const STAKCAST_CONTRACT_ADDRESS =
+  "0x05b5fcf9bc77b7c0530b0a54e1125dbcac43f6022cfe9156564a5025b030334b";
