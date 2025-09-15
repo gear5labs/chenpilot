@@ -1,24 +1,30 @@
-import { swapTool } from "../tools/swap";
-import { walletTool } from "../tools/wallet";
 import { WorkflowPlan } from "../types";
+import { toolRegistry } from "../registry/ToolRegistry";
+import { ToolResult } from "../registry/ToolMetadata";
 
 export class ExecutionAgent {
   async run(plan: WorkflowPlan, userId: string) {
-    const results: unknown[] = [];
+    const results: ToolResult[] = [];
 
     for (const step of plan.workflow) {
-      switch (step.action) {
-        case "swap":
-          results.push(await swapTool.execute(step.payload, userId));
-          break;
-        case "wallet_balance":
-          results.push(await walletTool.getBalance(step.payload,userId));
-          break;
-        case "transfer":
-          results.push(await walletTool.transfer(step.payload, userId));
-          break;
-        default:
-          results.push({ error: `Unknown action: ${(step as any).action}` });
+      try {
+        // Use the tool registry to execute the action
+        const result = await toolRegistry.executeTool(
+          step.action,
+          step.payload,
+          userId
+        );
+        results.push(result);
+      } catch (error) {
+        // Handle tool execution errors
+        const errorResult: ToolResult = {
+          action: step.action,
+          status: "error",
+          error:
+            error instanceof Error ? error.message : "Unknown error occurred",
+          data: { payload: step.payload },
+        };
+        results.push(errorResult);
       }
     }
 

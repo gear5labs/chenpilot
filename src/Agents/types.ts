@@ -1,3 +1,4 @@
+// Legacy types - kept for backward compatibility
 export type SwapPayload = {
   from: string;
   to: string;
@@ -8,31 +9,38 @@ export type TransferPayload = {
   to: string;
   amount: number;
 };
+
 export type supportedTokens = "STRK" | "ETH" | "DAI";
+
 export type BalancePayload = {
   token: supportedTokens;
 };
-export type WorkflowStep =
-  | { action: "swap"; payload: SwapPayload }
-  | { action: "wallet_balance"; payload: BalancePayload }
-  | { action: "transfer"; payload: TransferPayload };
+
+// Dynamic workflow types that work with the tool registry
+export type WorkflowStep = {
+  action: string; // Tool name from registry
+  payload: Record<string, unknown>; // Flexible payload
+};
 
 export type WorkflowPlan = {
   workflow: WorkflowStep[];
 };
 
-
-
+// Legacy ToolResult interface - now superseded by registry types
 export interface ToolResult {
   action: string;
   status: "success" | "error";
-  //flexible fields
-  [key: string]: unknown;
+  message?: string;
+  data?: Record<string, unknown>;
+  error?: string;
 }
 
-
+// Legacy Tool interface - now superseded by registry types
 export interface Tool {
   name: string;
   description: string;
-  execute: (payload: unknown, userId: string) => Promise<ToolResult>;
+  execute: (
+    payload: Record<string, unknown>,
+    userId: string
+  ) => Promise<ToolResult>;
 }
