@@ -4,7 +4,11 @@ import cors from "cors";
 import { authenticate } from "../Auth/auth";
 import { validateQuery } from "../Agents/validationService";
 import { intentAgent } from "../Agents/agents/intentagent";
-import { memoryStore } from "../Agents/memory/memory";
+import {
+  ErrorHandler,
+  UnauthorizedError,
+  ValidationError,
+} from "../utils/error";
 const app = express();
 
 app.use(cors());
@@ -15,15 +19,17 @@ app.post("/query", async (req, res) => {
 
   const user = await authenticate(userId);
 
-  if (!user) return res.status(401).json({ error: "Unauthorized" });
+  if (!user) throw new UnauthorizedError("invalid credentials");
 
   const valid = await validateQuery(query, userId);
-  if (!valid) return res.status(400).json({ error: "Invalid query" });
+  if (!valid) throw new ValidationError("invalid query");
 
   // 3. intent → execution
   const result = await intentAgent.handle(query, userId);
 
   res.json({ result });
 });
+
+app.use(ErrorHandler);
 
 export default app;

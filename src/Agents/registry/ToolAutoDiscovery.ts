@@ -1,13 +1,12 @@
 import { ToolDefinition } from "./ToolMetadata";
 import { toolRegistry } from "./ToolRegistry";
 
-
 export class ToolAutoDiscovery {
   private static instance: ToolAutoDiscovery;
   private initialized = false;
 
   private constructor() {}
-  
+
   static getInstance(): ToolAutoDiscovery {
     if (!ToolAutoDiscovery.instance) {
       ToolAutoDiscovery.instance = new ToolAutoDiscovery();
@@ -21,13 +20,14 @@ export class ToolAutoDiscovery {
     }
 
     try {
-
       const { walletTool } = await import("../tools/wallet");
       toolRegistry.register(walletTool);
 
       const { swapTool } = await import("../tools/swap");
       toolRegistry.register(swapTool);
 
+      const { metaTool } = await import("../tools/meta");
+      toolRegistry.register(metaTool);
       // todo
       // await this.discoverToolsFromDirectory();
 
@@ -43,21 +43,14 @@ export class ToolAutoDiscovery {
     }
   }
 
-
   getRegisteredTools(): ToolDefinition[] {
     return toolRegistry.getAllTools();
   }
 
-  /**
-   * Get tool by name
-   */
   getTool(name: string): ToolDefinition | undefined {
     return toolRegistry.getTool(name);
   }
 
-  /**
-   * Check if registry is initialized
-   */
   isInitialized(): boolean {
     return this.initialized;
   }

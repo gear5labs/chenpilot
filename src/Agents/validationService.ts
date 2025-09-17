@@ -21,7 +21,7 @@ export async function validateQuery(
     "{{CONTEXT}}",
     JSON.stringify(context)
   );
-
+  console.log(validationPrompt);
   const result = await agentLLM.callLLM(userId, validationPrompt, query, false);
 
   return result.trim() === "1";

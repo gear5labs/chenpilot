@@ -66,7 +66,10 @@ Respond with valid JSON only.
           (tool) => tool.category === category
         );
         const toolNames = categoryTools.map((tool) => tool.name).join(", ");
-        return `- ${category} operations (${toolNames})`;
+        const toolDescriptions = categoryTools
+          .map((tool) => tool.description)
+          .join(", ");
+        return `- ${category} operations (${toolNames})  description:${toolDescriptions}`;
       })
       .join("\n");
 
@@ -216,4 +219,3 @@ ${metadata.examples.map((example) => `  - ${example}`).join("\n")}
 }
 
 export const promptGenerator = new PromptGenerator();
-
