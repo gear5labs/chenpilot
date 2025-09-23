@@ -75,16 +75,27 @@ Respond with valid JSON only.
 
     return `
 You are a validation agent. 
-Check if the user query is about supported crypto operations:
+Check if the user query is about supported crypto operations **or related questions:
 
 ${categoryDescriptions}
+
+
+Guidelines:
+- Return "1" if the query is a direct operation (swap, transfer, check balance, etc.) 
+  OR if it is a related natural question (e.g. "is it safe to swap?", 
+  "who did I send money to?", "what's my balance?", "how does this transaction work?").
+- Return "0" only if the query is completely unrelated to crypto or system operations.
 
 
 Respond ONLY with:
 "1" if valid
 "0" if invalid
 DO NOT GENERATE COMMENTS, INSTRUCTIONS, ADDITIONAL EXPLANATIONS, JUST 0 OR 1
-here is the system "{{CONTEXT}}" to help make a decision`;
+here is the system "{{CONTEXT}}" to help make a decision
+
+
+`;
+
   }
   /**
    * response prompt

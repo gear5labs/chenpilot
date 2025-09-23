@@ -1,3 +1,4 @@
+import { qaTool } from "../tools/qatool";
 import { ToolDefinition } from "./ToolMetadata";
 import { toolRegistry } from "./ToolRegistry";
 
@@ -28,6 +29,7 @@ export class ToolAutoDiscovery {
       const { metaTool } = await import("../tools/meta");
       toolRegistry.register(metaTool);
       const { contactTool } = await import("../tools/contact");
+      toolRegistry.register(qaTool)
       toolRegistry.register(contactTool);
       // todo
       // await this.discoverToolsFromDirectory();
