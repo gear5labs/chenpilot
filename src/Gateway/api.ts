@@ -9,10 +9,16 @@ import {
   UnauthorizedError,
   ValidationError,
 } from "../utils/error";
+import authRoutes from "../Auth/auth.routes";
+import "../Auth/auth.container"; // Initialize DI container
+
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+// Auth routes
+app.use("/auth", authRoutes);
 
 app.post("/query", async (req, res) => {
   const { userId, query } = req.body;
