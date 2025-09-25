@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { injectable, inject } from "tsyringe";
 import { AuthRepository } from "./auth.repository";
 import { User, AuthProvider } from "./user.entity";
+import nodemailer from "nodemailer";
 
 export interface RegisterData {
   email: string;
@@ -189,6 +190,31 @@ export class AuthService {
     return true;
   }
 
+  private async sendResetEmail(email: string, resetToken: string): Promise<void> {
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST || "smtp.example.com",
+      port: Number(process.env.SMTP_PORT) || 587,
+      secure: false,
+      auth: {
+        user: process.env.SMTP_USER || "your@email.com",
+        pass: process.env.SMTP_PASS || "yourpassword",
+      },
+    });
+
+    const resetUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/reset-password?token=${resetToken}`;
+
+    await transporter.sendMail({
+      from: `"ChenPilot" <${process.env.SMTP_USER || "your@email.com"}>`,
+      to: email,
+      subject: "Password Reset Request",
+      html: `
+        <p>You requested a password reset.</p>
+        <p>Click <a href="${resetUrl}">here</a> to reset your password.</p>
+        <p>If you did not request this, please ignore this email.</p>
+      `,
+    });
+  }
+
   async forgotPassword(email: string): Promise<boolean> {
     const user = await this.authRepository.findByEmail(email);
     if (!user) {
@@ -206,7 +232,9 @@ export class AuthService {
       passwordResetExpires
     );
 
-    // TODO: Send email with reset link
+    // Send email with reset link
+    await this.sendResetEmail(email, passwordResetToken);
+
     return true;
   }
 

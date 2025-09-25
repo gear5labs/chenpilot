@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { injectable, inject } from "tsyringe";
-import { AuthService, RegisterData, LoginData, GoogleAuthData } from "./auth.service";
+import { AuthService, RegisterData, LoginData, GoogleAuthData, AuthResponse } from "./auth.service";
+import { AuthenticatedRequest } from "./auth.middleware";
 
 @injectable()
 export class AuthController {
@@ -227,10 +228,10 @@ export class AuthController {
     }
   }
 
-  async changePassword(req: Request, res: Response): Promise<void> {
+  async changePassword(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { currentPassword, newPassword } = req.body;
-      const userId = (req as any).user?.userId;
+      const userId = req.user?.userId;
 
       if (!userId) {
         res.status(401).json({
@@ -270,9 +271,9 @@ export class AuthController {
     }
   }
 
-  async getProfile(req: Request, res: Response): Promise<void> {
+  async getProfile(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = req.user?.userId;
 
       if (!userId) {
         res.status(401).json({
@@ -296,9 +297,9 @@ export class AuthController {
     }
   }
 
-  async updateProfile(req: Request, res: Response): Promise<void> {
+  async updateProfile(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = req.user?.userId;
       const { name, profilePicture } = req.body;
 
       if (!userId) {
@@ -324,9 +325,9 @@ export class AuthController {
     }
   }
 
-  async deleteAccount(req: Request, res: Response): Promise<void> {
+  async deleteAccount(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = req.user?.userId;
 
       if (!userId) {
         res.status(401).json({
