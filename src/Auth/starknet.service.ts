@@ -1,5 +1,5 @@
 import { injectable } from "tsyringe";
-import { Account, CallData, RpcProvider, ec, stark, hash, Signer } from "starknet";
+import { Account, CallData, RpcProvider, ec, stark, hash, Signer, Contract } from "starknet";
 
 export interface StarknetAccountData {
   privateKey: string;
@@ -69,8 +69,8 @@ export class StarknetService {
       // Generate public key
       const publicKey = ec.starkCurve.getStarkKey(formattedPrivateKey);
       
-      // Prepare constructor calldata
-      const constructorCalldata = CallData.compile({ publicKey });
+      // Prepare constructor calldata - OpenZeppelin account expects publicKey as direct parameter
+      const constructorCalldata = [publicKey];
       
       // Generate address salt (64 hex characters)
       const addressSalt = stark.randomAddress();
@@ -168,29 +168,35 @@ export class StarknetService {
   async getAccountBalance(address: string): Promise<string> {
     try {
       const formattedAddress = this.formatAddress(address);
-      
-      // Replace with the actual ERC20 contract address for STRK or desired token
-      const erc20Address = process.env.STARKNET_ERC20_ADDRESS || '0x079b6682318FC303953B767F8312287c120804fa97E7B92c9567ee27889CB10E';
-      const balanceOfSelector = hash.getSelectorFromName('balanceOf');
-      const calldata = [formattedAddress];
+      const erc20Address = process.env.STARKNET_ERC20_ADDRESS || '0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d';
 
       console.log(`Checking balance for address: ${formattedAddress}`);
       console.log(`Using ERC20 contract: ${erc20Address}`);
-      console.log(`Balance selector: ${balanceOfSelector}`);
 
-      const result = await this.provider.callContract({
-        contractAddress: erc20Address,
-        entrypoint: balanceOfSelector,
-        calldata,
-      });
-
-      console.log(`Balance query result:`, result);
-
-      // The result is an array of felt, balance is usually at index 0
-      return result[0];
+      // Get the contract class/ABI
+      const contractClass = await this.provider.getClassAt(erc20Address);
+      
+      if (!contractClass) {
+        throw new Error('Failed to fetch contract class');
+      }
+      
+      // Create contract instance
+      const contract = new Contract(contractClass.abi, erc20Address, this.provider);
+      
+      // Call balanceOf using the contract instance
+      const balance = await contract.balanceOf(formattedAddress);
+      
+      console.log(`Balance query result:`, balance);
+      
+      if (balance) {
+        // The balance is returned as a BigInt, convert to string
+        return balance.toString();
+      }
+      
+      return "0";
     } catch (error) {
       console.error(`Balance check failed for address ${address}:`, error);
-      throw new Error(`Failed to get account balance: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return "0";
     }
   }
 

@@ -551,4 +551,21 @@ export class AuthController {
       });
     }
   }
+
+  async getFundingConfigurationStatus(req: Request, res: Response): Promise<void> {
+    try {
+      const status = await this.authService.getFundingConfigurationStatus();
+
+      res.status(200).json({
+        success: true,
+        message: "Funding configuration status retrieved",
+        data: status,
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to get funding configuration status",
+      });
+    }
+  }
 }

@@ -1,7 +1,8 @@
 import { injectable, inject } from "tsyringe";
-import { Account, RpcProvider, uint256, hash } from "starknet";
+import { Account, RpcProvider, uint256, hash, Signer } from "starknet";
 import { AuthRepository } from "./auth.repository";
 import { StarknetService } from "./starknet.service";
+import { walletTool } from "../Agents/tools/wallet";
 
 export interface AutoFundingConfig {
   fundedAccountPrivateKey: string;
@@ -39,8 +40,8 @@ export class AutoFundingService {
     this.config = {
       fundedAccountPrivateKey: process.env.FUNDED_ACCOUNT_PRIVATE_KEY || '',
       fundedAccountAddress: process.env.FUNDED_ACCOUNT_ADDRESS || '',
-      fundingAmount: process.env.FUNDING_AMOUNT || "100000000000000000", // 0.1 STRK
-      tokenAddress: process.env.STARKNET_ERC20_ADDRESS || '0x079b6682318FC303953B767F8312287c120804fa97E7B92c9567ee27889CB10E',
+      fundingAmount: process.env.FUNDING_AMOUNT || "200000000000000000", // 0.2 STRK
+      tokenAddress: process.env.STARKNET_ERC20_ADDRESS || '0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d',
       maxFundingPerDay: parseInt(process.env.MAX_FUNDING_PER_DAY || "100"),
       maxFundingAmount: process.env.MAX_FUNDING_AMOUNT || "100000000000000000000" // 100 STRK
     };
@@ -53,9 +54,11 @@ export class AutoFundingService {
     console.log(`- Max funding amount: ${this.config.maxFundingAmount}`);
 
     if (!this.config.fundedAccountPrivateKey || !this.config.fundedAccountAddress) {
-      console.warn("Auto-funding service not configured: Missing funded account credentials");
+      console.warn("⚠️  Auto-funding service not configured: Missing funded account credentials");
+      console.warn("   Please set FUNDED_ACCOUNT_PRIVATE_KEY and FUNDED_ACCOUNT_ADDRESS environment variables");
+      console.warn("   Account creation will work but auto-funding will be disabled");
     } else {
-      console.log("Auto-funding service configured successfully");
+      console.log("✅ Auto-funding service configured successfully");
     }
   }
 
@@ -100,9 +103,7 @@ export class AutoFundingService {
     return new Account(
       this.provider,
       this.config.fundedAccountAddress,
-      this.config.fundedAccountPrivateKey,
-      '1', // chainId
-      '0x3' // version
+      this.config.fundedAccountPrivateKey
     );
   }
 
@@ -165,38 +166,33 @@ export class AutoFundingService {
       console.log("Checking funded account balance...");
       const balanceCheck = await this.checkFundedAccountBalance();
       if (!balanceCheck.hasBalance) {
-        console.log(`Insufficient balance: Required ${balanceCheck.required}, Available ${balanceCheck.balance}`);
+        const requiredStrk = (BigInt(balanceCheck.required) / BigInt(10**18)).toString();
+        const availableStrk = (BigInt(balanceCheck.balance) / BigInt(10**18)).toString();
+        console.log(`❌ Insufficient balance: Required ${requiredStrk} STRK (${balanceCheck.required} wei), Available ${availableStrk} STRK (${balanceCheck.balance} wei)`);
         return {
           success: false,
-          error: `Insufficient balance in funded account. Required: ${balanceCheck.required}, Available: ${balanceCheck.balance}`,
+          error: `Insufficient balance in funded account. Required: ${balanceCheck.required}, Available: ${balanceCheck.balance}. Please fund the account with at least ${requiredStrk} STRK tokens.`,
           amount: this.config.fundingAmount,
           recipientAddress
         };
       }
 
-      // Get funded account
-      const fundedAccount = this.getFundedAccount();
+      // Use wallet tool to execute the transfer
+      const transferPayload = {
+        operation: 'transfer',
+        to: recipientAddress,
+        amount: parseFloat(this.config.fundingAmount) / Math.pow(10, 18), // Convert wei to STRK
+        token: 'STRK'
+      };
 
-      // Prepare transfer calldata
-      const transferSelector = hash.getSelectorFromName('transfer');
-      const amountUint256 = uint256.bnToUint256(this.config.fundingAmount);
+      // Execute transfer using wallet tool
+      const result = await walletTool.execute(transferPayload, 'funded-account');
       
-      const calldata = [
-        recipientAddress, // recipient
-        amountUint256.low, // amount low
-        amountUint256.high, // amount high
-        '0' // data (empty)
-      ];
+      if (result.status === 'error') {
+        throw new Error(result.error || 'Transfer failed');
+      }
 
-      // Execute transfer
-      const { transaction_hash } = await fundedAccount.execute({
-        contractAddress: this.config.tokenAddress,
-        entrypoint: transferSelector,
-        calldata
-      });
-
-      // Wait for transaction confirmation
-      await this.provider.waitForTransaction(transaction_hash);
+      const transaction_hash = result.data?.txHash as string;
 
       // Update daily counters
       this.dailyFundingCount++;
@@ -294,6 +290,63 @@ export class AutoFundingService {
       maxFundingAmount: this.config.maxFundingAmount,
       fundingAmount: this.config.fundingAmount,
       lastResetDate: this.lastResetDate
+    };
+  }
+
+  /**
+   * Get detailed funding configuration status
+   */
+  async getFundingConfigurationStatus(): Promise<{
+    isConfigured: boolean;
+    hasCredentials: boolean;
+    hasBalance: boolean;
+    balance: string;
+    required: string;
+    balanceInStrk: string;
+    requiredInStrk: string;
+    fundingAmount: string;
+    fundingAmountInStrk: string;
+    fundedAccountAddress: string;
+    tokenAddress: string;
+    errors: string[];
+  }> {
+    const errors: string[] = [];
+    const hasCredentials = !!(this.config.fundedAccountPrivateKey && this.config.fundedAccountAddress);
+    
+    if (!hasCredentials) {
+      errors.push("Missing FUNDED_ACCOUNT_PRIVATE_KEY or FUNDED_ACCOUNT_ADDRESS environment variables");
+    }
+
+    let balance = "0";
+    let hasBalance = false;
+    
+    if (hasCredentials) {
+      try {
+        const balanceCheck = await this.checkFundedAccountBalance();
+        balance = balanceCheck.balance;
+        hasBalance = balanceCheck.hasBalance;
+      } catch (error) {
+        errors.push(`Failed to check balance: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    }
+
+    const balanceInStrk = (BigInt(balance) / BigInt(10**18)).toString();
+    const requiredInStrk = (BigInt(this.config.fundingAmount) / BigInt(10**18)).toString();
+    const fundingAmountInStrk = (BigInt(this.config.fundingAmount) / BigInt(10**18)).toString();
+
+    return {
+      isConfigured: hasCredentials && hasBalance,
+      hasCredentials,
+      hasBalance,
+      balance,
+      required: this.config.fundingAmount,
+      balanceInStrk,
+      requiredInStrk,
+      fundingAmount: this.config.fundingAmount,
+      fundingAmountInStrk,
+      fundedAccountAddress: this.config.fundedAccountAddress,
+      tokenAddress: this.config.tokenAddress,
+      errors
     };
   }
 

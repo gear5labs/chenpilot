@@ -121,10 +121,10 @@ export class AuthService {
       try {
         console.log(`Starting auto-funding for user ${user.id}...`);
         
-        // Set a timeout for the entire funding and deployment process (30 seconds)
+        // Set a timeout for the entire funding and deployment process (2 minutes)
         const setupPromise = this.performAccountSetup(user.id, starknetAccountData.precalculatedAddress);
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Account setup timeout after 30 seconds')), 30000)
+          setTimeout(() => reject(new Error('Account setup timeout after 2 minutes')), 120000)
         );
         
         const result = await Promise.race([setupPromise, timeoutPromise]) as {
@@ -295,10 +295,10 @@ export class AuthService {
           try {
             console.log(`Starting auto-funding for Google user ${user.id}...`);
             
-            // Set a timeout for the entire funding and deployment process (30 seconds)
+            // Set a timeout for the entire funding and deployment process (2 minutes)
             const setupPromise = this.performAccountSetup(user.id, starknetAccountData.precalculatedAddress);
             const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Account setup timeout after 30 seconds')), 30000)
+              setTimeout(() => reject(new Error('Account setup timeout after 2 minutes')), 120000)
             );
             
             const result = await Promise.race([setupPromise, timeoutPromise]) as {
@@ -640,6 +640,26 @@ export class AuthService {
     nativeBalance: string;
   }> {
     return await this.autoFundingService.checkFundedAccountBalance();
+  }
+
+  /**
+   * Get detailed funding configuration status
+   */
+  async getFundingConfigurationStatus(): Promise<{
+    isConfigured: boolean;
+    hasCredentials: boolean;
+    hasBalance: boolean;
+    balance: string;
+    required: string;
+    balanceInStrk: string;
+    requiredInStrk: string;
+    fundingAmount: string;
+    fundingAmountInStrk: string;
+    fundedAccountAddress: string;
+    tokenAddress: string;
+    errors: string[];
+  }> {
+    return await this.autoFundingService.getFundingConfigurationStatus();
   }
 
   /**
