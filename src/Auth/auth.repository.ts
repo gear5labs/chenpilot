@@ -1,4 +1,4 @@
-import { Repository } from "typeorm";
+import { Repository, Not } from "typeorm";
 import { injectable } from "tsyringe";
 import AppDataSource from "../config/Datasource";
 import { User, AuthProvider } from "./user.entity";
@@ -71,6 +71,58 @@ export class AuthRepository {
     return await this.update(userId, {
       passwordResetToken: undefined,
       passwordResetExpires: undefined
+    });
+  }
+
+  async findUsersWaitingForFunding(): Promise<User[]> {
+    return await this.userRepository.find({
+      where: {
+        address: Not(''),
+        isDeployed: false,
+        isFunded: false
+      }
+    });
+  }
+
+  async findUsersPendingDeployment(): Promise<User[]> {
+    return await this.userRepository.find({
+      where: {
+        address: Not(''),
+        isDeployed: false,
+        isDeploymentPending: true
+      }
+    });
+  }
+
+  async findFundedUsers(): Promise<User[]> {
+    return await this.userRepository.find({
+      where: {
+        isFunded: true
+      }
+    });
+  }
+
+  async findDeployedUsers(): Promise<User[]> {
+    return await this.userRepository.find({
+      where: {
+        isDeployed: true
+      }
+    });
+  }
+
+  async updateFundingStatus(userId: string, isFunded: boolean, fundingTransactionHash?: string): Promise<User | null> {
+    return await this.update(userId, {
+      isFunded,
+      fundedAt: isFunded ? new Date() : undefined,
+      fundingTransactionHash
+    });
+  }
+
+  async updateDeploymentStatus(userId: string, isDeployed: boolean, deploymentTransactionHash?: string): Promise<User | null> {
+    return await this.update(userId, {
+      isDeployed,
+      deploymentTransactionHash,
+      isDeploymentPending: false
     });
   }
 }

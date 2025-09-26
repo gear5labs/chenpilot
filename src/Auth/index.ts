@@ -4,4 +4,4 @@ export { AuthService } from "./auth.service";
 export { AuthController } from "./auth.controller";
 export { AuthMiddleware } from "./auth.middleware";
 export { default as authRoutes } from "./auth.routes";
-export { container } from "./auth.container";
+export { StarknetService } from "./starknet.service";

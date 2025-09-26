@@ -44,9 +44,21 @@ export class AuthController {
       const registerData: RegisterData = { email, password, name };
       const result = await this.authService.register(registerData);
 
+      // Determine the appropriate message based on setup status
+      let message = "Account created successfully. Please check your email for verification.";
+      if (result.setupStatus) {
+        if (result.setupStatus.fullyReady) {
+          message = "Account created, funded, and deployed successfully! Your Starknet account is ready to use.";
+        } else if (result.setupStatus.funding.success && !result.setupStatus.deployment.success) {
+          message = "Account created and funded successfully. Deployment is pending and will be completed shortly.";
+        } else if (!result.setupStatus.funding.success) {
+          message = "Account created successfully. Auto-funding is not available at the moment. Please fund your account manually.";
+        }
+      }
+
       res.status(201).json({
         success: true,
-        message: "Account created successfully. Please check your email for verification.",
+        message,
         data: result,
       });
     } catch (error) {
@@ -102,9 +114,21 @@ export class AuthController {
       const googleAuthData: GoogleAuthData = { googleId, email, name, profilePicture };
       const result = await this.authService.googleAuth(googleAuthData);
 
+      // Determine the appropriate message based on setup status
+      let message = "Google authentication successful";
+      if (result.setupStatus) {
+        if (result.setupStatus.fullyReady) {
+          message = "Google authentication successful! Your Starknet account is funded and deployed, ready to use.";
+        } else if (result.setupStatus.funding.success && !result.setupStatus.deployment.success) {
+          message = "Google authentication successful. Account is funded and deployment is pending.";
+        } else if (!result.setupStatus.funding.success) {
+          message = "Google authentication successful. Auto-funding is not available at the moment.";
+        }
+      }
+
       res.status(200).json({
         success: true,
-        message: "Google authentication successful",
+        message,
         data: result,
       });
     } catch (error) {
@@ -347,6 +371,183 @@ export class AuthController {
       res.status(400).json({
         success: false,
         message: error instanceof Error ? error.message : "Account deletion failed",
+      });
+    }
+  }
+
+  async deployStarknetAccount(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.userId;
+
+      if (!userId) {
+        res.status(401).json({
+          success: false,
+          message: "Authentication required",
+        });
+        return;
+      }
+
+      // Check if account is funded first
+      const user = await this.authService.getProfile(userId);
+      if (!user.isFunded) {
+        res.status(400).json({
+          success: false,
+          message: "Account must be funded before deployment. Please fund your account first.",
+          data: { isFunded: user.isFunded }
+        });
+        return;
+      }
+
+      const result = await this.authService.deployStarknetAccount(userId);
+
+      res.status(200).json({
+        success: true,
+        message: "Starknet account deployed successfully",
+        data: result,
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error instanceof Error ? error.message : "Starknet account deployment failed",
+      });
+    }
+  }
+
+  async getStarknetAccountBalance(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.userId;
+
+      if (!userId) {
+        res.status(401).json({
+          success: false,
+          message: "Authentication required",
+        });
+        return;
+      }
+
+      const balance = await this.authService.getStarknetAccountBalance(userId);
+
+      res.status(200).json({
+        success: true,
+        data: { balance },
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to get account balance",
+      });
+    }
+  }
+
+  async checkStarknetAccountStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.userId;
+
+      if (!userId) {
+        res.status(401).json({
+          success: false,
+          message: "Authentication required",
+        });
+        return;
+      }
+
+      const isDeployed = await this.authService.isStarknetAccountDeployed(userId);
+
+      res.status(200).json({
+        success: true,
+        data: { isDeployed },
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to check account status",
+      });
+    }
+  }
+
+
+  async fundUserAccount(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.userId;
+
+      if (!userId) {
+        res.status(401).json({
+          success: false,
+          message: "Authentication required",
+        });
+        return;
+      }
+
+      const result = await this.authService.fundUserAccount(userId);
+
+      res.status(200).json({
+        success: result.success,
+        message: result.success ? "Account funded successfully" : "Failed to fund account",
+        data: result,
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to fund account",
+      });
+    }
+  }
+
+  async getAutoFundingStats(req: Request, res: Response): Promise<void> {
+    try {
+      const stats = this.authService.getAutoFundingStats();
+
+      res.status(200).json({
+        success: true,
+        data: stats,
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to get auto-funding statistics",
+      });
+    }
+  }
+
+  async checkFundedAccountBalance(req: Request, res: Response): Promise<void> {
+    try {
+      const balance = await this.authService.checkFundedAccountBalance();
+
+      res.status(200).json({
+        success: true,
+        data: balance,
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to check funded account balance",
+      });
+    }
+  }
+
+  async batchFundAccounts(req: Request, res: Response): Promise<void> {
+    try {
+      const { addresses } = req.body;
+
+      if (!addresses || !Array.isArray(addresses)) {
+        res.status(400).json({
+          success: false,
+          message: "Addresses array is required",
+        });
+        return;
+      }
+
+      const results = await this.authService.batchFundAccounts(addresses);
+
+      res.status(200).json({
+        success: true,
+        message: "Batch funding completed",
+        data: results,
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to batch fund accounts",
       });
     }
   }

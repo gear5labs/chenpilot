@@ -10,7 +10,6 @@ import {
   ValidationError,
 } from "../utils/error";
 import authRoutes from "../Auth/auth.routes";
-import "../Auth/auth.container"; // Initialize DI container
 
 const app = express();
 

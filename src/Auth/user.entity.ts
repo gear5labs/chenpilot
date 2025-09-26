@@ -30,9 +30,21 @@ export class User {
 
   @Column({ type: "varchar", nullable: true })
   pk?: string;
+
+  @Column({ type: "varchar", nullable: true })
+  publicKey?: string;
+
+  @Column({ type: "varchar", nullable: true })
+  addressSalt?: string;
+
+  @Column({ type: "text", nullable: true })
+  constructorCalldata?: string;
   
   @Column({ type: "boolean", default: false })
   isDeployed!: boolean;
+
+  @Column({ type: "varchar", nullable: true })
+  deploymentTransactionHash?: string;
 
   @Column({ type: "varchar", default: "STRK" })
   tokenType!: string;
@@ -57,6 +69,21 @@ export class User {
 
   @Column({ type: "timestamp", nullable: true })
   passwordResetExpires?: Date;
+
+  @Column({ type: "boolean", default: false })
+  isFunded!: boolean;
+
+  @Column({ type: "varchar", nullable: true })
+  fundingTransactionHash?: string;
+
+  @Column({ type: "timestamp", nullable: true })
+  fundedAt?: Date;
+
+  @Column({ type: "boolean", default: false })
+  isDeploymentPending!: boolean;
+
+  @Column({ type: "timestamp", nullable: true })
+  deploymentRequestedAt?: Date;
 
   @CreateDateColumn()
   createdAt!: Date;
