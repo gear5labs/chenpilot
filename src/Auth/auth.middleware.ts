@@ -11,7 +11,7 @@ export interface AuthenticatedRequest extends Request {
 @injectable()
 export class AuthMiddleware {
   constructor(
-    @inject("AuthService") private authService: AuthService
+    @inject(AuthService) private authService: AuthService
   ) {}
 
   authenticate = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {

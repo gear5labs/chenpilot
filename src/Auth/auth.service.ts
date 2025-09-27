@@ -1,12 +1,13 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
+import { Repository} from "typeorm";
 import { injectable, inject } from "tsyringe";
-import { AuthRepository } from "./auth.repository";
 import { User, AuthProvider } from "./user.entity";
 import { StarknetService } from "./starknet.service";
 import { AutoFundingService } from "./auto-funding.service";
 import { EncryptionService } from "./encryption.service";
+import AppDataSource from "../config/Datasource";
 import nodemailer from "nodemailer";
 
 export interface RegisterData {
@@ -60,22 +61,23 @@ export class AuthService {
   private readonly JWT_SECRET: string;
   private readonly JWT_EXPIRES_IN: string;
   private readonly SALT_ROUNDS: number = 12;
+  private userRepository: Repository<User>;
 
   constructor(
-    @inject("AuthRepository") private authRepository: AuthRepository,
-    @inject("StarknetService") private starknetService: StarknetService,
-    @inject("AutoFundingService") private autoFundingService: AutoFundingService,
-    @inject("EncryptionService") private encryptionService: EncryptionService
+    @inject(StarknetService) private starknetService: StarknetService,
+    @inject(AutoFundingService) private autoFundingService: AutoFundingService,
+    @inject(EncryptionService) private encryptionService: EncryptionService
   ) {
     this.JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
     this.JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
+    this.userRepository = AppDataSource.getRepository(User);
   }
 
   async register(data: RegisterData): Promise<AuthResponse> {
     const { email, password, name } = data;
 
     // Check if user already exists
-    const existingUser = await this.authRepository.findByEmail(email);
+    const existingUser = await this.userRepository.findOne({ where: { email } });
     if (existingUser) {
       throw new Error("User with this email already exists");
     }
@@ -97,7 +99,7 @@ export class AuthService {
     }
 
     // Create user
-    const user = await this.authRepository.create({
+    const user = this.userRepository.create({
       email,
       password: hashedPassword,
       name: name || email.split("@")[0],
@@ -112,6 +114,7 @@ export class AuthService {
       constructorCalldata: starknetAccountData?.constructorCalldata ? JSON.stringify(starknetAccountData.constructorCalldata) : undefined,
       isDeployed: false,
     });
+    const savedUser = await this.userRepository.save(user);
 
     // Auto-fund and deploy the new account synchronously with timeout
     let fundingResult = null;
@@ -121,10 +124,10 @@ export class AuthService {
 
     if (starknetAccountData?.precalculatedAddress) {
       try {
-        console.log(`Starting auto-funding for user ${user.id}...`);
+        console.log(`Starting auto-funding for user ${savedUser.id}...`);
         
         // Set a timeout for the entire funding and deployment process (2 minutes)
-        const setupPromise = this.performAccountSetup(user.id, starknetAccountData.precalculatedAddress);
+        const setupPromise = this.performAccountSetup(savedUser.id, starknetAccountData.precalculatedAddress);
         const timeoutPromise = new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Account setup timeout after 2 minutes')), 120000)
         );
@@ -143,10 +146,10 @@ export class AuthService {
       } catch (error) {
         if (error instanceof Error && error.message.includes('timeout')) {
           fundingError = error;
-          console.log(`⏰ Account setup timed out for user ${user.id}`);
+          console.log(`⏰ Account setup timed out for user ${savedUser.id}`);
         } else {
           fundingError = error;
-          console.error(`❌ Auto-funding error for user ${user.id}:`, error);
+          console.error(`❌ Auto-funding error for user ${savedUser.id}:`, error);
         }
       }
     }
@@ -155,7 +158,7 @@ export class AuthService {
     const token = this.generateToken(user.id);
 
     // Refresh user data to get updated funding/deployment status
-    const updatedUser = await this.authRepository.findById(user.id);
+    const updatedUser = await this.userRepository.findOne({ where: { id: user.id } });
 
     // Prepare Starknet account info for response
     const starknetAccount: StarknetAccountInfo | undefined = starknetAccountData ? {
@@ -194,7 +197,7 @@ export class AuthService {
     const { email, password } = data;
 
     // Find user by email
-    const user = await this.authRepository.findByEmail(email);
+    const user = await this.userRepository.findOne({ where: { email } });
     if (!user) {
       throw new Error("Invalid email or password");
     }
@@ -243,28 +246,30 @@ export class AuthService {
     let deploymentError = null;
 
     // Check if user already exists with this Google ID
-    let user = await this.authRepository.findByGoogleId(googleId);
+    let user = await this.userRepository.findOne({ where: { googleId } });
     
     if (user) {
       // Update user info if needed
       if (user.name !== name || user.profilePicture !== profilePicture) {
-        user = await this.authRepository.update(user.id, {
+        await this.userRepository.update(user.id, {
           name,
           profilePicture,
         });
+        user = await this.userRepository.findOne({ where: { id: user.id } });
       }
     } else {
       // Check if user exists with this email but different provider
-      const existingUser = await this.authRepository.findByEmail(email);
+      const existingUser = await this.userRepository.findOne({ where: { email } });
       if (existingUser) {
         // Link Google account to existing user
-        user = await this.authRepository.update(existingUser.id, {
+        await this.userRepository.update(existingUser.id, {
           googleId,
           authProvider: AuthProvider.GOOGLE,
           name: name || existingUser.name,
           profilePicture,
           isEmailVerified: true, // Google emails are pre-verified
         });
+        user = await this.userRepository.findOne({ where: { id: existingUser.id } });
       } else {
         // Create Starknet account for new Google user
         let starknetAccountData;
@@ -276,7 +281,7 @@ export class AuthService {
         }
 
         // Create new user
-        user = await this.authRepository.create({
+        const newUser = this.userRepository.create({
           googleId,
           email,
           name,
@@ -291,6 +296,7 @@ export class AuthService {
           constructorCalldata: starknetAccountData?.constructorCalldata ? JSON.stringify(starknetAccountData.constructorCalldata) : undefined,
           isDeployed: false,
         });
+        user = await this.userRepository.save(newUser);
 
         // Auto-fund and deploy the new Google user account synchronously with timeout
         if (starknetAccountData?.precalculatedAddress) {
@@ -335,7 +341,7 @@ export class AuthService {
     const token = this.generateToken(user.id);
 
     // Refresh user data to get updated funding/deployment status
-    const updatedUser = await this.authRepository.findById(user.id);
+    const updatedUser = await this.userRepository.findOne({ where: { id: user.id } });
 
     // Prepare Starknet account info for response
     const starknetAccount: StarknetAccountInfo | undefined = user.address ? {
@@ -371,17 +377,20 @@ export class AuthService {
   }
 
   async verifyEmail(token: string): Promise<boolean> {
-    const user = await this.authRepository.findByEmailVerificationToken(token);
+    const user = await this.userRepository.findOne({ where: { emailVerificationToken: token } });
     if (!user) {
       throw new Error("Invalid or expired verification token");
     }
 
-    await this.authRepository.updateEmailVerification(user.id, true);
+    await this.userRepository.update(user.id, { 
+      isEmailVerified: true,
+      emailVerificationToken: undefined
+    });
     return true;
   }
 
   async resendVerificationEmail(email: string): Promise<boolean> {
-    const user = await this.authRepository.findByEmail(email);
+    const user = await this.userRepository.findOne({ where: { email } });
     if (!user) {
       throw new Error("User not found");
     }
@@ -392,7 +401,7 @@ export class AuthService {
 
     // Generate new verification token
     const emailVerificationToken = crypto.randomBytes(32).toString("hex");
-    await this.authRepository.update(user.id, { emailVerificationToken });
+    await this.userRepository.update(user.id, { emailVerificationToken });
 
     // TODO: Send email with verification link
     return true;
@@ -424,7 +433,7 @@ export class AuthService {
   }
 
   async forgotPassword(email: string): Promise<boolean> {
-    const user = await this.authRepository.findByEmail(email);
+    const user = await this.userRepository.findOne({ where: { email } });
     if (!user) {
       // Don't reveal if user exists or not
       return true;
@@ -434,11 +443,10 @@ export class AuthService {
     const passwordResetToken = crypto.randomBytes(32).toString("hex");
     const passwordResetExpires = new Date(Date.now() + 3600000); // 1 hour
 
-    await this.authRepository.updatePasswordResetToken(
-      user.id,
+    await this.userRepository.update(user.id, {
       passwordResetToken,
       passwordResetExpires
-    );
+    });
 
     // Send email with reset link
     await this.sendResetEmail(email, passwordResetToken);
@@ -447,7 +455,7 @@ export class AuthService {
   }
 
   async resetPassword(token: string, newPassword: string): Promise<boolean> {
-    const user = await this.authRepository.findByPasswordResetToken(token);
+    const user = await this.userRepository.findOne({ where: { passwordResetToken: token } });
     if (!user || !user.passwordResetExpires || user.passwordResetExpires < new Date()) {
       throw new Error("Invalid or expired reset token");
     }
@@ -456,7 +464,7 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(newPassword, this.SALT_ROUNDS);
 
     // Update password and clear reset token
-    await this.authRepository.update(user.id, {
+    await this.userRepository.update(user.id, {
       password: hashedPassword,
       passwordResetToken: undefined,
       passwordResetExpires: undefined,
@@ -466,7 +474,7 @@ export class AuthService {
   }
 
   async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<boolean> {
-    const user = await this.authRepository.findById(userId);
+    const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user || !user.password) {
       throw new Error("User not found or no password set");
     }
@@ -481,13 +489,13 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(newPassword, this.SALT_ROUNDS);
 
     // Update password
-    await this.authRepository.update(userId, { password: hashedPassword });
+    await this.userRepository.update(userId, { password: hashedPassword });
 
     return true;
   }
 
   async getProfile(userId: string): Promise<Omit<User, "password" | "emailVerificationToken" | "passwordResetToken">> {
-    const user = await this.authRepository.findById(userId);
+    const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new Error("User not found");
     }
@@ -496,7 +504,8 @@ export class AuthService {
   }
 
   async updateProfile(userId: string, data: Partial<Pick<User, "name" | "profilePicture">>): Promise<Omit<User, "password" | "emailVerificationToken" | "passwordResetToken">> {
-    const user = await this.authRepository.update(userId, data);
+    await this.userRepository.update(userId, data);
+    const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new Error("User not found");
     }
@@ -505,7 +514,8 @@ export class AuthService {
   }
 
   async deleteAccount(userId: string): Promise<boolean> {
-    return await this.authRepository.delete(userId);
+    const result = await this.userRepository.delete(userId);
+    return result.affected !== 0;
   }
 
   private generateToken(userId: string): string {
@@ -529,7 +539,7 @@ export class AuthService {
    * Deploy a user's Starknet account
    */
   async deployStarknetAccount(userId: string): Promise<{ transactionHash: string; contractAddress: string }> {
-    const user = await this.authRepository.findById(userId);
+    const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new Error("User not found");
     }
@@ -558,7 +568,7 @@ export class AuthService {
       const deploymentResult = await this.starknetService.deployAccount(accountData);
 
       // Update user with deployment information
-      await this.authRepository.update(userId, {
+      await this.userRepository.update(userId, {
         isDeployed: true,
         deploymentTransactionHash: deploymentResult.transactionHash,
       });
@@ -573,7 +583,7 @@ export class AuthService {
    * Get user's Starknet account balance
    */
   async getStarknetAccountBalance(userId: string): Promise<string> {
-    const user = await this.authRepository.findById(userId);
+    const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user || !user.address) {
       throw new Error("User or Starknet account not found");
     }
@@ -589,7 +599,7 @@ export class AuthService {
    * Check if user's Starknet account is deployed
    */
   async isStarknetAccountDeployed(userId: string): Promise<boolean> {
-    const user = await this.authRepository.findById(userId);
+    const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user || !user.address) {
       return false;
     }
@@ -714,7 +724,7 @@ export class AuthService {
           console.log(`❌ Auto-deployment failed for user ${userId}: ${deployError instanceof Error ? deployError.message : 'Unknown error'}`);
           
           // Mark as deployment pending for later retry
-          await this.authRepository.update(userId, {
+          await this.userRepository.update(userId, {
             isDeploymentPending: true,
             deploymentRequestedAt: new Date()
           });
@@ -742,7 +752,7 @@ export class AuthService {
    * @returns The decrypted private key
    */
   async getDecryptedPrivateKey(userId: string): Promise<string> {
-    const user = await this.authRepository.findById(userId);
+    const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new Error("User not found");
     }
@@ -771,7 +781,7 @@ export class AuthService {
     deployed: boolean;
     contract_address?: string;
   }> {
-    const user = await this.authRepository.findById(userId);
+    const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new Error("User not found");
     }

@@ -1,7 +1,7 @@
 import { Router } from "express";
+import { container } from "tsyringe";
 import { AuthController } from "./auth.controller";
 import { AuthMiddleware } from "./auth.middleware";
-import { AuthRepository } from "./auth.repository";
 import { AuthService } from "./auth.service";
 import { StarknetService } from "./starknet.service";
 import { AutoFundingService } from "./auto-funding.service";
@@ -9,14 +9,13 @@ import { EncryptionService } from "./encryption.service";
 
 const router = Router();
 
-// Create instances directly
-const authRepository = new AuthRepository();
-const starknetService = new StarknetService();
-const encryptionService = new EncryptionService();
-const autoFundingService = new AutoFundingService(authRepository, starknetService);
-const authService = new AuthService(authRepository, starknetService, autoFundingService, encryptionService);
-const authController = new AuthController(authService);
-const authMiddleware = new AuthMiddleware(authService);
+// Create instances using tsyringe container
+const starknetService = container.resolve(StarknetService);
+const encryptionService = container.resolve(EncryptionService);
+const autoFundingService = container.resolve(AutoFundingService);
+const authService = container.resolve(AuthService);
+const authController = container.resolve(AuthController);
+const authMiddleware = container.resolve(AuthMiddleware);
 
 // Public routes
 router.post("/register", authController.register.bind(authController));

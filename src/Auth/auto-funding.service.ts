@@ -1,8 +1,10 @@
 import { injectable, inject } from "tsyringe";
 import { Account, RpcProvider, uint256, hash, Signer } from "starknet";
-import { AuthRepository } from "./auth.repository";
+import { Repository } from "typeorm";
+import { User } from "./user.entity";
 import { StarknetService } from "./starknet.service";
 import { WalletTool } from "../Agents/tools/wallet";
+import AppDataSource from "../config/Datasource";
 
 export interface AutoFundingConfig {
   fundedAccountPrivateKey: string;
@@ -29,10 +31,12 @@ export class AutoFundingService {
   private dailyFundingAmount: string = "0";
   private lastResetDate: string = new Date().toDateString();
 
+  private userRepository: Repository<User>;
+
   constructor(
-    @inject("AuthRepository") private authRepository: AuthRepository,
-    @inject("StarknetService") private starknetService: StarknetService
+    @inject(StarknetService) private starknetService: StarknetService
   ) {
+    this.userRepository = AppDataSource.getRepository(User);
     // Use environment variables for configuration
     const nodeUrl = process.env.STARKNET_NODE_URL || 'https://docs-demo.strk-sepolia.quiknode.pro/rpc/v0_7';
     this.provider = new RpcProvider({ nodeUrl });
@@ -40,8 +44,8 @@ export class AutoFundingService {
     this.config = {
       fundedAccountPrivateKey: process.env.FUNDED_ACCOUNT_PRIVATE_KEY || '',
       fundedAccountAddress: process.env.FUNDED_ACCOUNT_ADDRESS || '',
-      fundingAmount: process.env.FUNDING_AMOUNT || "200000000000000000", // 0.2 STRK
-      tokenAddress: process.env.STARKNET_ERC20_ADDRESS || '0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d',
+      fundingAmount: process.env.FUNDING_AMOUNT || "100000000000000000", // 0.1 STRK
+      tokenAddress: process.env.TOKEN_ADDRESS || '0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d',
       maxFundingPerDay: parseInt(process.env.MAX_FUNDING_PER_DAY || "100"),
       maxFundingAmount: process.env.MAX_FUNDING_AMOUNT || "100000000000000000000" // 100 STRK
     };
@@ -224,7 +228,7 @@ export class AutoFundingService {
    */
   async autoFundNewAccount(userId: string): Promise<FundingResult> {
     try {
-      const user = await this.authRepository.findById(userId);
+      const user = await this.userRepository.findOne({ where: { id: userId } });
       if (!user || !user.address) {
         return {
           success: false,
@@ -249,7 +253,7 @@ export class AutoFundingService {
 
       if (result.success) {
         // Update user funding status
-        await this.authRepository.update(userId, {
+        await this.userRepository.update(userId, {
           isFunded: true,
           fundedAt: new Date(),
           fundingTransactionHash: result.transactionHash

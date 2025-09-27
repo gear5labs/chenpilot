@@ -6,7 +6,7 @@ import { AuthenticatedRequest } from "./auth.middleware";
 @injectable()
 export class AuthController {
   constructor(
-    @inject("AuthService") private authService: AuthService
+    @inject(AuthService) private authService: AuthService
   ) {}
 
   async register(req: Request, res: Response): Promise<void> {
