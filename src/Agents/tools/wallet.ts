@@ -1,7 +1,6 @@
 import { Account, RpcProvider, Contract, uint256 } from "starknet";
 import accountsData from "../../Auth/accounts.json";
 import tokenAbi from "../../abis/token.json";
-import { container } from "tsyringe";
 import {
   STRKTokenAddress,
   ETHTokenAddress,
@@ -10,6 +9,11 @@ import {
 import { BaseTool } from "./base/BaseTool";
 import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 import ContactService from "../../Contacts/contact.service";
+import { AuthService } from "../../Auth/auth.service";
+import { AuthRepository } from "../../Auth/auth.repository";
+import { StarknetService } from "../../Auth/starknet.service";
+import { AutoFundingService } from "../../Auth/auto-funding.service";
+import { EncryptionService } from "../../Auth/encryption.service";
 import config from "../../config/config";
 const tokensMap: Record<supportedTokens, string> = {
   DAI: DAITokenAddress,
@@ -79,23 +83,52 @@ export class WalletTool extends BaseTool {
 
   private accounts: AccountData[];
   private provider: RpcProvider;
-  private contactService = container.resolve(ContactService);
+  private contactService: ContactService;
+  private authService: AuthService;
+  
   constructor() {
     super();
     this.accounts = accountsData as AccountData[];
     this.provider = new RpcProvider({
       nodeUrl: config.node_url,
     });
+    
+    // Create service instances directly
+    this.contactService = new ContactService();
+    
+    // Create AuthService with its dependencies
+    const authRepository = new AuthRepository();
+    const starknetService = new StarknetService();
+    const encryptionService = new EncryptionService();
+    const autoFundingService = new AutoFundingService(authRepository, starknetService);
+    this.authService = new AuthService(authRepository, starknetService, autoFundingService, encryptionService);
   }
 
-  private getAccount(userId: string): AccountData {
-    const account = this.accounts.find((a) => a.userId === userId);
-    if (!account) throw new Error(`Account not found: ${userId}`);
-    return account;
+  private async getAccount(userId: string): Promise<AccountData> {
+    // First check if it's a system account (from accounts.json)
+    const systemAccount = this.accounts.find((a) => a.userId === userId);
+    if (systemAccount) {
+      return systemAccount;
+    }
+
+    // If not found in system accounts, try to get user account from database
+    try {
+      const userAccountData = await this.authService.getUserAccountData(userId);
+      return {
+        userId: userAccountData.userId,
+        privateKey: userAccountData.privateKey,
+        publicKey: userAccountData.publicKey,
+        precalculatedAddress: userAccountData.precalculatedAddress,
+        deployed: userAccountData.deployed,
+        contract_address: userAccountData.contract_address
+      };
+    } catch (error) {
+      throw new Error(`Account not found: ${userId}. ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
-  private getStarkAccount(userId: string): Account {
-    const accountData = this.getAccount(userId);
+  private async getStarkAccount(userId: string): Promise<Account> {
+    const accountData = await this.getAccount(userId);
 
     return new Account(
       this.provider,
@@ -131,8 +164,8 @@ export class WalletTool extends BaseTool {
   ): Promise<ToolResult> {
     try {
       console.log(payload);
-      const accountData = this.getAccount(userId);
-      const acct = this.getStarkAccount(userId);
+      const accountData = await this.getAccount(userId);
+      const acct = await this.getStarkAccount(userId);
 
       const contractAddress = tokensMap[payload.token];
       if (!contractAddress) throw new Error("invalid token ");
@@ -163,7 +196,7 @@ export class WalletTool extends BaseTool {
     userId: string
   ): Promise<ToolResult> {
     try {
-      const starkAccount = this.getStarkAccount(userId);
+      const starkAccount = await this.getStarkAccount(userId);
       const tokenAddress = payload.token
         ? tokensMap[payload.token]
         : STRKTokenAddress;
@@ -198,7 +231,7 @@ export class WalletTool extends BaseTool {
 
   private async getWalletAddress(userId: string): Promise<ToolResult> {
     try {
-      const account = this.getAccount(userId);
+      const account = await this.getAccount(userId);
       return this.createSuccessResult("address", {
         address: account.precalculatedAddress,
       });
@@ -213,4 +246,3 @@ export class WalletTool extends BaseTool {
   }
 }
 
-export const walletTool = new WalletTool();

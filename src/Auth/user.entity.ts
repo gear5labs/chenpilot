@@ -28,7 +28,7 @@ export class User {
   @Column({ type: "varchar", nullable: true })
   address?: string;
 
-  @Column({ type: "varchar", nullable: true })
+  @Column({ type: "text", nullable: true, comment: "Encrypted private key" })
   pk?: string;
 
   @Column({ type: "varchar", nullable: true })

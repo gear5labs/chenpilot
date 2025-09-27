@@ -6,6 +6,7 @@ import { AuthRepository } from "./auth.repository";
 import { User, AuthProvider } from "./user.entity";
 import { StarknetService } from "./starknet.service";
 import { AutoFundingService } from "./auto-funding.service";
+import { EncryptionService } from "./encryption.service";
 import nodemailer from "nodemailer";
 
 export interface RegisterData {
@@ -63,7 +64,8 @@ export class AuthService {
   constructor(
     @inject("AuthRepository") private authRepository: AuthRepository,
     @inject("StarknetService") private starknetService: StarknetService,
-    @inject("AutoFundingService") private autoFundingService: AutoFundingService
+    @inject("AutoFundingService") private autoFundingService: AutoFundingService,
+    @inject("EncryptionService") private encryptionService: EncryptionService
   ) {
     this.JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
     this.JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
@@ -104,7 +106,7 @@ export class AuthService {
       isEmailVerified: true,
       // Starknet account data
       address: starknetAccountData?.precalculatedAddress,
-      pk: starknetAccountData?.privateKey,
+      pk: starknetAccountData?.privateKey ? this.encryptionService.encryptPrivateKeyForStorage(starknetAccountData.privateKey) : undefined,
       publicKey: starknetAccountData?.publicKey,
       addressSalt: starknetAccountData?.addressSalt,
       constructorCalldata: starknetAccountData?.constructorCalldata ? JSON.stringify(starknetAccountData.constructorCalldata) : undefined,
@@ -283,7 +285,7 @@ export class AuthService {
           isEmailVerified: true,
           // Starknet account data
           address: starknetAccountData?.precalculatedAddress,
-          pk: starknetAccountData?.privateKey,
+          pk: starknetAccountData?.privateKey ? this.encryptionService.encryptPrivateKeyForStorage(starknetAccountData.privateKey) : undefined,
           publicKey: starknetAccountData?.publicKey,
           addressSalt: starknetAccountData?.addressSalt,
           constructorCalldata: starknetAccountData?.constructorCalldata ? JSON.stringify(starknetAccountData.constructorCalldata) : undefined,
@@ -541,11 +543,14 @@ export class AuthService {
     }
 
     try {
+      // Decrypt the private key before deployment
+      const decryptedPrivateKey = this.encryptionService.decryptPrivateKeyFromStorage(user.pk!);
+      
       const accountData = {
-        privateKey: user.pk,
+        privateKey: decryptedPrivateKey,
         publicKey: user.publicKey,
         addressSalt: user.addressSalt,
-        constructorCalldata: JSON.parse(user.constructorCalldata),
+        constructorCalldata: JSON.parse(user.constructorCalldata!),
         precalculatedAddress: user.address,
         deployed: false,
       };
@@ -729,5 +734,65 @@ export class AuthService {
       fundingError,
       deploymentError
     };
+  }
+
+  /**
+   * Decrypts a user's private key for use by agents
+   * @param userId - The user ID
+   * @returns The decrypted private key
+   */
+  async getDecryptedPrivateKey(userId: string): Promise<string> {
+    const user = await this.authRepository.findById(userId);
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    if (!user.pk) {
+      throw new Error("User does not have a private key");
+    }
+
+    try {
+      return this.encryptionService.decryptPrivateKeyFromStorage(user.pk);
+    } catch (error) {
+      throw new Error(`Failed to decrypt private key: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Gets user account data with decrypted private key for agent use
+   * @param userId - The user ID
+   * @returns User account data with decrypted private key
+   */
+  async getUserAccountData(userId: string): Promise<{
+    userId: string;
+    privateKey: string;
+    publicKey: string;
+    precalculatedAddress: string;
+    deployed: boolean;
+    contract_address?: string;
+  }> {
+    const user = await this.authRepository.findById(userId);
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    if (!user.pk || !user.publicKey || !user.address) {
+      throw new Error("User does not have complete Starknet account data");
+    }
+
+    try {
+      const decryptedPrivateKey = this.encryptionService.decryptPrivateKeyFromStorage(user.pk);
+      
+      return {
+        userId: user.id,
+        privateKey: decryptedPrivateKey,
+        publicKey: user.publicKey,
+        precalculatedAddress: user.address,
+        deployed: user.isDeployed,
+        contract_address: user.deploymentTransactionHash || undefined
+      };
+    } catch (error) {
+      throw new Error(`Failed to get user account data: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 }

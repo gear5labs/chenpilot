@@ -12,7 +12,7 @@ const AppDataSource = new DataSource({
   username: config.db.postgres.username,
   password: config.db.postgres.password,
   database: config.db.postgres.database,
-  synchronize: false,
+  synchronize: true,
   entities: [Contact, User],
   migrations: [isDev ? "src/migrations/**/*.ts" : "dist/migrations/**/*.js"],
   subscribers: [],

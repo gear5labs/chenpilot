@@ -5,14 +5,16 @@ import { AuthRepository } from "./auth.repository";
 import { AuthService } from "./auth.service";
 import { StarknetService } from "./starknet.service";
 import { AutoFundingService } from "./auto-funding.service";
+import { EncryptionService } from "./encryption.service";
 
 const router = Router();
 
 // Create instances directly
 const authRepository = new AuthRepository();
 const starknetService = new StarknetService();
+const encryptionService = new EncryptionService();
 const autoFundingService = new AutoFundingService(authRepository, starknetService);
-const authService = new AuthService(authRepository, starknetService, autoFundingService);
+const authService = new AuthService(authRepository, starknetService, autoFundingService, encryptionService);
 const authController = new AuthController(authService);
 const authMiddleware = new AuthMiddleware(authService);
 

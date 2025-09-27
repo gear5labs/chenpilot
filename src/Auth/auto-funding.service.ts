@@ -2,7 +2,7 @@ import { injectable, inject } from "tsyringe";
 import { Account, RpcProvider, uint256, hash, Signer } from "starknet";
 import { AuthRepository } from "./auth.repository";
 import { StarknetService } from "./starknet.service";
-import { walletTool } from "../Agents/tools/wallet";
+import { WalletTool } from "../Agents/tools/wallet";
 
 export interface AutoFundingConfig {
   fundedAccountPrivateKey: string;
@@ -186,6 +186,7 @@ export class AutoFundingService {
       };
 
       // Execute transfer using wallet tool
+      const walletTool = new WalletTool();
       const result = await walletTool.execute(transferPayload, 'funded-account');
       
       if (result.status === 'error') {
