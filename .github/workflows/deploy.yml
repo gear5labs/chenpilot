@@ -35,9 +35,9 @@ jobs:
           username: ${{ secrets.AWS_USER }}
           key: ${{ secrets.AWS_SSH_KEY }}
           source: |
-            ./dist/*
-            ./package.json
-            ./pnpm-lock.yaml
+            dist/**
+            package.json
+            pnpm-lock.yaml
           target: /var/www/chenpilot-prod
           overwrite: true
           rm: true

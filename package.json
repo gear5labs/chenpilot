@@ -21,12 +21,20 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.62.0",
     "@atomiqlabs/chain-starknet": "^5.1.5",
+    "@types/bcrypt": "^5.0.2",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
+    "@types/jsonwebtoken": "^9.0.6",
+    "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^7.0.6",
     "nodemon": "^3.1.9",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "passport-jwt": "^4.0.1",
     "pg": "^8.16.3",
     "reflect-metadata": "^0.2.2",
     "starknet": "^7.6.4",
@@ -34,5 +42,8 @@
     "tsyringe": "^4.10.0",
     "typeorm": "^0.3.26",
     "typescript": "^5.7.3"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^7.0.1"
   }
 }

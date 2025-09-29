@@ -16,14 +16,23 @@ class Server {
     try {
       const shutdown = async () => {
         console.log("Shutting down gracefully...");
-        await AppDataSource.destroy();
+        if (AppDataSource.isInitialized) {
+          await AppDataSource.destroy();
+        }
         this.server.close(() => {
           console.log("Server closed");
           process.exit(0);
         });
       };
-      await AppDataSource.initialize();
-      console.log("db connected successfully");
+      
+      // Only initialize database if not already initialized
+      if (!AppDataSource.isInitialized) {
+        await AppDataSource.initialize();
+        console.log("db connected successfully");
+      } else {
+        console.log("db already connected");
+      }
+      
       process.on("SIGTERM", shutdown);
       process.on("SIGINT", shutdown);
 
@@ -33,6 +42,9 @@ class Server {
             `Port ${this.port} in use, retrying on ${this.port + 1}...`
           );
           this.port += 1;
+          // Close the current server before starting a new one
+          this.server.close();
+          this.server = http.createServer(app);
           this.start();
         } else {
           console.error("Server error:", error);

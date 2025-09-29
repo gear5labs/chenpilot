@@ -1,7 +1,5 @@
 import { Account, RpcProvider, Contract, uint256 } from "starknet";
-import accountsData from "../../Auth/accounts.json";
 import tokenAbi from "../../abis/token.json";
-import { container } from "tsyringe";
 import {
   STRKTokenAddress,
   ETHTokenAddress,
@@ -10,6 +8,11 @@ import {
 import { BaseTool } from "./base/BaseTool";
 import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 import ContactService from "../../Contacts/contact.service";
+import { AuthService } from "../../Auth/auth.service";
+import { container } from "tsyringe";
+import { StarknetService } from "../../Auth/starknet.service";
+import { AutoFundingService } from "../../Auth/auto-funding.service";
+import { EncryptionService } from "../../Auth/encryption.service";
 import config from "../../config/config";
 const tokensMap: Record<supportedTokens, string> = {
   DAI: DAITokenAddress,
@@ -27,6 +30,29 @@ interface AccountData {
 }
 
 type supportedTokens = "STRK" | "ETH" | "DAI";
+
+// System accounts configuration - loaded from environment variables
+const getSystemAccounts = (): AccountData[] => {
+  const privateKey = process.env.FUNDED_ACCOUNT_PRIVATE_KEY;
+  const publicKey = process.env.FUNDED_ACCOUNT_PUBLIC_KEY;
+  const address = process.env.FUNDED_ACCOUNT_ADDRESS;
+  const deployed = process.env.FUNDED_ACCOUNT_DEPLOYED === 'true';
+
+  if (!privateKey || !publicKey || !address) {
+    throw new Error('Missing required environment variables for funded account: FUNDED_ACCOUNT_PRIVATE_KEY, FUNDED_ACCOUNT_PUBLIC_KEY, FUNDED_ACCOUNT_ADDRESS');
+  }
+
+  return [
+    {
+      userId: "funded-account",
+      privateKey,
+      publicKey,
+      precalculatedAddress: address,
+      deployed,
+      contract_address: undefined
+    }
+  ];
+};
 
 interface BalancePayload {
   token: supportedTokens;
@@ -79,23 +105,51 @@ export class WalletTool extends BaseTool {
 
   private accounts: AccountData[];
   private provider: RpcProvider;
-  private contactService = container.resolve(ContactService);
+  private contactService: ContactService;
+  private authService: AuthService;
+  
   constructor() {
     super();
-    this.accounts = accountsData as AccountData[];
+    this.accounts = getSystemAccounts();
     this.provider = new RpcProvider({
       nodeUrl: config.node_url,
     });
+    
+    // Create service instances directly
+    this.contactService = new ContactService();
+    
+    // Create AuthService with its dependencies using tsyringe container
+    const starknetService = container.resolve(StarknetService);
+    const encryptionService = container.resolve(EncryptionService);
+    const autoFundingService = container.resolve(AutoFundingService);
+    this.authService = container.resolve(AuthService);
   }
 
-  private getAccount(userId: string): AccountData {
-    const account = this.accounts.find((a) => a.userId === userId);
-    if (!account) throw new Error(`Account not found: ${userId}`);
-    return account;
+  private async getAccount(userId: string): Promise<AccountData> {
+    // First try to get user account from database
+    try {
+      const userAccountData = await this.authService.getUserAccountData(userId);
+      return {
+        userId: userAccountData.userId,
+        privateKey: userAccountData.privateKey,
+        publicKey: userAccountData.publicKey,
+        precalculatedAddress: userAccountData.precalculatedAddress,
+        deployed: userAccountData.deployed,
+        contract_address: userAccountData.contract_address
+      };
+    } catch (error) {
+      // If not found in database, check if it's a system account
+      const systemAccount = this.accounts.find((a) => a.userId === userId);
+      if (systemAccount) {
+        return systemAccount;
+      }
+      
+      throw new Error(`Account not found: ${userId}. ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
-  private getStarkAccount(userId: string): Account {
-    const accountData = this.getAccount(userId);
+  private async getStarkAccount(userId: string): Promise<Account> {
+    const accountData = await this.getAccount(userId);
 
     return new Account(
       this.provider,
@@ -131,8 +185,8 @@ export class WalletTool extends BaseTool {
   ): Promise<ToolResult> {
     try {
       console.log(payload);
-      const accountData = this.getAccount(userId);
-      const acct = this.getStarkAccount(userId);
+      const accountData = await this.getAccount(userId);
+      const acct = await this.getStarkAccount(userId);
 
       const contractAddress = tokensMap[payload.token];
       if (!contractAddress) throw new Error("invalid token ");
@@ -163,7 +217,7 @@ export class WalletTool extends BaseTool {
     userId: string
   ): Promise<ToolResult> {
     try {
-      const starkAccount = this.getStarkAccount(userId);
+      const starkAccount = await this.getStarkAccount(userId);
       const tokenAddress = payload.token
         ? tokensMap[payload.token]
         : STRKTokenAddress;
@@ -198,7 +252,7 @@ export class WalletTool extends BaseTool {
 
   private async getWalletAddress(userId: string): Promise<ToolResult> {
     try {
-      const account = this.getAccount(userId);
+      const account = await this.getAccount(userId);
       return this.createSuccessResult("address", {
         address: account.precalculatedAddress,
       });
@@ -213,4 +267,3 @@ export class WalletTool extends BaseTool {
   }
 }
 
-export const walletTool = new WalletTool();
