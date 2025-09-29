@@ -21,8 +21,8 @@ export class ToolAutoDiscovery {
     }
 
     try {
-      const { walletTool } = await import("../tools/wallet");
-      toolRegistry.register(walletTool);
+      const { WalletTool } = await import("../tools/wallet");
+      toolRegistry.register(new WalletTool());
 
       const { swapTool } = await import("../tools/swap");
       toolRegistry.register(swapTool);
