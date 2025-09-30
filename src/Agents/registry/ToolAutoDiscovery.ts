@@ -29,8 +29,15 @@ export class ToolAutoDiscovery {
       const { metaTool } = await import("../tools/meta");
       toolRegistry.register(metaTool);
       const { contactTool } = await import("../tools/contact");
-      toolRegistry.register(qaTool)
+      const { bitcoinWalletTool } = await import("../tools/bitcoinWallet");
+      const { crossChainSwapTool } = await import("../tools/crossChainSwap");
+      const { swapStateManagerTool } = await import("../tools/swapStateManager");
+      
+      toolRegistry.register(qaTool);
       toolRegistry.register(contactTool);
+      toolRegistry.register(bitcoinWalletTool);
+      toolRegistry.register(crossChainSwapTool);
+      toolRegistry.register(swapStateManagerTool);
       // todo
       // await this.discoverToolsFromDirectory();
 

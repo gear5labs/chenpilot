@@ -5,6 +5,8 @@ interface SwapPayload extends Record<string, unknown> {
   from: string;
   to: string;
   amount: number;
+  crossChain?: boolean;
+  bitcoinAddress?: string;
 }
 
 export class SwapTool extends BaseTool<SwapPayload> {
@@ -16,13 +18,13 @@ export class SwapTool extends BaseTool<SwapPayload> {
         type: "string",
         description: "Source token symbol",
         required: true,
-        enum: ["STRK", "ETH", "DAI", "USDC", "USDT"],
+        enum: ["STRK", "ETH", "DAI", "USDC", "USDT", "BTC"],
       },
       to: {
         type: "string",
         description: "Target token symbol",
         required: true,
-        enum: ["STRK", "ETH", "DAI", "USDC", "USDT"],
+        enum: ["STRK", "ETH", "DAI", "USDC", "USDT", "BTC"],
       },
       amount: {
         type: "number",
@@ -30,11 +32,23 @@ export class SwapTool extends BaseTool<SwapPayload> {
         required: true,
         min: 0,
       },
+      crossChain: {
+        type: "boolean",
+        description: "Whether this is a cross-chain swap (BTC ↔ other tokens)",
+        required: false,
+      },
+      bitcoinAddress: {
+        type: "string",
+        description: "Bitcoin address for BTC swaps",
+        required: false,
+      },
     },
     examples: [
       "Swap 100 STRK to ETH",
       "Convert 50 DAI to USDC",
       "Exchange 0.5 ETH for STRK",
+      "Swap 0.01 BTC to STRK",
+      "Convert 1000 STRK to BTC",
     ],
     category: "trading",
     version: "1.0.0",
@@ -42,7 +56,22 @@ export class SwapTool extends BaseTool<SwapPayload> {
 
   async execute(payload: SwapPayload, userId: string): Promise<ToolResult> {
     try {
-      // Mock swap logic - replace with actual implementation
+      // Check if this is a cross-chain swap involving BTC
+      const isBtcSwap = payload.from === "BTC" || payload.to === "BTC";
+      
+      if (isBtcSwap) {
+        // Import and use the cross-chain swap tool for BTC swaps
+        const { crossChainSwapTool } = await import("./crossChainSwap");
+        return crossChainSwapTool.execute({
+          from: payload.from as "BTC" | "STRK",
+          to: payload.to as "BTC" | "STRK",
+          amount: payload.amount,
+          exactIn: true, // Default to exact input
+          bitcoinAddress: payload.bitcoinAddress,
+        }, userId);
+      }
+
+      // Handle regular Starknet token swaps (existing logic)
       console.log(
         `User ${userId} swapping ${payload.amount} ${payload.from} → ${payload.to}`
       );
