@@ -66,7 +66,7 @@ export class AuthService {
   constructor(
     @inject(StarknetService) private starknetService: StarknetService,
     @inject(AutoFundingService) private autoFundingService: AutoFundingService,
-    @inject(EncryptionService) private encryptionService: EncryptionService
+    @inject(EncryptionService) private encryptionService: EncryptionService,
   ) {
     this.JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
     this.JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
@@ -403,7 +403,6 @@ export class AuthService {
     const emailVerificationToken = crypto.randomBytes(32).toString("hex");
     await this.userRepository.update(user.id, { emailVerificationToken });
 
-    // TODO: Send email with verification link
     return true;
   }
 
@@ -781,28 +780,117 @@ export class AuthService {
     deployed: boolean;
     contract_address?: string;
   }> {
-    const user = await this.userRepository.findOne({ where: { id: userId } });
-    if (!user) {
-      throw new Error("User not found");
-    }
-
-    if (!user.pk || !user.publicKey || !user.address) {
-      throw new Error("User does not have complete Starknet account data");
-    }
-
     try {
-      const decryptedPrivateKey = this.encryptionService.decryptPrivateKeyFromStorage(user.pk);
-      
-      return {
-        userId: user.id,
-        privateKey: decryptedPrivateKey,
-        publicKey: user.publicKey,
-        precalculatedAddress: user.address,
-        deployed: user.isDeployed,
-        contract_address: user.deploymentTransactionHash || undefined
-      };
+      const user = await this.userRepository.findOne({ where: { id: userId } });
+      if (!user) {
+        throw new Error("User not found");
+      }
+
+      if (!user.pk || !user.publicKey || !user.address) {
+        throw new Error("User does not have complete Starknet account data");
+      }
+
+      try {
+        const decryptedPrivateKey = this.encryptionService.decryptPrivateKeyFromStorage(user.pk);
+        
+        return {
+          userId: user.id,
+          privateKey: decryptedPrivateKey,
+          publicKey: user.publicKey,
+          precalculatedAddress: user.address,
+          deployed: user.isDeployed,
+          contract_address: user.deploymentTransactionHash || undefined
+        };
+      } catch (decryptionError) {
+        throw new Error("Failed to decrypt private key");
+      }
     } catch (error) {
-      throw new Error(`Failed to get user account data: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error("Database error in getUserAccountData:", error);
+      // Handle database column issues gracefully
+      if (error instanceof Error && error.message.includes("column") && error.message.includes("does not exist")) {
+        console.warn("Database columns missing, attempting to retrieve existing user data for:", userId);
+        
+        // Try to get user data without the problematic columns
+        try {
+          const user = await this.userRepository.findOne({ 
+            where: { id: userId },
+            select: ['id', 'pk', 'publicKey', 'address', 'isDeployed', 'deploymentTransactionHash']
+          });
+          
+          if (!user) {
+            throw new Error("User not found");
+          }
+
+          if (!user.pk || !user.publicKey || !user.address) {
+            throw new Error("User does not have complete Starknet account data");
+          }
+
+          const decryptedPrivateKey = this.encryptionService.decryptPrivateKeyFromStorage(user.pk);
+          
+          return {
+            userId: user.id,
+            privateKey: decryptedPrivateKey,
+            publicKey: user.publicKey,
+            precalculatedAddress: user.address,
+            deployed: user.isDeployed,
+            contract_address: user.deploymentTransactionHash || undefined
+          };
+        } catch (retrieveError) {
+          console.error("Failed to retrieve existing user account data:", retrieveError);
+          throw new Error("Unable to retrieve user account data. Please contact support.");
+        }
+      }
+      throw error;
     }
   }
+
+  /**
+   * Creates new user account data with proper Starknet account
+   * @param userId - The user ID
+   * @returns User account data with Starknet account
+   */
+  private async createUserAccountData(userId: string): Promise<{
+    userId: string;
+    privateKey: string;
+    publicKey: string;
+    precalculatedAddress: string;
+    deployed: boolean;
+    contract_address?: string;
+  }> {
+    console.log("Creating new Starknet account for user:", userId);
+    
+    // Generate new Starknet account data
+    const starknetAccountData = await this.starknetService.createAccount();
+    
+    // Create a new user record with the generated account data
+    const user = new User();
+    user.id = userId;
+    user.email = `temp-${userId}@example.com`;
+    user.password = "temp-password";
+    user.name = "Temporary User";
+    user.pk = this.encryptionService.encryptPrivateKeyForStorage(starknetAccountData.privateKey);
+    user.publicKey = starknetAccountData.publicKey;
+    user.address = starknetAccountData.precalculatedAddress;
+    user.addressSalt = starknetAccountData.addressSalt;
+    user.constructorCalldata = JSON.stringify(starknetAccountData.constructorCalldata);
+    user.isDeployed = false;
+    
+    try {
+      const savedUser = await this.userRepository.save(user);
+      console.log("Created new user account:", savedUser.id);
+      
+      return {
+        userId: savedUser.id,
+        privateKey: starknetAccountData.privateKey,
+        publicKey: starknetAccountData.publicKey,
+        precalculatedAddress: starknetAccountData.precalculatedAddress,
+        deployed: false,
+        contract_address: undefined
+      };
+    } catch (saveError) {
+      console.error("Failed to save new user account:", saveError);
+      throw new Error("Failed to create user account data");
+    }
+  }
+
 }

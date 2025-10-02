@@ -29,10 +29,13 @@ export class ToolAutoDiscovery {
       const { metaTool } = await import("../tools/meta");
       toolRegistry.register(metaTool);
       const { contactTool } = await import("../tools/contact");
-      toolRegistry.register(qaTool)
+      const { crossChainSwapTool } = await import("../tools/crossChainSwap");
+      const { swapStateManagerTool } = await import("../tools/swapStateManager");
+      
+      toolRegistry.register(qaTool);
       toolRegistry.register(contactTool);
-      // todo
-      // await this.discoverToolsFromDirectory();
+      toolRegistry.register(crossChainSwapTool);
+      toolRegistry.register(swapStateManagerTool);
 
       this.initialized = true;
       console.log(

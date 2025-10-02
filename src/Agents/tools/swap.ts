@@ -2,27 +2,28 @@ import { BaseTool } from "./base/BaseTool";
 import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 
 interface SwapPayload extends Record<string, unknown> {
-  from: string;
-  to: string;
+  from: "STRK" | "BTC";
+  to: "STRK" | "BTC";
   amount: number;
+  bitcoinAddress?: string;
 }
 
 export class SwapTool extends BaseTool<SwapPayload> {
   metadata: ToolMetadata = {
     name: "swap_tool",
-    description: "Swap tokens between different cryptocurrencies",
+    description: "Cross-chain swaps between STRK and BTC using Atomiq protocol",
     parameters: {
       from: {
         type: "string",
         description: "Source token symbol",
         required: true,
-        enum: ["STRK", "ETH", "DAI", "USDC", "USDT"],
+        enum: ["STRK", "BTC"],
       },
       to: {
         type: "string",
         description: "Target token symbol",
         required: true,
-        enum: ["STRK", "ETH", "DAI", "USDC", "USDT"],
+        enum: ["STRK", "BTC"],
       },
       amount: {
         type: "number",
@@ -30,11 +31,17 @@ export class SwapTool extends BaseTool<SwapPayload> {
         required: true,
         min: 0,
       },
+      bitcoinAddress: {
+        type: "string",
+        description: "Bitcoin address to receive BTC (optional - will use default testnet address if not provided)",
+        required: false,
+      },
     },
     examples: [
-      "Swap 100 STRK to ETH",
-      "Convert 50 DAI to USDC",
-      "Exchange 0.5 ETH for STRK",
+      "Swap 100 STRK to BTC",
+      "Convert 0.01 BTC to STRK",
+      "Exchange 500 STRK for BTC",
+      "Swap 0.005 BTC to STRK",
     ],
     category: "trading",
     version: "1.0.0",
@@ -42,21 +49,40 @@ export class SwapTool extends BaseTool<SwapPayload> {
 
   async execute(payload: SwapPayload, userId: string): Promise<ToolResult> {
     try {
-      // Mock swap logic - replace with actual implementation
-      console.log(
-        `User ${userId} swapping ${payload.amount} ${payload.from} → ${payload.to}`
-      );
+      console.log(`SwapTool.execute called with userId: ${userId}`);
+      console.log(`Payload:`, JSON.stringify(payload, null, 2));
+      
+      // Validate that this is a BTC ↔ STRK swap
+      if (payload.from === payload.to) {
+        return this.createErrorResult(
+          "swap",
+          "Source and destination tokens cannot be the same"
+        );
+      }
 
-      // Simulate swap processing time
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (!["BTC", "STRK"].includes(payload.from) || !["BTC", "STRK"].includes(payload.to)) {
+        return this.createErrorResult(
+          "swap",
+          "Only STRK ↔ BTC swaps are supported"
+        );
+      }
 
-      return this.createSuccessResult("swap", {
+      console.log(`Processing ${payload.from} → ${payload.to} swap for user: ${userId}`);
+      
+      // Delegate to CrossChainSwapTool for all BTC ↔ STRK swaps
+      const { crossChainSwapTool } = await import("./crossChainSwap");
+      
+      const result = await crossChainSwapTool.execute({
+        operation: "swap", // Default to swap operation
         from: payload.from,
         to: payload.to,
         amount: payload.amount,
-        txHash: "0xMOCKSWAP123",
-        timestamp: new Date().toISOString(),
-      });
+        exactIn: payload.from === "BTC", // Set based on swap direction
+        bitcoinAddress: payload.bitcoinAddress,
+      }, userId);
+      
+      console.log(`CrossChainSwapTool result:`, result);
+      return result;
     } catch (error) {
       return this.createErrorResult(
         "swap",
