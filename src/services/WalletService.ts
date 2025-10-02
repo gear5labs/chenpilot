@@ -10,39 +10,10 @@ export interface UserAccountData {
 }
 
 export interface WalletService {
-  /**
-   * Get user account data for creating Starknet signers
-   * @param userId - The user ID
-   * @returns Promise<UserAccountData> - User's wallet account data
-   */
   getUserAccountData(userId: string): Promise<UserAccountData>;
-
-  /**
-   * Get user's Starknet address
-   * @param userId - The user ID
-   * @returns Promise<string> - User's Starknet address
-   */
   getUserAddress(userId: string): Promise<string>;
-
-  /**
-   * Check if user has an active wallet
-   * @param userId - The user ID
-   * @returns Promise<boolean> - Whether user has an active wallet
-   */
   hasActiveWallet(userId: string): Promise<boolean>;
-
-  /**
-   * Create a new wallet for a user (if needed)
-   * @param userId - The user ID
-   * @returns Promise<UserAccountData> - New wallet account data
-   */
   createWallet(userId: string): Promise<UserAccountData>;
-
-  /**
-   * Validate user's private key format
-   * @param privateKey - The private key to validate
-   * @returns boolean - Whether the private key is valid
-   */
   validatePrivateKey(privateKey: string): boolean;
 }
 
@@ -59,7 +30,6 @@ export class ProductionWalletService implements WalletService {
 
   async getUserAccountData(userId: string): Promise<UserAccountData> {
     try {
-      // Get user account data from existing AuthService
       const userAccountData = await this.authService.getUserAccountData(userId);
       
       return {
@@ -67,7 +37,7 @@ export class ProductionWalletService implements WalletService {
         privateKey: userAccountData.privateKey,
         publicKey: userAccountData.publicKey,
         address: userAccountData.precalculatedAddress,
-        chainId: "SN_SEPOLIA", // or your target chain
+        chainId: "SN_SEPOLIA",
         isActive: userAccountData.deployed,
         createdAt: new Date(),
         lastUsed: new Date(),
@@ -92,12 +62,10 @@ export class ProductionWalletService implements WalletService {
   }
 
   async createWallet(userId: string): Promise<UserAccountData> {
-
     throw new Error("Wallet creation is handled by the existing AuthService - use AuthService.createUser() instead");
   }
 
   validatePrivateKey(privateKey: string): boolean {
-    // Basic validation for Starknet private key format
     return /^0x[a-fA-F0-9]{64}$/.test(privateKey);
   }
 }

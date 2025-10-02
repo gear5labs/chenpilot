@@ -3,6 +3,7 @@ import http from "http";
 import app from "./Gateway/api";
 import config from "./config/config";
 import AppDataSource from "./config/Datasource";
+import { atomiqService } from "./services/AtomiqService";
 class Server {
   private server: http.Server;
   private port: number;
@@ -32,6 +33,16 @@ class Server {
       } else {
         console.log("db already connected");
       }
+
+      // Initialize AtomiqService asynchronously (non-blocking)
+      atomiqService.initialize()
+        .then(() => {
+          console.log("AtomiqService initialized successfully");
+        })
+        .catch((error) => {
+          console.error("Failed to initialize AtomiqService:", error);
+          console.log("Server will continue with limited swap functionality");
+        });
       
       process.on("SIGTERM", shutdown);
       process.on("SIGINT", shutdown);
@@ -53,7 +64,7 @@ class Server {
       });
 
       this.server.listen(this.port, () => {
-        console.log(`🚀 Server running on port ${this.port}`);
+        console.log(`Server running on port ${this.port}`);
       });
     } catch (error) {
       console.error("Error during server startup:", error);

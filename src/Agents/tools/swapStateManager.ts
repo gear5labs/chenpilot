@@ -2,6 +2,8 @@ import { BaseTool } from "./base/BaseTool";
 import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 import { atomiqService } from "../../services/AtomiqService";
 import { walletService } from "../../services/WalletService";
+import { StarknetSigner } from "@atomiqlabs/chain-starknet";
+import { StarknetKeypairWallet } from "@atomiqlabs/chain-starknet";
 
 interface SwapStatePayload extends Record<string, unknown> {
   operation: "get_swap_status" | "get_refundable_swaps" | "get_claimable_swaps" | "refund_swap" | "claim_swap";
@@ -45,7 +47,9 @@ export class SwapStateManagerTool extends BaseTool<SwapStatePayload> {
 
   async execute(payload: SwapStatePayload, userId: string): Promise<ToolResult> {
     try {
-      if (!atomiqService.isInitialized()) {
+      try {
+        atomiqService.getSwapper();
+      } catch (error) {
         await atomiqService.initialize();
       }
 
@@ -87,7 +91,9 @@ export class SwapStateManagerTool extends BaseTool<SwapStatePayload> {
         );
       }
 
-      if (!atomiqService.isInitialized()) {
+      try {
+        atomiqService.getSwapper();
+      } catch (error) {
         await atomiqService.initialize();
       }
 
@@ -122,7 +128,9 @@ export class SwapStateManagerTool extends BaseTool<SwapStatePayload> {
 
   private async getRefundableSwaps(chain: string, userId: string): Promise<ToolResult> {
     try {
-      if (!atomiqService.isInitialized()) {
+      try {
+        atomiqService.getSwapper();
+      } catch (error) {
         await atomiqService.initialize();
       }
 
@@ -165,13 +173,15 @@ export class SwapStateManagerTool extends BaseTool<SwapStatePayload> {
 
   private async getClaimableSwaps(chain: string, userId: string): Promise<ToolResult> {
     try {
-      if (!atomiqService.isInitialized()) {
+      try {
+        atomiqService.getSwapper();
+      } catch (error) {
         await atomiqService.initialize();
       }
 
       const swapper = atomiqService.getSwapper();
       
-      // Get user's address (you'll need to implement this based on your wallet system)
+
       const userAddress = await this.getUserAddress(userId);
       
       if (!userAddress) {
@@ -187,7 +197,7 @@ export class SwapStateManagerTool extends BaseTool<SwapStatePayload> {
         swapId: swap.getId(),
         state: swap.getState(),
         stateDescription: this.getStateDescription(swap.getState()),
-        createdAt: new Date().toISOString(), // You might want to store this in your database
+        createdAt: new Date().toISOString(), 
       }));
 
       return this.createSuccessResult("claimable_swaps", {
@@ -222,7 +232,9 @@ export class SwapStateManagerTool extends BaseTool<SwapStatePayload> {
         );
       }
 
-      if (!atomiqService.isInitialized()) {
+      try {
+        atomiqService.getSwapper();
+      } catch (error) {
         await atomiqService.initialize();
       }
 
@@ -280,7 +292,9 @@ export class SwapStateManagerTool extends BaseTool<SwapStatePayload> {
         );
       }
 
-      if (!atomiqService.isInitialized()) {
+      try {
+        atomiqService.getSwapper();
+      } catch (error) {
         await atomiqService.initialize();
       }
 
@@ -323,19 +337,18 @@ export class SwapStateManagerTool extends BaseTool<SwapStatePayload> {
   }
 
   private getStateDescription(state: number): string {
-    // Map swap states to human-readable descriptions
-    const stateMap: Record<number, string> = {
-      [-3]: "Refunded",
-      [-2]: "Quote Expired",
-      [-1]: "Quote Soft Expired",
-      0: "Created",
-      1: "Committed",
-      2: "Soft Claimed",
-      3: "Claimed",
-      4: "Refundable",
+    // Simple state descriptions for swap states
+    const stateDescriptions: { [key: number]: string } = {
+      [-3]: "REFUNDED",
+      [-2]: "QUOTE_EXPIRED", 
+      [-1]: "QUOTE_SOFT_EXPIRED",
+      0: "CREATED",
+      1: "COMMITTED",
+      2: "SOFT_CLAIMED",
+      3: "CLAIMED",
+      4: "REFUNDABLE"
     };
-    
-    return stateMap[state] || `Unknown State (${state})`;
+    return stateDescriptions[state] || `UNKNOWN_STATE_${state}`;
   }
 
       private async getUserAddress(userId: string): Promise<string> {
@@ -347,10 +360,12 @@ export class SwapStateManagerTool extends BaseTool<SwapStatePayload> {
         }
       }
 
-      private async getUserSigner(userId: string): Promise<any | null> {
+      private async getUserSigner(userId: string): Promise<StarknetSigner | null> {
         try {
-          const { StarknetSigner, StarknetKeypairWallet } = await import("@atomiqlabs/chain-starknet");
+          // Use imported Atomiq packages
+          
           const config = await import("../../config/config");
+          const { RpcProvider } = await import("starknet");
           
           const userAccountData = await walletService.getUserAccountData(userId);
           
@@ -358,8 +373,11 @@ export class SwapStateManagerTool extends BaseTool<SwapStatePayload> {
             throw new Error("Invalid private key format for user wallet");
           }
           
+          // Create RpcProvider from the URL
+          const rpcProvider = new RpcProvider({ nodeUrl: config.default.node_url });
+          
           const starknetSigner = new StarknetSigner(
-            new StarknetKeypairWallet(config.default.node_url, userAccountData.privateKey)
+            new StarknetKeypairWallet(rpcProvider, userAccountData.privateKey)
           );
           
           return starknetSigner;
