@@ -10,6 +10,7 @@ import {
   ValidationError,
 } from "../utils/error";
 import authRoutes from "../Auth/auth.routes";
+import vesuRoutes from "./vesu.routes";
 
 const app = express();
 
@@ -18,6 +19,9 @@ app.use(express.json());
 
 // Auth routes
 app.use("/auth", authRoutes);
+
+// Vesu DeFi routes
+app.use("/vesu", vesuRoutes);
 
 app.post("/query", async (req, res) => {
   const { userId, query } = req.body;
@@ -29,9 +33,8 @@ app.post("/query", async (req, res) => {
   const valid = await validateQuery(query, userId);
   if (!valid) throw new ValidationError("invalid query");
 
-  // 3. intent → execution
+  // Handle all commands through intent agent (including DeFi commands)
   const result = await intentAgent.handle(query, userId);
-
   res.json({ result });
 });
 

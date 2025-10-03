@@ -4,6 +4,7 @@ import app from "./Gateway/api";
 import config from "./config/config";
 import AppDataSource from "./config/Datasource";
 import { atomiqService } from "./services/AtomiqService";
+import { vesuService } from "./services/VesuService";
 class Server {
   private server: http.Server;
   private port: number;
@@ -42,6 +43,16 @@ class Server {
         .catch((error) => {
           console.error("Failed to initialize AtomiqService:", error);
           console.log("Server will continue with limited swap functionality");
+        });
+
+      // Initialize VesuService asynchronously (non-blocking)
+      vesuService.initialize()
+        .then(() => {
+          console.log("VesuService initialized successfully");
+        })
+        .catch((error) => {
+          console.error("Failed to initialize VesuService:", error);
+          console.log("Server will continue with limited DeFi functionality");
         });
       
       process.on("SIGTERM", shutdown);
