@@ -42,7 +42,6 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
 
     steps:
       - name: Checkout Code
@@ -71,16 +70,17 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm run build
 
+      - name: Create deployment package
+        run: |
+          tar -czf deployment.tar.gz dist/ package.json pnpm-lock.yaml
+
       - name: Upload build to AWS server via SCP
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.AWS_HOST }}
           username: ${{ secrets.AWS_USER }}
           key: ${{ secrets.AWS_SSH_KEY }}
-          source: |
-            dist/**
-            package.json
-            pnpm-lock.yaml
+          source: "deployment.tar.gz"
           target: /var/www/chenpilot-prod
           overwrite: true
           rm: true
@@ -93,6 +93,8 @@ jobs:
           key: ${{ secrets.AWS_SSH_KEY }}
           script: |
             cd /var/www/chenpilot-prod
+            tar -xzf deployment.tar.gz
+            rm deployment.tar.gz
             echo "${{ secrets.PROD_ENV }}" > .env
             pnpm install --prod
             pm2 start dist/index.js --name chenpilot-prod || pm2 restart chenpilot-prod
