@@ -5,6 +5,7 @@ import config from "./config/config";
 import AppDataSource from "./config/Datasource";
 import { atomiqService } from "./services/AtomiqService";
 import { vesuService } from "./services/VesuService";
+import { xverseService } from "./services/XVerseService";
 
 class Server {
   private server: http.Server;
@@ -54,6 +55,16 @@ class Server {
         .catch((error) => {
           console.error("Failed to initialize VesuService:", error);
           console.log("Server will continue with limited DeFi functionality");
+        });
+
+      // Initialize XVerse service asynchronously (non-blocking)
+      xverseService.healthCheck()
+        .then(() => {
+          console.log("XVerse service initialized successfully");
+        })
+        .catch((error) => {
+          console.error("Failed to initialize XVerse service:", error);
+          console.log("Server will continue with limited Bitcoin functionality");
         });
 
       

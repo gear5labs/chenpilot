@@ -11,6 +11,7 @@ import {
 } from "../utils/error";
 import authRoutes from "../Auth/auth.routes";
 import vesuRoutes from "./vesu.routes";
+import bitcoinRoutes from "./bitcoin.routes";
 
 const app = express();
 
@@ -22,6 +23,9 @@ app.use("/auth", authRoutes);
 
 // Vesu DeFi routes
 app.use("/vesu", vesuRoutes);
+
+// Bitcoin routes
+app.use("/bitcoin", bitcoinRoutes);
 
 app.post("/query", async (req, res) => {
   const { userId, query } = req.body;
