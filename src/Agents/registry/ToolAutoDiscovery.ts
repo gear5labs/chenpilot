@@ -32,10 +32,34 @@ export class ToolAutoDiscovery {
       const { crossChainSwapTool } = await import("../tools/crossChainSwap");
       const { swapStateManagerTool } = await import("../tools/swapStateManager");
       
+      // Import Bitcoin tools
+      const { 
+        bitcoinBalanceTool,
+        bitcoinUTXOsTool,
+        bitcoinTransactionsTool,
+        bitcoinTransactionTool,
+        bitcoinPriceTool,
+        bitcoinCreateTransactionTool,
+        bitcoinSendTransactionTool,
+        bitcoinCreateWalletTool,
+        bitcoinValidateAddressTool
+      } = await import("../tools/bitcoin");
+      
       toolRegistry.register(qaTool);
       toolRegistry.register(contactTool);
       toolRegistry.register(crossChainSwapTool);
       toolRegistry.register(swapStateManagerTool);
+      
+      // Register Bitcoin tools
+      toolRegistry.register(bitcoinBalanceTool);
+      toolRegistry.register(bitcoinUTXOsTool);
+      toolRegistry.register(bitcoinTransactionsTool);
+      toolRegistry.register(bitcoinTransactionTool);
+      toolRegistry.register(bitcoinPriceTool);
+      toolRegistry.register(bitcoinCreateTransactionTool);
+      toolRegistry.register(bitcoinSendTransactionTool);
+      toolRegistry.register(bitcoinCreateWalletTool);
+      toolRegistry.register(bitcoinValidateAddressTool);
 
       this.initialized = true;
       console.log(
