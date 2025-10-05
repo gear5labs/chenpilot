@@ -12,6 +12,7 @@ import {
 import authRoutes from "../Auth/auth.routes";
 import vesuRoutes from "./vesu.routes";
 import bitcoinRoutes from "./bitcoin.routes";
+import trovesRoutes from "./troves.routes";
 
 const app = express();
 
@@ -26,6 +27,9 @@ app.use("/vesu", vesuRoutes);
 
 // Bitcoin routes
 app.use("/bitcoin", bitcoinRoutes);
+
+// Troves yield farming routes
+app.use("/troves", trovesRoutes);
 
 app.post("/query", async (req, res) => {
   const { userId, query } = req.body;

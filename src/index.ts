@@ -6,6 +6,7 @@ import AppDataSource from "./config/Datasource";
 import { atomiqService } from "./services/AtomiqService";
 import { vesuService } from "./services/VesuService";
 import { xverseService } from "./services/XVerseService";
+import { trovesService } from "./services/TrovesService";
 
 class Server {
   private server: http.Server;
@@ -65,6 +66,16 @@ class Server {
         .catch((error) => {
           console.error("Failed to initialize XVerse service:", error);
           console.log("Server will continue with limited Bitcoin functionality");
+        });
+
+      // Initialize TrovesService asynchronously (non-blocking)
+      trovesService.initialize()
+        .then(() => {
+          console.log("TrovesService initialized successfully");
+        })
+        .catch((error) => {
+          console.error("Failed to initialize TrovesService:", error);
+          console.log("Server will continue with limited yield farming functionality");
         });
 
       

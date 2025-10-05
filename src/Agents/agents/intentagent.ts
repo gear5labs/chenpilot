@@ -6,15 +6,17 @@ import { toolAutoDiscovery } from "../registry/ToolAutoDiscovery";
 import { WorkflowPlan, WorkflowStep } from "../types";
 import { memoryStore } from "../memory/memory";
 import { vesuService } from "../../services/VesuService";
+import { trovesService } from "../../services/TrovesService";
 import { VesuLendingOperation, VesuPool, VesuPosition, VesuQuote } from "../../types/vesu";
 import { Account } from "starknet";
 import { walletService } from "../../services/WalletService";
 
 export interface DeFiIntent {
-  action: 'lend' | 'borrow' | 'withdraw' | 'repay' | 'check_balance' | 'get_apy' | 'health_check' | 'liquidate' | 'claim_rewards' | 'add_collateral' | 'remove_collateral';
+  action: 'lend' | 'borrow' | 'withdraw' | 'repay' | 'check_balance' | 'get_apy' | 'health_check' | 'liquidate' | 'claim_rewards' | 'add_collateral' | 'remove_collateral' | 'deposit_vault' | 'withdraw_vault' | 'get_vaults' | 'get_vault_positions' | 'harvest_vault' | 'get_strategies';
   asset?: string;
   amount?: string;
   poolId?: string;
+  vaultId?: string;
   userAddress?: string;
   targetUser?: string; // For liquidation operations
   requiresConfirmation: boolean;
@@ -92,7 +94,7 @@ export class IntentAgent {
     const defiKeywords = [
       'lend', 'borrow', 'withdraw', 'repay', 'apy', 'yield', 'lending', 'borrowing',
       'collateral', 'debt', 'health factor', 'liquidation', 'liquidate', 'pool', 'deposit', 'rewards', 'claim', 'add collateral', 'remove collateral',
-      'vesu', 'defi', 'earn', 'interest', 'rate'
+      'vesu', 'defi', 'earn', 'interest', 'rate', 'vault', 'strategy', 'harvest', 'troves', 'farming', 'yield farming'
     ];
     
     const lowerQuery = query.toLowerCase();
@@ -130,6 +132,18 @@ export class IntentAgent {
           return await this.handleAddCollateral(intent, userId);
         case 'remove_collateral':
           return await this.handleRemoveCollateral(intent, userId);
+        case 'deposit_vault':
+          return await this.handleDepositVault(intent, userId);
+        case 'withdraw_vault':
+          return await this.handleWithdrawVault(intent, userId);
+        case 'get_vaults':
+          return await this.handleGetVaults(intent, userId);
+        case 'get_vault_positions':
+          return await this.handleGetVaultPositions(intent, userId);
+        case 'harvest_vault':
+          return await this.handleHarvestVault(intent, userId);
+        case 'get_strategies':
+          return await this.handleGetStrategies(intent, userId);
         default:
           return {
             success: false,
@@ -148,15 +162,15 @@ export class IntentAgent {
   // DeFi intent parsing
   private async parseDeFiIntent(input: string, userId: string): Promise<DeFiIntent> {
     const prompt = `
-    You are a DeFi agent that parses natural language commands for lending and borrowing operations on Vesu protocol.
+    You are a DeFi agent that parses natural language commands for lending, borrowing, and yield farming operations on Vesu protocol and Troves yield aggregator.
 
     Parse the following user input and extract the DeFi intent. Respond with JSON only.
 
     Supported actions:
-    - lend: Deposit assets into a lending pool
-    - borrow: Borrow assets from a lending pool
-    - withdraw: Withdraw assets from a lending pool
-    - repay: Repay borrowed assets
+    - lend: Deposit assets into a lending pool (Vesu)
+    - borrow: Borrow assets from a lending pool (Vesu)
+    - withdraw: Withdraw assets from a lending pool (Vesu)
+    - repay: Repay borrowed assets (Vesu)
     - check_balance: Check user's lending/borrowing positions
     - get_apy: Get current APY for lending pools
     - health_check: Check user's health factor and liquidation risk
@@ -164,6 +178,12 @@ export class IntentAgent {
     - claim_rewards: Claim DeFi Spring rewards
     - add_collateral: Add collateral to existing positions
     - remove_collateral: Remove collateral from existing positions
+    - deposit_vault: Deposit assets into Troves yield farming vault
+    - withdraw_vault: Withdraw assets from Troves yield farming vault
+    - get_vaults: Get available Troves vaults
+    - get_vault_positions: Get user's Troves vault positions
+    - harvest_vault: Harvest rewards from Troves vault
+    - get_strategies: Get available yield farming strategies
 
     Supported assets: ETH, STRK, USDC, USDT, WBTC
 
@@ -177,6 +197,11 @@ export class IntentAgent {
     - "Claim my rewards" -> {"action": "claim_rewards", "requiresConfirmation": true}
     - "Add 50 STRK as collateral" -> {"action": "add_collateral", "asset": "STRK", "amount": "50", "requiresConfirmation": true}
     - "Remove 25 USDC collateral" -> {"action": "remove_collateral", "asset": "USDC", "amount": "25", "requiresConfirmation": true}
+    - "Deposit 100 STRK to Troves vault" -> {"action": "deposit_vault", "asset": "STRK", "amount": "100", "requiresConfirmation": true}
+    - "Show me Troves vaults" -> {"action": "get_vaults", "requiresConfirmation": false}
+    - "What are my Troves positions?" -> {"action": "get_vault_positions", "requiresConfirmation": false}
+    - "Harvest my Troves rewards" -> {"action": "harvest_vault", "requiresConfirmation": true}
+    - "Show me yield farming strategies" -> {"action": "get_strategies", "requiresConfirmation": false}
 
     User input: ${input}
 `;
@@ -643,6 +668,215 @@ export class IntentAgent {
       return {
         success: false,
         data: error instanceof Error ? error.message : 'Failed to process remove collateral request'
+      };
+    }
+  }
+
+  // Troves Vault Handlers
+  private async handleDepositVault(intent: DeFiIntent, userId: string): Promise<DeFiResult> {
+    try {
+      await trovesService.initialize();
+      
+      if (!intent.asset || !intent.amount) {
+        return {
+          success: false,
+          data: "Asset and amount are required for vault deposit"
+        };
+      }
+
+      // Find the appropriate vault for the asset
+      const vaults = await trovesService.getAvailableVaults();
+      const vault = vaults.find(v => v.asset === intent.asset);
+      
+      if (!vault) {
+        return {
+          success: false,
+          data: `No vault found for asset ${intent.asset}`
+        };
+      }
+
+      // Get deposit quote
+      const quote = await trovesService.getDepositQuote(vault.id, intent.amount, intent.asset);
+      
+      return {
+        success: true,
+        data: {
+          message: `Deposit quote for ${intent.amount} ${intent.asset} to ${vault.name}`,
+          vault: vault.name,
+          estimatedShares: quote.estimatedShares,
+          apy: quote.apy,
+          estimatedYield: quote.estimatedYield,
+          fees: quote.fees
+        }
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: error instanceof Error ? error.message : 'Failed to process vault deposit request'
+      };
+    }
+  }
+
+  private async handleWithdrawVault(intent: DeFiIntent, userId: string): Promise<DeFiResult> {
+    try {
+      await trovesService.initialize();
+      
+      if (!intent.vaultId || !intent.amount) {
+        return {
+          success: false,
+          data: "Vault ID and amount are required for vault withdrawal"
+        };
+      }
+
+      const vaults = await trovesService.getAvailableVaults();
+      const vault = vaults.find(v => v.id === intent.vaultId);
+      
+      if (!vault) {
+        return {
+          success: false,
+          data: `Vault ${intent.vaultId} not found`
+        };
+      }
+
+      return {
+        success: true,
+        data: {
+          message: `Withdrawal of ${intent.amount} shares from ${vault.name}`,
+          vault: vault.name,
+          asset: vault.asset
+        }
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: error instanceof Error ? error.message : 'Failed to process vault withdrawal request'
+      };
+    }
+  }
+
+  private async handleGetVaults(intent: DeFiIntent, userId: string): Promise<DeFiResult> {
+    try {
+      await trovesService.initialize();
+      
+      const vaults = await trovesService.getAvailableVaults();
+      
+      return {
+        success: true,
+        data: {
+          vaults: vaults.map(vault => ({
+            id: vault.id,
+            name: vault.name,
+            asset: vault.asset,
+            apy: vault.apy,
+            tvl: vault.tvl,
+            strategy: vault.strategy,
+            minDeposit: vault.minDeposit,
+            fees: vault.fees
+          }))
+        }
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: error instanceof Error ? error.message : 'Failed to fetch vaults'
+      };
+    }
+  }
+
+  private async handleGetVaultPositions(intent: DeFiIntent, userId: string): Promise<DeFiResult> {
+    try {
+      await trovesService.initialize();
+      
+      const userAddress = await this.getStarknetAddress(userId);
+      const positions = await trovesService.getUserPositions(userAddress);
+      
+      return {
+        success: true,
+        data: {
+          positions: positions.map(position => ({
+            vaultId: position.vaultId,
+            vaultName: position.vaultName,
+            asset: position.asset,
+            shares: position.shares,
+            assets: position.assets,
+            estimatedValue: position.estimatedValue,
+            apy: position.apy,
+            totalEarned: position.totalEarned
+          }))
+        }
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: error instanceof Error ? error.message : 'Failed to fetch vault positions'
+      };
+    }
+  }
+
+  private async handleHarvestVault(intent: DeFiIntent, userId: string): Promise<DeFiResult> {
+    try {
+      await trovesService.initialize();
+      
+      if (!intent.vaultId) {
+        return {
+          success: false,
+          data: "Vault ID is required for harvesting rewards"
+        };
+      }
+
+      const vaults = await trovesService.getAvailableVaults();
+      const vault = vaults.find(v => v.id === intent.vaultId);
+      
+      if (!vault) {
+        return {
+          success: false,
+          data: `Vault ${intent.vaultId} not found`
+        };
+      }
+
+      return {
+        success: true,
+        data: {
+          message: `Harvesting rewards from ${vault.name}`,
+          vault: vault.name,
+          vaultId: vault.id,
+          apy: vault.apy
+        }
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: error instanceof Error ? error.message : 'Failed to harvest vault rewards'
+      };
+    }
+  }
+
+  private async handleGetStrategies(intent: DeFiIntent, userId: string): Promise<DeFiResult> {
+    try {
+      await trovesService.initialize();
+      
+      const strategies = await trovesService.getAvailableStrategies();
+      
+      return {
+        success: true,
+        data: {
+          strategies: strategies.map(strategy => ({
+            id: strategy.id,
+            name: strategy.name,
+            description: strategy.description,
+            riskLevel: strategy.riskLevel,
+            targetApy: strategy.targetApy,
+            currentApy: strategy.currentApy,
+            tvl: strategy.tvl,
+            supportedAssets: strategy.supportedAssets,
+            strategyType: strategy.strategyType
+          }))
+        }
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: error instanceof Error ? error.message : 'Failed to fetch strategies'
       };
     }
   }
