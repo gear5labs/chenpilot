@@ -7,7 +7,7 @@ Chen Pilot is an intelligent AI agent that enables seamless interaction with mul
 ### Core Capabilities
 - **Natural Language Processing**: Chat with the agent using plain English
 - **Multi-Chain Support**: Bitcoin, Starknet, and cross-chain operations
-- **DeFi Integration**: Lending, borrowing, and yield farming on Vesu protocol
+- **DeFi Integration**: Lending, borrowing, and yield farming on Vesu protocol and Troves aggregator
 - **Cross-Chain Swaps**: Seamless asset swaps between Bitcoin and Starknet
 - **Wallet Management**: Complete wallet operations and contact management
 - **Auto-Deployment**: Automatic Starknet account creation and funding
@@ -17,6 +17,7 @@ Chen Pilot is an intelligent AI agent that enables seamless interaction with mul
 ### Services Integration
 - **Atomiq**: Cross-chain swap infrastructure for Bitcoin ↔ Starknet
 - **Vesu**: DeFi lending and borrowing protocol on Starknet
+- **Troves**: Yield farming aggregator for optimized returns on Starknet
 - **XVerse**: Bitcoin wallet and transaction management
 - **Starknet**: Native blockchain operations and smart contracts
 
@@ -162,6 +163,13 @@ The agent understands natural language commands. Here are examples:
 - "Check my health factor"
 - "Claim my rewards"
 
+**Yield Farming Operations:**
+- "Show me available Troves vaults"
+- "Deposit 100 STRK to Troves vault"
+- "What are my Troves positions?"
+- "Harvest my Troves rewards"
+- "Show me yield farming strategies"
+
 **Cross-Chain Swaps:**
 - "Swap 0.01 BTC to STRK"
 - "Check my swap status"
@@ -265,7 +273,60 @@ The agent understands natural language commands. Here are examples:
 - `GET /vesu/positions/:userId` - Get user positions
 - `POST /vesu/execute` - Execute lending operation
 
-### 3. XVerse - Bitcoin Wallet Management
+### 3. Troves - Yield Farming Aggregator
+
+**Purpose**: Automated yield farming and vault management on Starknet
+
+**Features**:
+- Automated yield optimization across multiple DeFi protocols
+- Vault-based asset management
+- Strategy diversification
+- Reward harvesting
+- Performance monitoring
+- Risk management
+
+**Supported Assets**: STRK, ETH, USDC, WBTC, USDT
+
+**Available Vaults**:
+- STRK Yield Vault (12.5% APY)
+- ETH Yield Vault (8.7% APY)
+- USDC Stable Vault (6.2% APY)
+
+**Available Strategies**:
+- Liquidity Provision (Medium Risk, 15% Target APY)
+- Lending Strategy (Low Risk, 8% Target APY)
+
+**Yield Farming Operations**:
+```typescript
+// Vault Operations
+"Show me available Troves vaults"
+"Deposit 100 STRK to Troves vault"
+"Withdraw 50 shares from ETH vault"
+"What are my Troves positions?"
+
+// Strategy Management
+"Show me yield farming strategies"
+"Get yield data for STRK vault"
+"Harvest my Troves rewards"
+
+// Information
+"Check Troves health status"
+"Get deposit quote for 100 STRK"
+"What's the current APY for USDC vault?"
+```
+
+**API Endpoints**:
+- `GET /troves/health` - Service health check
+- `GET /troves/vaults` - Get available vaults
+- `GET /troves/strategies` - Get available strategies
+- `GET /troves/positions/:userId` - Get user vault positions
+- `POST /troves/quote` - Get deposit quote
+- `POST /troves/deposit` - Deposit to vault
+- `POST /troves/withdraw` - Withdraw from vault
+- `POST /troves/harvest` - Harvest rewards
+- `GET /troves/yield/:vaultId` - Get yield data
+
+### 4. XVerse - Bitcoin Wallet Management
 
 **Purpose**: Complete Bitcoin wallet and transaction management
 
@@ -306,7 +367,7 @@ The agent understands natural language commands. Here are examples:
 - `GET /bitcoin/transactions/:address` - Get transaction history
 - `POST /bitcoin/send` - Send Bitcoin transaction
 
-### 4. Wallet Tool - Starknet Operations
+### 5. Wallet Tool - Starknet Operations
 
 **Purpose**: Native Starknet wallet operations
 
@@ -336,7 +397,7 @@ The agent understands natural language commands. Here are examples:
 "Edit contact Alice's address"
 ```
 
-### 5. Meta Tool - Agent Information
+### 6. Meta Tool - Agent Information
 
 **Purpose**: Get information about the agent itself
 
@@ -412,7 +473,25 @@ curl -X POST http://localhost:2333/query \
   -d '{"userId": "your-user-id", "query": "What are my lending positions?"}'
 ```
 
-### 3. Cross-Chain Swaps
+### 3. Yield Farming Operations
+```bash
+# Show available vaults
+curl -X POST http://localhost:2333/query \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "your-user-id", "query": "Show me available Troves vaults"}'
+
+# Deposit to vault
+curl -X POST http://localhost:2333/query \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "your-user-id", "query": "Deposit 100 STRK to Troves vault"}'
+
+# Check positions
+curl -X POST http://localhost:2333/query \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "your-user-id", "query": "What are my Troves positions?"}'
+```
+
+### 4. Cross-Chain Swaps
 ```bash
 # Get swap quote
 curl -X POST http://localhost:2333/query \
@@ -470,6 +549,7 @@ npm start
 
 ### Service-Specific Endpoints
 - `/vesu/*` - Vesu DeFi operations
+- `/troves/*` - Troves yield farming operations
 - `/bitcoin/*` - Bitcoin wallet operations
 - `/atomiq/*` - Cross-chain swap operations
 

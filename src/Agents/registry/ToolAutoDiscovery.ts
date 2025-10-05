@@ -31,6 +31,7 @@ export class ToolAutoDiscovery {
       const { contactTool } = await import("../tools/contact");
       const { crossChainSwapTool } = await import("../tools/crossChainSwap");
       const { swapStateManagerTool } = await import("../tools/swapStateManager");
+      const { trovesTool } = await import("../tools/troves");
       
       // Import Bitcoin tools
       const { 
@@ -49,6 +50,7 @@ export class ToolAutoDiscovery {
       toolRegistry.register(contactTool);
       toolRegistry.register(crossChainSwapTool);
       toolRegistry.register(swapStateManagerTool);
+      toolRegistry.register(trovesTool);
       
       // Register Bitcoin tools
       toolRegistry.register(bitcoinBalanceTool);
