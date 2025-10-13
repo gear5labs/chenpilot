@@ -10,15 +10,15 @@ export type TransferPayload = {
   amount: number;
 };
 
-export type supportedTokens = "STRK" | "ETH" | "DAI";
+export type supportedTokens = 'STRK' | 'ETH' | 'DAI';
 
 export type BalancePayload = {
   token: supportedTokens;
 };
 
 export type WorkflowStep = {
-  action: string; 
-  payload: Record<string, unknown>; 
+  action: string;
+  payload: Record<string, unknown>;
 };
 
 export type WorkflowPlan = {
@@ -28,7 +28,7 @@ export type WorkflowPlan = {
 // Legacy ToolResult interface - now superseded by registry types
 export interface ToolResult {
   action: string;
-  status: "success" | "error";
+  status: 'success' | 'error';
   message?: string;
   data?: Record<string, unknown>;
   error?: string;

@@ -5,7 +5,6 @@ export interface XverseConfig {
   rateLimitDelay?: number;
 }
 
-
 export interface XverseTransaction {
   txid: string;
   hash: string;

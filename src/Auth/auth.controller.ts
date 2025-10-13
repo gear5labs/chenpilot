@@ -1,13 +1,17 @@
-import { Request, Response } from "express";
-import { injectable, inject } from "tsyringe";
-import { AuthService, RegisterData, LoginData, GoogleAuthData, AuthResponse } from "./auth.service";
-import { AuthenticatedRequest } from "./auth.middleware";
+import { Request, Response } from 'express';
+import { injectable, inject } from 'tsyringe';
+import {
+  AuthService,
+  RegisterData,
+  LoginData,
+  GoogleAuthData,
+  AuthResponse,
+} from './auth.service';
+import { AuthenticatedRequest } from './auth.middleware';
 
 @injectable()
 export class AuthController {
-  constructor(
-    @inject(AuthService) private authService: AuthService
-  ) {}
+  constructor(@inject(AuthService) private authService: AuthService) {}
 
   async register(req: Request, res: Response): Promise<void> {
     try {
@@ -17,7 +21,7 @@ export class AuthController {
       if (!email || !password) {
         res.status(400).json({
           success: false,
-          message: "Email and password are required",
+          message: 'Email and password are required',
         });
         return;
       }
@@ -27,7 +31,7 @@ export class AuthController {
       if (!emailRegex.test(email)) {
         res.status(400).json({
           success: false,
-          message: "Please provide a valid email address",
+          message: 'Please provide a valid email address',
         });
         return;
       }
@@ -36,7 +40,7 @@ export class AuthController {
       if (password.length < 8) {
         res.status(400).json({
           success: false,
-          message: "Password must be at least 8 characters long",
+          message: 'Password must be at least 8 characters long',
         });
         return;
       }
@@ -45,14 +49,21 @@ export class AuthController {
       const result = await this.authService.register(registerData);
 
       // Determine the appropriate message based on setup status
-      let message = "Account created successfully. Please check your email for verification.";
+      let message =
+        'Account created successfully. Please check your email for verification.';
       if (result.setupStatus) {
         if (result.setupStatus.fullyReady) {
-          message = "Account created, funded, and deployed successfully! Your Starknet account is ready to use.";
-        } else if (result.setupStatus.funding.success && !result.setupStatus.deployment.success) {
-          message = "Account created and funded successfully. Deployment is pending and will be completed shortly.";
+          message =
+            'Account created, funded, and deployed successfully! Your Starknet account is ready to use.';
+        } else if (
+          result.setupStatus.funding.success &&
+          !result.setupStatus.deployment.success
+        ) {
+          message =
+            'Account created and funded successfully. Deployment is pending and will be completed shortly.';
         } else if (!result.setupStatus.funding.success) {
-          message = "Account created successfully. Auto-funding is not available at the moment. Please fund your account manually.";
+          message =
+            'Account created successfully. Auto-funding is not available at the moment. Please fund your account manually.';
         }
       }
 
@@ -64,7 +75,7 @@ export class AuthController {
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Registration failed",
+        message: error instanceof Error ? error.message : 'Registration failed',
       });
     }
   }
@@ -77,7 +88,7 @@ export class AuthController {
       if (!email || !password) {
         res.status(400).json({
           success: false,
-          message: "Email and password are required",
+          message: 'Email and password are required',
         });
         return;
       }
@@ -87,13 +98,13 @@ export class AuthController {
 
       res.status(200).json({
         success: true,
-        message: "Login successful",
+        message: 'Login successful',
         data: result,
       });
     } catch (error) {
       res.status(401).json({
         success: false,
-        message: error instanceof Error ? error.message : "Login failed",
+        message: error instanceof Error ? error.message : 'Login failed',
       });
     }
   }
@@ -106,23 +117,34 @@ export class AuthController {
       if (!googleId || !email || !name) {
         res.status(400).json({
           success: false,
-          message: "Google ID, email, and name are required",
+          message: 'Google ID, email, and name are required',
         });
         return;
       }
 
-      const googleAuthData: GoogleAuthData = { googleId, email, name, profilePicture };
+      const googleAuthData: GoogleAuthData = {
+        googleId,
+        email,
+        name,
+        profilePicture,
+      };
       const result = await this.authService.googleAuth(googleAuthData);
 
       // Determine the appropriate message based on setup status
-      let message = "Google authentication successful";
+      let message = 'Google authentication successful';
       if (result.setupStatus) {
         if (result.setupStatus.fullyReady) {
-          message = "Google authentication successful! Your Starknet account is funded and deployed, ready to use.";
-        } else if (result.setupStatus.funding.success && !result.setupStatus.deployment.success) {
-          message = "Google authentication successful. Account is funded and deployment is pending.";
+          message =
+            'Google authentication successful! Your Starknet account is funded and deployed, ready to use.';
+        } else if (
+          result.setupStatus.funding.success &&
+          !result.setupStatus.deployment.success
+        ) {
+          message =
+            'Google authentication successful. Account is funded and deployment is pending.';
         } else if (!result.setupStatus.funding.success) {
-          message = "Google authentication successful. Auto-funding is not available at the moment.";
+          message =
+            'Google authentication successful. Auto-funding is not available at the moment.';
         }
       }
 
@@ -134,7 +156,10 @@ export class AuthController {
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Google authentication failed",
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Google authentication failed',
       });
     }
   }
@@ -146,7 +171,7 @@ export class AuthController {
       if (!token) {
         res.status(400).json({
           success: false,
-          message: "Verification token is required",
+          message: 'Verification token is required',
         });
         return;
       }
@@ -155,12 +180,13 @@ export class AuthController {
 
       res.status(200).json({
         success: true,
-        message: "Email verified successfully",
+        message: 'Email verified successfully',
       });
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Email verification failed",
+        message:
+          error instanceof Error ? error.message : 'Email verification failed',
       });
     }
   }
@@ -172,7 +198,7 @@ export class AuthController {
       if (!email) {
         res.status(400).json({
           success: false,
-          message: "Email is required",
+          message: 'Email is required',
         });
         return;
       }
@@ -181,12 +207,15 @@ export class AuthController {
 
       res.status(200).json({
         success: true,
-        message: "Verification email sent successfully",
+        message: 'Verification email sent successfully',
       });
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Failed to send verification email",
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Failed to send verification email',
       });
     }
   }
@@ -198,7 +227,7 @@ export class AuthController {
       if (!email) {
         res.status(400).json({
           success: false,
-          message: "Email is required",
+          message: 'Email is required',
         });
         return;
       }
@@ -207,12 +236,16 @@ export class AuthController {
 
       res.status(200).json({
         success: true,
-        message: "If an account with that email exists, a password reset link has been sent",
+        message:
+          'If an account with that email exists, a password reset link has been sent',
       });
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Failed to process password reset request",
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Failed to process password reset request',
       });
     }
   }
@@ -225,7 +258,7 @@ export class AuthController {
       if (!token || !password) {
         res.status(400).json({
           success: false,
-          message: "Token and new password are required",
+          message: 'Token and new password are required',
         });
         return;
       }
@@ -233,7 +266,7 @@ export class AuthController {
       if (password.length < 8) {
         res.status(400).json({
           success: false,
-          message: "Password must be at least 8 characters long",
+          message: 'Password must be at least 8 characters long',
         });
         return;
       }
@@ -242,17 +275,21 @@ export class AuthController {
 
       res.status(200).json({
         success: true,
-        message: "Password reset successfully",
+        message: 'Password reset successfully',
       });
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Password reset failed",
+        message:
+          error instanceof Error ? error.message : 'Password reset failed',
       });
     }
   }
 
-  async changePassword(req: AuthenticatedRequest, res: Response): Promise<void> {
+  async changePassword(
+    req: AuthenticatedRequest,
+    res: Response
+  ): Promise<void> {
     try {
       const { currentPassword, newPassword } = req.body;
       const userId = req.user?.userId;
@@ -260,7 +297,7 @@ export class AuthController {
       if (!userId) {
         res.status(401).json({
           success: false,
-          message: "Authentication required",
+          message: 'Authentication required',
         });
         return;
       }
@@ -268,7 +305,7 @@ export class AuthController {
       if (!currentPassword || !newPassword) {
         res.status(400).json({
           success: false,
-          message: "Current password and new password are required",
+          message: 'Current password and new password are required',
         });
         return;
       }
@@ -276,21 +313,26 @@ export class AuthController {
       if (newPassword.length < 8) {
         res.status(400).json({
           success: false,
-          message: "New password must be at least 8 characters long",
+          message: 'New password must be at least 8 characters long',
         });
         return;
       }
 
-      await this.authService.changePassword(userId, currentPassword, newPassword);
+      await this.authService.changePassword(
+        userId,
+        currentPassword,
+        newPassword
+      );
 
       res.status(200).json({
         success: true,
-        message: "Password changed successfully",
+        message: 'Password changed successfully',
       });
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Password change failed",
+        message:
+          error instanceof Error ? error.message : 'Password change failed',
       });
     }
   }
@@ -302,7 +344,7 @@ export class AuthController {
       if (!userId) {
         res.status(401).json({
           success: false,
-          message: "Authentication required",
+          message: 'Authentication required',
         });
         return;
       }
@@ -316,7 +358,8 @@ export class AuthController {
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Failed to get profile",
+        message:
+          error instanceof Error ? error.message : 'Failed to get profile',
       });
     }
   }
@@ -329,22 +372,26 @@ export class AuthController {
       if (!userId) {
         res.status(401).json({
           success: false,
-          message: "Authentication required",
+          message: 'Authentication required',
         });
         return;
       }
 
-      const updatedProfile = await this.authService.updateProfile(userId, { name, profilePicture });
+      const updatedProfile = await this.authService.updateProfile(userId, {
+        name,
+        profilePicture,
+      });
 
       res.status(200).json({
         success: true,
-        message: "Profile updated successfully",
+        message: 'Profile updated successfully',
         data: updatedProfile,
       });
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Profile update failed",
+        message:
+          error instanceof Error ? error.message : 'Profile update failed',
       });
     }
   }
@@ -356,7 +403,7 @@ export class AuthController {
       if (!userId) {
         res.status(401).json({
           success: false,
-          message: "Authentication required",
+          message: 'Authentication required',
         });
         return;
       }
@@ -365,24 +412,28 @@ export class AuthController {
 
       res.status(200).json({
         success: true,
-        message: "Account deleted successfully",
+        message: 'Account deleted successfully',
       });
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Account deletion failed",
+        message:
+          error instanceof Error ? error.message : 'Account deletion failed',
       });
     }
   }
 
-  async deployStarknetAccount(req: AuthenticatedRequest, res: Response): Promise<void> {
+  async deployStarknetAccount(
+    req: AuthenticatedRequest,
+    res: Response
+  ): Promise<void> {
     try {
       const userId = req.user?.userId;
 
       if (!userId) {
         res.status(401).json({
           success: false,
-          message: "Authentication required",
+          message: 'Authentication required',
         });
         return;
       }
@@ -392,8 +443,9 @@ export class AuthController {
       if (!user.isFunded) {
         res.status(400).json({
           success: false,
-          message: "Account must be funded before deployment. Please fund your account first.",
-          data: { isFunded: user.isFunded }
+          message:
+            'Account must be funded before deployment. Please fund your account first.',
+          data: { isFunded: user.isFunded },
         });
         return;
       }
@@ -402,25 +454,31 @@ export class AuthController {
 
       res.status(200).json({
         success: true,
-        message: "Starknet account deployed successfully",
+        message: 'Starknet account deployed successfully',
         data: result,
       });
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Starknet account deployment failed",
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Starknet account deployment failed',
       });
     }
   }
 
-  async getStarknetAccountBalance(req: AuthenticatedRequest, res: Response): Promise<void> {
+  async getStarknetAccountBalance(
+    req: AuthenticatedRequest,
+    res: Response
+  ): Promise<void> {
     try {
       const userId = req.user?.userId;
 
       if (!userId) {
         res.status(401).json({
           success: false,
-          message: "Authentication required",
+          message: 'Authentication required',
         });
         return;
       }
@@ -434,24 +492,31 @@ export class AuthController {
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Failed to get account balance",
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Failed to get account balance',
       });
     }
   }
 
-  async checkStarknetAccountStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
+  async checkStarknetAccountStatus(
+    req: AuthenticatedRequest,
+    res: Response
+  ): Promise<void> {
     try {
       const userId = req.user?.userId;
 
       if (!userId) {
         res.status(401).json({
           success: false,
-          message: "Authentication required",
+          message: 'Authentication required',
         });
         return;
       }
 
-      const isDeployed = await this.authService.isStarknetAccountDeployed(userId);
+      const isDeployed =
+        await this.authService.isStarknetAccountDeployed(userId);
 
       res.status(200).json({
         success: true,
@@ -460,20 +525,25 @@ export class AuthController {
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Failed to check account status",
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Failed to check account status',
       });
     }
   }
 
-
-  async fundUserAccount(req: AuthenticatedRequest, res: Response): Promise<void> {
+  async fundUserAccount(
+    req: AuthenticatedRequest,
+    res: Response
+  ): Promise<void> {
     try {
       const userId = req.user?.userId;
 
       if (!userId) {
         res.status(401).json({
           success: false,
-          message: "Authentication required",
+          message: 'Authentication required',
         });
         return;
       }
@@ -482,13 +552,16 @@ export class AuthController {
 
       res.status(200).json({
         success: result.success,
-        message: result.success ? "Account funded successfully" : "Failed to fund account",
+        message: result.success
+          ? 'Account funded successfully'
+          : 'Failed to fund account',
         data: result,
       });
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Failed to fund account",
+        message:
+          error instanceof Error ? error.message : 'Failed to fund account',
       });
     }
   }
@@ -504,7 +577,10 @@ export class AuthController {
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Failed to get auto-funding statistics",
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Failed to get auto-funding statistics',
       });
     }
   }
@@ -520,7 +596,10 @@ export class AuthController {
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Failed to check funded account balance",
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Failed to check funded account balance',
       });
     }
   }
@@ -532,7 +611,7 @@ export class AuthController {
       if (!addresses || !Array.isArray(addresses)) {
         res.status(400).json({
           success: false,
-          message: "Addresses array is required",
+          message: 'Addresses array is required',
         });
         return;
       }
@@ -541,30 +620,39 @@ export class AuthController {
 
       res.status(200).json({
         success: true,
-        message: "Batch funding completed",
+        message: 'Batch funding completed',
         data: results,
       });
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Failed to batch fund accounts",
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Failed to batch fund accounts',
       });
     }
   }
 
-  async getFundingConfigurationStatus(req: Request, res: Response): Promise<void> {
+  async getFundingConfigurationStatus(
+    req: Request,
+    res: Response
+  ): Promise<void> {
     try {
       const status = await this.authService.getFundingConfigurationStatus();
 
       res.status(200).json({
         success: true,
-        message: "Funding configuration status retrieved",
+        message: 'Funding configuration status retrieved',
         data: status,
       });
     } catch (error) {
       res.status(400).json({
         success: false,
-        message: error instanceof Error ? error.message : "Failed to get funding configuration status",
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Failed to get funding configuration status',
       });
     }
   }

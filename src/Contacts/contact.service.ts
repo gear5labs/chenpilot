@@ -1,7 +1,7 @@
-import { injectable } from "tsyringe";
-import { Repository } from "typeorm";
-import { Contact } from "./contact.entity";
-import AppDataSource from "../config/Datasource";
+import { injectable } from 'tsyringe';
+import { Repository } from 'typeorm';
+import { Contact } from './contact.entity';
+import AppDataSource from '../config/Datasource';
 
 @injectable()
 export default class ContactService {

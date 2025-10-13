@@ -1,8 +1,8 @@
-import { BaseTool } from "./base/BaseTool";
-import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
-import { container } from "tsyringe";
-import QaService from "../../QA/qa.service";
-import { memoryStore } from "../memory/memory";
+import { BaseTool } from './base/BaseTool';
+import { ToolMetadata, ToolResult } from '../registry/ToolMetadata';
+import { container } from 'tsyringe';
+import QaService from '../../QA/qa.service';
+import { memoryStore } from '../memory/memory';
 interface QAPayload {
   query: string;
   context?: Record<string, unknown>;
@@ -11,30 +11,30 @@ interface QAPayload {
 
 export class QATool extends BaseTool {
   metadata: ToolMetadata = {
-    name: "qa_tool",
+    name: 'qa_tool',
     description:
-      "Answer user questions about transactions, balances, and contacts.",
+      'Answer user questions about transactions, balances, and contacts.',
     parameters: {
       operation: {
-        type: "string",
-        description: "The operation to perform",
+        type: 'string',
+        description: 'The operation to perform',
         required: true,
-        enum: ["ask"],
+        enum: ['ask'],
       },
       payload: {
-        type: "object",
-        description: "Payload containing the user query and optional context",
+        type: 'object',
+        description: 'Payload containing the user query and optional context',
         required: true,
       },
     },
     examples: [
-      "who did I send STRK to yesterday?",
-      "can you help me transfer money?",
-      "is it safe to perform this transaction?",
-      "what’s my wallet balance?",
+      'who did I send STRK to yesterday?',
+      'can you help me transfer money?',
+      'is it safe to perform this transaction?',
+      'what’s my wallet balance?',
     ],
-    category: "qa",
-    version: "1.0.0",
+    category: 'qa',
+    version: '1.0.0',
   };
 
   private qaService = container.resolve(QaService);
@@ -47,34 +47,32 @@ export class QATool extends BaseTool {
 
     try {
       switch (operation) {
-        case "ask":
+        case 'ask':
           return this.ask(data, userId);
         default:
           return this.createErrorResult(
-            "qa_operation",
+            'qa_operation',
             `Unknown operation: ${operation}`
           );
       }
     } catch (error) {
-      return this.createErrorResult("qa_error", (error as Error).message);
+      return this.createErrorResult('qa_error', (error as Error).message);
     }
   }
 
   private async ask(data: QAPayload, userId: string): Promise<ToolResult> {
     if (!data?.query) {
       return this.createErrorResult(
-        "qa_query",
-        "Missing required field: query"
+        'qa_query',
+        'Missing required field: query'
       );
     }
 
     const context = memoryStore.get(userId);
     const answer = await this.qaService.answer(userId, data.query, context);
 
-    return this.createSuccessResult("qa_answer", { answer });
+    return this.createSuccessResult('qa_answer', { answer });
   }
-
-
 }
 
 export const qaTool = new QATool();

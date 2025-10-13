@@ -1,6 +1,6 @@
-import { qaTool } from "../tools/qatool";
-import { ToolDefinition } from "./ToolMetadata";
-import { toolRegistry } from "./ToolRegistry";
+import { qaTool } from '../tools/qatool';
+import { ToolDefinition } from './ToolMetadata';
+import { toolRegistry } from './ToolRegistry';
 
 export class ToolAutoDiscovery {
   private static instance: ToolAutoDiscovery;
@@ -21,21 +21,21 @@ export class ToolAutoDiscovery {
     }
 
     try {
-      const { WalletTool } = await import("../tools/wallet");
-      const { metaTool } = await import("../tools/meta");
-      const { contactTool } = await import("../tools/contact");
-      
+      const { WalletTool } = await import('../tools/wallet');
+      const { metaTool } = await import('../tools/meta');
+      const { contactTool } = await import('../tools/contact');
+
       toolRegistry.register(new WalletTool());
       toolRegistry.register(metaTool);
       toolRegistry.register(contactTool);
       toolRegistry.register(qaTool);
 
       // Register new consolidated DeFi tools
-      const { xverseTool } = await import("../tools/xverse");
-      const { vesuTool } = await import("../tools/vesu");
-      const { trovesTool } = await import("../tools/troves");
-      const { atomiqTool } = await import("../tools/atomiq");
-      
+      const { xverseTool } = await import('../tools/xverse');
+      const { vesuTool } = await import('../tools/vesu');
+      const { trovesTool } = await import('../tools/troves');
+      const { atomiqTool } = await import('../tools/atomiq');
+
       toolRegistry.register(xverseTool);
       toolRegistry.register(vesuTool);
       toolRegistry.register(trovesTool);
@@ -48,7 +48,7 @@ export class ToolAutoDiscovery {
         } tools`
       );
     } catch (error) {
-      console.error("Failed to initialize tool registry:", error);
+      console.error('Failed to initialize tool registry:', error);
       throw error;
     }
   }

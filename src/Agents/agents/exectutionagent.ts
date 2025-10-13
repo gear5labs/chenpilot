@@ -1,8 +1,8 @@
-import { WorkflowPlan } from "../types";
-import { toolRegistry } from "../registry/ToolRegistry";
-import { ToolResult } from "../registry/ToolMetadata";
-import { memoryStore } from "../memory/memory";
-import { responseAgent } from "./responseagent";
+import { WorkflowPlan } from '../types';
+import { toolRegistry } from '../registry/ToolRegistry';
+import { ToolResult } from '../registry/ToolMetadata';
+import { memoryStore } from '../memory/memory';
+import { responseAgent } from './responseagent';
 export class ExecutionAgent {
   async run(plan: WorkflowPlan, userId: string, input: string) {
     const results: ToolResult[] = [];
@@ -18,21 +18,21 @@ export class ExecutionAgent {
       } catch (error) {
         const errorResult: ToolResult = {
           action: step.action,
-          status: "error",
+          status: 'error',
           error:
-            error instanceof Error ? error.message : "Unknown error occurred",
+            error instanceof Error ? error.message : 'Unknown error occurred',
           data: { payload: step.payload },
         };
         results.push(errorResult);
       }
     }
-    const summarizedResults = results.map((r) => ({
+    const summarizedResults = results.map(r => ({
       action: r.action,
       status: r.status,
       error: r.error ?? null,
 
       payload: r.data?.payload
-        ? JSON.stringify(r.data.payload).slice(0, 80) + "..."
+        ? JSON.stringify(r.data.payload).slice(0, 80) + '...'
         : undefined,
     }));
 
@@ -42,7 +42,7 @@ export class ExecutionAgent {
       userId,
       input
     );
-    console.log(res, "resss");
+    console.log(res, 'resss');
     return { success: true, data: res?.response };
   }
 }
