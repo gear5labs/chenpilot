@@ -3,7 +3,7 @@ import {
   ToolMetadata,
   ToolResult,
   ToolPayload,
-} from "../../registry/ToolMetadata";
+} from '../../registry/ToolMetadata';
 
 export abstract class BaseTool<T extends ToolPayload = ToolPayload>
   implements ToolDefinition<T>
@@ -52,17 +52,17 @@ export abstract class BaseTool<T extends ToolPayload = ToolPayload>
    */
   private validateParameterType(value: unknown, expectedType: string): boolean {
     switch (expectedType) {
-      case "string":
-        return typeof value === "string";
-      case "number":
-        return typeof value === "number" && !isNaN(value);
-      case "boolean":
-        return typeof value === "boolean";
-      case "object":
+      case 'string':
+        return typeof value === 'string';
+      case 'number':
+        return typeof value === 'number' && !isNaN(value);
+      case 'boolean':
+        return typeof value === 'boolean';
+      case 'object':
         return (
-          typeof value === "object" && value !== null && !Array.isArray(value)
+          typeof value === 'object' && value !== null && !Array.isArray(value)
         );
-      case "array":
+      case 'array':
         return Array.isArray(value);
       default:
         return false;
@@ -78,7 +78,7 @@ export abstract class BaseTool<T extends ToolPayload = ToolPayload>
   ): ToolResult {
     return {
       action,
-      status: "success",
+      status: 'success',
       data,
     };
   }
@@ -93,11 +93,9 @@ export abstract class BaseTool<T extends ToolPayload = ToolPayload>
   ): ToolResult {
     return {
       action,
-      status: "error",
+      status: 'error',
       error,
       data,
     };
   }
 }
-
-

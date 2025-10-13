@@ -1,19 +1,19 @@
-import { Account, RpcProvider, Contract, uint256 } from "starknet";
-import tokenAbi from "../../abis/token.json";
+import { Account, RpcProvider, Contract, uint256 } from 'starknet';
+import tokenAbi from '../../abis/token.json';
 import {
   STRKTokenAddress,
   ETHTokenAddress,
   DAITokenAddress,
-} from "../../constants/tokenaddresses";
-import { BaseTool } from "./base/BaseTool";
-import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
-import ContactService from "../../Contacts/contact.service";
-import { AuthService } from "../../Auth/auth.service";
-import { container } from "tsyringe";
-import { StarknetService } from "../../Auth/starknet.service";
-import { AutoFundingService } from "../../Auth/auto-funding.service";
-import { EncryptionService } from "../../Auth/encryption.service";
-import config from "../../config/config";
+} from '../../constants/tokenaddresses';
+import { BaseTool } from './base/BaseTool';
+import { ToolMetadata, ToolResult } from '../registry/ToolMetadata';
+import ContactService from '../../Contacts/contact.service';
+import { AuthService } from '../../Auth/auth.service';
+import { container } from 'tsyringe';
+import { StarknetService } from '../../Auth/starknet.service';
+import { AutoFundingService } from '../../Auth/auto-funding.service';
+import { EncryptionService } from '../../Auth/encryption.service';
+import config from '../../config/config';
 const tokensMap: Record<supportedTokens, string> = {
   DAI: DAITokenAddress,
   STRK: STRKTokenAddress,
@@ -29,7 +29,7 @@ interface AccountData {
   contract_address?: string;
 }
 
-type supportedTokens = "STRK" | "ETH" | "DAI";
+type supportedTokens = 'STRK' | 'ETH' | 'DAI';
 
 // System accounts configuration - loaded from environment variables
 const getSystemAccounts = (): AccountData[] => {
@@ -39,18 +39,20 @@ const getSystemAccounts = (): AccountData[] => {
   const deployed = process.env.FUNDED_ACCOUNT_DEPLOYED === 'true';
 
   if (!privateKey || !publicKey || !address) {
-    throw new Error('Missing required environment variables for funded account: FUNDED_ACCOUNT_PRIVATE_KEY, FUNDED_ACCOUNT_PUBLIC_KEY, FUNDED_ACCOUNT_ADDRESS');
+    throw new Error(
+      'Missing required environment variables for funded account: FUNDED_ACCOUNT_PRIVATE_KEY, FUNDED_ACCOUNT_PUBLIC_KEY, FUNDED_ACCOUNT_ADDRESS'
+    );
   }
 
   return [
     {
-      userId: "funded-account",
+      userId: 'funded-account',
       privateKey,
       publicKey,
       precalculatedAddress: address,
       deployed,
-      contract_address: undefined
-    }
+      contract_address: undefined,
+    },
   ];
 };
 
@@ -61,63 +63,63 @@ interface BalancePayload {
 interface TransferPayload {
   to: string;
   amount: number;
-  token?: "STRK" | "ETH";
+  token?: 'STRK' | 'ETH';
 }
 
 export class WalletTool extends BaseTool {
   metadata: ToolMetadata = {
-    name: "wallet_tool",
+    name: 'wallet_tool',
     description:
-      "Wallet operations including balance checking, transfers, and address retrieval",
+      'Wallet operations including balance checking, transfers, and address retrieval',
     parameters: {
       operation: {
-        type: "string",
-        description: "The wallet operation to perform",
+        type: 'string',
+        description: 'The wallet operation to perform',
         required: true,
-        enum: ["get_balance", "transfer", "get_address"],
+        enum: ['get_balance', 'transfer', 'get_address'],
       },
       token: {
-        type: "string",
-        description: "Token symbol for balance operations",
+        type: 'string',
+        description: 'Token symbol for balance operations',
         required: false,
-        enum: ["STRK", "ETH", "DAI"],
+        enum: ['STRK', 'ETH', 'DAI'],
       },
       to: {
-        type: "string",
-        description: "Recipient address for transfers",
+        type: 'string',
+        description: 'Recipient address for transfers',
         required: false,
       },
       amount: {
-        type: "number",
-        description: "Amount to transfer",
+        type: 'number',
+        description: 'Amount to transfer',
         required: false,
         min: 0,
       },
     },
     examples: [
-      "Check my STRK balance",
-      "Transfer 100 STRK to 0x123...",
-      "Get my wallet address",
+      'Check my STRK balance',
+      'Transfer 100 STRK to 0x123...',
+      'Get my wallet address',
     ],
-    category: "wallet",
-    version: "1.0.0",
+    category: 'wallet',
+    version: '1.0.0',
   };
 
   private accounts: AccountData[];
   private provider: RpcProvider;
   private contactService: ContactService;
   private authService: AuthService;
-  
+
   constructor() {
     super();
     this.accounts = getSystemAccounts();
     this.provider = new RpcProvider({
       nodeUrl: config.node_url,
     });
-    
+
     // Create service instances directly
     this.contactService = new ContactService();
-    
+
     // Create AuthService with its dependencies using tsyringe container
     const starknetService = container.resolve(StarknetService);
     const encryptionService = container.resolve(EncryptionService);
@@ -135,16 +137,18 @@ export class WalletTool extends BaseTool {
         publicKey: userAccountData.publicKey,
         precalculatedAddress: userAccountData.precalculatedAddress,
         deployed: userAccountData.deployed,
-        contract_address: userAccountData.contract_address
+        contract_address: userAccountData.contract_address,
       };
     } catch (error) {
       // If not found in database, check if it's a system account
-      const systemAccount = this.accounts.find((a) => a.userId === userId);
+      const systemAccount = this.accounts.find(a => a.userId === userId);
       if (systemAccount) {
         return systemAccount;
       }
-      
-      throw new Error(`Account not found: ${userId}. ${error instanceof Error ? error.message : 'Unknown error'}`);
+
+      throw new Error(
+        `Account not found: ${userId}. ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   }
 
@@ -165,15 +169,15 @@ export class WalletTool extends BaseTool {
     const operation = payload.operation as string;
 
     switch (operation) {
-      case "get_balance":
+      case 'get_balance':
         return this.getBalance(payload as unknown as BalancePayload, userId);
-      case "transfer":
+      case 'transfer':
         return this.transfer(payload as unknown as TransferPayload, userId);
-      case "get_address":
+      case 'get_address':
         return this.getWalletAddress(userId);
       default:
         return this.createErrorResult(
-          "wallet_operation",
+          'wallet_operation',
           `Unknown operation: ${operation}`
         );
     }
@@ -189,13 +193,13 @@ export class WalletTool extends BaseTool {
       const acct = await this.getStarkAccount(userId);
 
       const contractAddress = tokensMap[payload.token];
-      if (!contractAddress) throw new Error("invalid token ");
+      if (!contractAddress) throw new Error('invalid token ');
       const contract = new Contract(tokenAbi, contractAddress, acct);
       const balance = await contract.balanceOf(
         accountData.precalculatedAddress
       );
 
-      return this.createSuccessResult("wallet_balance", {
+      return this.createSuccessResult('wallet_balance', {
         balance: `${(Number(balance.balance.toString()) / 10 ** 18).toFixed(
           2
         )} ${payload.token}`,
@@ -204,9 +208,9 @@ export class WalletTool extends BaseTool {
       });
     } catch (error) {
       return this.createErrorResult(
-        "wallet_balance",
+        'wallet_balance',
         `Failed to get balance: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
     }
@@ -228,13 +232,13 @@ export class WalletTool extends BaseTool {
       const amount = uint256.bnToUint256(payload.amount * 10 ** 18);
       const tx = await starkAccount.execute({
         contractAddress: tokenAddress,
-        entrypoint: "transfer",
+        entrypoint: 'transfer',
         calldata: [payload.to, amount.low, amount.high],
       });
 
       await starkAccount.waitForTransaction(tx.transaction_hash);
 
-      return this.createSuccessResult("transfer", {
+      return this.createSuccessResult('transfer', {
         from: starkAccount.address,
         to: payload.to,
         amount: payload.amount,
@@ -242,9 +246,9 @@ export class WalletTool extends BaseTool {
       });
     } catch (error) {
       return this.createErrorResult(
-        "transfer",
+        'transfer',
         `Transfer failed: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
     }
@@ -253,18 +257,17 @@ export class WalletTool extends BaseTool {
   private async getWalletAddress(userId: string): Promise<ToolResult> {
     try {
       const account = await this.getAccount(userId);
-      return this.createSuccessResult("address", {
+      return this.createSuccessResult('address', {
         address: account.precalculatedAddress,
-        message: `Your wallet address is: ${account.precalculatedAddress}`
+        message: `Your wallet address is: ${account.precalculatedAddress}`,
       });
     } catch (error) {
       return this.createErrorResult(
-        "address",
+        'address',
         `Failed to get address: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
     }
   }
 }
-

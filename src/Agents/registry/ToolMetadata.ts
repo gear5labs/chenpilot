@@ -1,9 +1,9 @@
 export type ParameterType =
-  | "string"
-  | "number"
-  | "boolean"
-  | "object"
-  | "array";
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'object'
+  | 'array';
 
 export interface ParameterDefinition {
   type: ParameterType;
@@ -32,7 +32,7 @@ export interface ToolDefinition<T = Record<string, unknown>> {
 
 export interface ToolResult {
   action: string;
-  status: "success" | "error";
+  status: 'success' | 'error';
   message?: string;
   data?: Record<string, unknown>;
   error?: string;
@@ -52,4 +52,3 @@ export interface ToolRegistryEntry {
   enabled: boolean;
   lastUsed?: Date;
 }
-

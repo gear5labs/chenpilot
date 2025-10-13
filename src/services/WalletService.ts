@@ -17,9 +17,8 @@ export interface WalletService {
   validatePrivateKey(privateKey: string): boolean;
 }
 
-import { container } from "tsyringe";
-import { AuthService } from "../Auth/auth.service";
-
+import { container } from 'tsyringe';
+import { AuthService } from '../Auth/auth.service';
 
 export class ProductionWalletService implements WalletService {
   private authService: AuthService;
@@ -31,19 +30,21 @@ export class ProductionWalletService implements WalletService {
   async getUserAccountData(userId: string): Promise<UserAccountData> {
     try {
       const userAccountData = await this.authService.getUserAccountData(userId);
-      
+
       return {
         userId: userAccountData.userId,
         privateKey: userAccountData.privateKey,
         publicKey: userAccountData.publicKey,
         address: userAccountData.precalculatedAddress,
-        chainId: "SN_SEPOLIA",
+        chainId: 'SN_SEPOLIA',
         isActive: userAccountData.deployed,
         createdAt: new Date(),
         lastUsed: new Date(),
       };
     } catch (error) {
-      throw new Error(`Failed to get user account data: ${error instanceof Error ? error.message : "Unknown error"}`);
+      throw new Error(
+        `Failed to get user account data: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   }
 
@@ -62,13 +63,14 @@ export class ProductionWalletService implements WalletService {
   }
 
   async createWallet(userId: string): Promise<UserAccountData> {
-    throw new Error("Wallet creation is handled by the existing AuthService - use AuthService.createUser() instead");
+    throw new Error(
+      'Wallet creation is handled by the existing AuthService - use AuthService.createUser() instead'
+    );
   }
 
   validatePrivateKey(privateKey: string): boolean {
     return /^0x[a-fA-F0-9]{64}$/.test(privateKey);
   }
 }
-
 
 export const walletService: WalletService = new ProductionWalletService();

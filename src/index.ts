@@ -1,14 +1,14 @@
-require("dotenv").config();
+require('dotenv').config();
 
-import "reflect-metadata";
-import http from "http";
-import app from "./Gateway/api";
-import config from "./config/config";
-import AppDataSource from "./config/Datasource";
-import { atomiqService } from "./services/AtomiqService";
-import { vesuService } from "./services/VesuService";
-import { xverseService } from "./services/XVerseService";
-import { trovesService } from "./services/TrovesService";
+import 'reflect-metadata';
+import http from 'http';
+import app from './Gateway/api';
+import config from './config/config';
+import AppDataSource from './config/Datasource';
+import { atomiqService } from './services/AtomiqService';
+import { vesuService } from './services/VesuService';
+import { xverseService } from './services/XVerseService';
+import { trovesService } from './services/TrovesService';
 
 class Server {
   private server: http.Server;
@@ -22,70 +22,77 @@ class Server {
   public async start(): Promise<void> {
     try {
       const shutdown = async () => {
-        console.log("Shutting down gracefully...");
+        console.log('Shutting down gracefully...');
         if (AppDataSource.isInitialized) {
           await AppDataSource.destroy();
         }
         this.server.close(() => {
-          console.log("Server closed");
+          console.log('Server closed');
           process.exit(0);
         });
       };
-      
+
       // Only initialize database if not already initialized
       if (!AppDataSource.isInitialized) {
         await AppDataSource.initialize();
-        console.log("db connected successfully");
+        console.log('db connected successfully');
       } else {
-        console.log("db already connected");
+        console.log('db already connected');
       }
 
       // Initialize AtomiqService asynchronously (non-blocking)
-      atomiqService.initialize()
+      atomiqService
+        .initialize()
         .then(() => {
-          console.log("AtomiqService initialized successfully");
+          console.log('AtomiqService initialized successfully');
         })
-        .catch((error) => {
-          console.error("Failed to initialize AtomiqService:", error);
-          console.log("Server will continue with limited swap functionality");
+        .catch(error => {
+          console.error('Failed to initialize AtomiqService:', error);
+          console.log('Server will continue with limited swap functionality');
         });
 
       // Initialize VesuService asynchronously (non-blocking)
-      vesuService.initialize()
+      vesuService
+        .initialize()
         .then(() => {
-          console.log("VesuService initialized successfully");
+          console.log('VesuService initialized successfully');
         })
-        .catch((error) => {
-          console.error("Failed to initialize VesuService:", error);
-          console.log("Server will continue with limited DeFi functionality");
+        .catch(error => {
+          console.error('Failed to initialize VesuService:', error);
+          console.log('Server will continue with limited DeFi functionality');
         });
 
       // Initialize XVerse service asynchronously (non-blocking)
-      xverseService.healthCheck()
+      xverseService
+        .healthCheck()
         .then(() => {
-          console.log("XVerse service initialized successfully");
+          console.log('XVerse service initialized successfully');
         })
-        .catch((error) => {
-          console.error("Failed to initialize XVerse service:", error);
-          console.log("Server will continue with limited Bitcoin functionality");
+        .catch(error => {
+          console.error('Failed to initialize XVerse service:', error);
+          console.log(
+            'Server will continue with limited Bitcoin functionality'
+          );
         });
 
       // Initialize TrovesService asynchronously (non-blocking)
-      trovesService.initialize()
+      trovesService
+        .initialize()
         .then(() => {
-          console.log("TrovesService initialized successfully");
+          console.log('TrovesService initialized successfully');
         })
-        .catch((error) => {
-          console.error("Failed to initialize TrovesService:", error);
-          console.log("Server will continue with limited yield farming functionality");
+        .catch(error => {
+          console.error('Failed to initialize TrovesService:', error);
+          console.log(
+            'Server will continue with limited yield farming functionality'
+          );
         });
 
-      
-      process.on("SIGTERM", shutdown);
-      process.on("SIGINT", shutdown);
+      process.on('SIGTERM', shutdown);
+      process.on('SIGINT', shutdown);
 
-      this.server.on("error", (error: NodeJS.ErrnoException) => {
-        if (error.code === "EADDRINUSE") {
+      this.server.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EADDRINUSE') {
           console.log(
             `Port ${this.port} in use, retrying on ${this.port + 1}...`
           );
@@ -95,7 +102,7 @@ class Server {
           this.server = http.createServer(app);
           this.start();
         } else {
-          console.error("Server error:", error);
+          console.error('Server error:', error);
           process.exit(1);
         }
       });
@@ -104,7 +111,7 @@ class Server {
         console.log(`Server running on port ${this.port}`);
       });
     } catch (error) {
-      console.error("Error during server startup:", error);
+      console.error('Error during server startup:', error);
       process.exit(1);
     }
   }

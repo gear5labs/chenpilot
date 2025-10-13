@@ -1,5 +1,5 @@
-import { injectable } from "tsyringe";
-import crypto from "crypto";
+import { injectable } from 'tsyringe';
+import crypto from 'crypto';
 
 export interface EncryptedData {
   encryptedData: string;
@@ -20,18 +20,19 @@ export class EncryptionService {
 
   private validateEncryptionKey(): void {
     const encryptionKey = process.env.PRIVATE_KEY_ENCRYPTION_KEY;
-    
+
     if (!encryptionKey) {
       throw new Error(
         'PRIVATE_KEY_ENCRYPTION_KEY environment variable is required. ' +
-        'Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+          "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
       );
     }
 
-    if (encryptionKey.length !== 64) { // 32 bytes = 64 hex characters
+    if (encryptionKey.length !== 64) {
+      // 32 bytes = 64 hex characters
       throw new Error(
         'PRIVATE_KEY_ENCRYPTION_KEY must be 64 characters long (32 bytes). ' +
-        'Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+          "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
       );
     }
   }
@@ -53,22 +54,24 @@ export class EncryptionService {
     try {
       const key = this.getEncryptionKey();
       const iv = crypto.randomBytes(this.ivLength);
-      
+
       const cipher = crypto.createCipheriv(this.algorithm, key, iv);
       cipher.setAAD(Buffer.from('starknet-private-key', 'utf8')); // Additional authenticated data
-      
+
       let encrypted = cipher.update(privateKey, 'utf8', 'hex');
       encrypted += cipher.final('hex');
-      
+
       const tag = cipher.getAuthTag();
-      
+
       return {
         encryptedData: encrypted,
         iv: iv.toString('hex'),
-        tag: tag.toString('hex')
+        tag: tag.toString('hex'),
       };
     } catch (error) {
-      throw new Error(`Failed to encrypt private key: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(
+        `Failed to encrypt private key: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   }
 
@@ -82,17 +85,23 @@ export class EncryptionService {
       const key = this.getEncryptionKey();
       const iv = Buffer.from(encryptedData.iv, 'hex');
       const tag = Buffer.from(encryptedData.tag, 'hex');
-      
+
       const decipher = crypto.createDecipheriv(this.algorithm, key, iv);
       decipher.setAAD(Buffer.from('starknet-private-key', 'utf8')); // Additional authenticated data
       decipher.setAuthTag(tag);
-      
-      let decrypted = decipher.update(encryptedData.encryptedData, 'hex', 'utf8');
+
+      let decrypted = decipher.update(
+        encryptedData.encryptedData,
+        'hex',
+        'utf8'
+      );
       decrypted += decipher.final('utf8');
-      
+
       return decrypted;
     } catch (error) {
-      throw new Error(`Failed to decrypt private key: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(
+        `Failed to decrypt private key: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   }
 
@@ -116,7 +125,9 @@ export class EncryptionService {
       const encryptedData: EncryptedData = JSON.parse(encryptedJson);
       return this.decryptPrivateKey(encryptedData);
     } catch (error) {
-      throw new Error(`Failed to decrypt private key from storage: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(
+        `Failed to decrypt private key from storage: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   }
 
@@ -135,7 +146,7 @@ export class EncryptionService {
         typeof parsed.tag === 'string' &&
         parsed.encryptedData.length > 0 &&
         parsed.iv.length === 32 && // 16 bytes = 32 hex characters
-        parsed.tag.length === 32    // 16 bytes = 32 hex characters
+        parsed.tag.length === 32 // 16 bytes = 32 hex characters
       );
     } catch {
       return false;

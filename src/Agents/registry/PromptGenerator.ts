@@ -1,5 +1,5 @@
-import { ToolMetadata } from "./ToolMetadata";
-import { toolRegistry } from "./ToolRegistry";
+import { ToolMetadata } from './ToolMetadata';
+import { toolRegistry } from './ToolRegistry';
 
 export class PromptGenerator {
   /**
@@ -12,7 +12,7 @@ export class PromptGenerator {
       return this.getEmptyPrompt();
     }
 
-    const actionTypes = tools.map((tool) => `"${tool.name}"`).join(" | ");
+    const actionTypes = tools.map(tool => `"${tool.name}"`).join(' | ');
     const parameterSchemas = this.generateParameterSchemas(tools);
     const examples = this.generateExamples(tools);
 
@@ -58,20 +58,18 @@ Respond with valid JSON only.
    */
   generateValidationPrompt(): string {
     const tools = toolRegistry.getToolMetadata();
-    const categories = [...new Set(tools.map((tool) => tool.category))];
+    const categories = [...new Set(tools.map(tool => tool.category))];
 
     const categoryDescriptions = categories
-      .map((category) => {
-        const categoryTools = tools.filter(
-          (tool) => tool.category === category
-        );
-        const toolNames = categoryTools.map((tool) => tool.name).join(", ");
+      .map(category => {
+        const categoryTools = tools.filter(tool => tool.category === category);
+        const toolNames = categoryTools.map(tool => tool.name).join(', ');
         const toolDescriptions = categoryTools
-          .map((tool) => tool.description)
-          .join(", ");
+          .map(tool => tool.description)
+          .join(', ');
         return `- ${category} operations (${toolNames})  description:${toolDescriptions}`;
       })
-      .join("\n");
+      .join('\n');
 
     return `
 You are a validation agent. 
@@ -137,40 +135,40 @@ e.g {response: your wallet balance is 1strk}
    */
   private generateParameterSchemas(tools: ToolMetadata[]): string {
     return tools
-      .map((tool) => {
+      .map(tool => {
         const params = Object.entries(tool.parameters)
           .map(([paramName, paramDef]) => {
-            const required = paramDef.required ? "required" : "optional";
+            const required = paramDef.required ? 'required' : 'optional';
             const type = paramDef.type;
             const description = paramDef.description;
             return `        //   "${paramName}": ${type} (${required}) - ${description}`;
           })
-          .join("\n");
+          .join('\n');
 
         return `        // For ${tool.name}:\n${params}`;
       })
-      .join("\n\n");
+      .join('\n\n');
   }
   /**
    * Generate action descriptions for the LLM
    */
   private generateActionDescriptions(tools: ToolMetadata[]): string {
     return tools
-      .map((tool) => {
+      .map(tool => {
         const params = Object.entries(tool.parameters)
           .map(([paramName, paramDef]) => {
-            const required = paramDef.required ? "*" : "";
+            const required = paramDef.required ? '*' : '';
 
             const type = paramDef.enum
-              ? paramDef.enum.map((v: string) => `"${v}"`).join(" | ")
+              ? paramDef.enum.map((v: string) => `"${v}"`).join(' | ')
               : paramDef.type;
             return `${paramName}${required} (${type}): ${paramDef.description}`;
           })
-          .join(", ");
+          .join(', ');
 
         return `- ${tool.name}: ${tool.description}\n  Parameters: ${params}`;
       })
-      .join("\n");
+      .join('\n');
   }
 
   /**
@@ -179,15 +177,15 @@ e.g {response: your wallet balance is 1strk}
   private generateExamples(tools: ToolMetadata[]): string {
     const allExamples: string[] = [];
 
-    tools.forEach((tool) => {
-      tool.examples.forEach((example) => {
+    tools.forEach(tool => {
+      tool.examples.forEach(example => {
         allExamples.push(`"${example}"`);
       });
     });
 
     return allExamples.length > 0
-      ? allExamples.map((example) => `- ${example}`).join("\n")
-      : "No examples available";
+      ? allExamples.map(example => `- ${example}`).join('\n')
+      : 'No examples available';
   }
 
   /**
@@ -218,10 +216,10 @@ Respond with: {"workflow": []}
       const { metadata } = tool;
       const params = Object.entries(metadata.parameters)
         .map(([paramName, paramDef]) => {
-          const required = paramDef.required ? " (required)" : " (optional)";
+          const required = paramDef.required ? ' (required)' : ' (optional)';
           return `  - ${paramName}: ${paramDef.type}${required} - ${paramDef.description}`;
         })
-        .join("\n");
+        .join('\n');
 
       return `
 Tool: ${metadata.name}
@@ -233,7 +231,7 @@ Parameters:
 ${params}
 
 Examples:
-${metadata.examples.map((example) => `  - ${example}`).join("\n")}
+${metadata.examples.map(example => `  - ${example}`).join('\n')}
 `;
     }
 
@@ -243,15 +241,15 @@ ${metadata.examples.map((example) => `  - ${example}`).join("\n")}
 
     let help = `Available Tools (${tools.length} total):\n\n`;
 
-    categories.forEach((category) => {
+    categories.forEach(category => {
       const categoryTools = tools.filter(
-        (tool) => tool.metadata.category === category
+        tool => tool.metadata.category === category
       );
       help += `${category.toUpperCase()}:\n`;
-      categoryTools.forEach((tool) => {
+      categoryTools.forEach(tool => {
         help += `  - ${tool.metadata.name}: ${tool.metadata.description}\n`;
       });
-      help += "\n";
+      help += '\n';
     });
 
     return help;
