@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 import "reflect-metadata";
 import http from "http";
 import app from "./Gateway/api";

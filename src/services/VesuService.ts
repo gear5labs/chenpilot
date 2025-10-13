@@ -15,19 +15,16 @@ export class VesuService {
   private config: VesuConfig;
 
   constructor() {
-    // Configuration for Vesu protocol
     this.config = {
       rpcUrl: "https://starknet-sepolia.public.blastapi.io/rpc/v0_7",
       network: "sepolia",
       contractAddresses: {
-        // Vesu V2 Core Contracts
         poolFactory: "0x3760f903a37948f97302736f89ce30290e45f441559325026842b7a6fb388c0",
         oracle: "0xfe4bfb1b353ba51eb34dff963017f94af5a5cf8bdf3dfc191c504657f3c05",
         multiply: "0x7964760e90baa28841ec94714151e03fbc13321797e68a874e88f27c9d58513",
         liquidate: "0x6b895ba904fb8f02ed0d74e343161de48e611e9e771be4cc2c997501dbfb418",
         defiSpringDistributor: "0x387f3eb1d98632fbe3440a9f1385aec9d87b6172491d3dd81f1c35a7c61048f",
         btcFiDistributor: "0x47ba31cdfc2db9bd20ab8a5b2788f877964482a8548a6e366ce56228ea22fa8",
-        // Vesu V2 Pools
         primePool: "0x451fe483d5921a2919ddd81d0de6696669bccdacd859f72a4fba7656b97c3b5",
         re7UsdcCore: "0x3976cac265a12609934089004df458ea29c776d77da423c96dc761d09d24124",
         re7UsdcPrime: "0x2eef0c13b10b487ea5916b54c0a7f98ec43fb3048f60fdeedaf5b08f6f88aaf",
@@ -41,16 +38,11 @@ export class VesuService {
 
   async initialize(): Promise<void> {
     try {
-      // Initialize Starknet provider
       this.provider = new RpcProvider({
         nodeUrl: this.config.rpcUrl
       });
 
-
-      console.log("VesuService initialized successfully");
-      console.log("Note: Vesu uses vToken architecture - each pool has its own vToken contract");
     } catch (error) {
-      console.error("Failed to initialize VesuService:", error);
       throw new Error(`VesuService initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -100,14 +92,12 @@ export class VesuService {
           vTokenSymbol: asset.vToken.symbol,
           borrowApr: Number(asset.stats.borrowApr.value) / Math.pow(10, asset.stats.borrowApr.decimals) * 100,
           usdPrice: Number(asset.usdPrice.value) / Math.pow(10, asset.usdPrice.decimals),
-          poolName: pool.name
+          poolName: pool.name || pool.id || `${asset.symbol} Pool`
         };
       }).filter((pool: any) => pool !== null);
 
-      console.log(`Fetched ${transformedPools.length} pools from Vesu API`);
       return transformedPools;
     } catch (error) {
-      console.error("Error fetching available pools from Vesu API:", error);
       throw new Error(`Failed to fetch pools: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -170,14 +160,11 @@ export class VesuService {
             });
           }
         } catch (error) {
-          console.warn(`Failed to get balance for pool ${pool.id}:`, error);
-          // Continue with other pools
         }
       }
 
       return positions;
     } catch (error) {
-      console.error("Error fetching user positions:", error);
       throw new Error(`Failed to fetch user positions: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -205,7 +192,6 @@ export class VesuService {
         timeHorizon
       };
     } catch (error) {
-      console.error("Error getting best yield quote:", error);
       throw new Error(`Failed to get yield quote: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -334,7 +320,6 @@ export class VesuService {
         transactionHash: response.transaction_hash
       };
     } catch (error) {
-      console.error("Error executing lending operation:", error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -388,7 +373,6 @@ export class VesuService {
         recommendations
       };
     } catch (error) {
-      console.error("Error checking health factor:", error);
       throw new Error(`Failed to check health factor: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -405,7 +389,6 @@ export class VesuService {
         };
       }
 
-      // Test connection by fetching available pools from real API
       const pools = await this.getAvailablePools();
       const apiStatus = await this.testVesuApiConnection();
       
@@ -467,7 +450,6 @@ export class VesuService {
       const pools = await this.getAvailablePools();
       return pools.find(pool => pool.asset === assetSymbol.toUpperCase()) || null;
     } catch (error) {
-      console.error(`Error fetching pool for asset ${assetSymbol}:`, error);
       return null;
     }
   }
@@ -512,8 +494,41 @@ export class VesuService {
         averageUtilization: Math.round(averageUtilization * 100) / 100
       };
     } catch (error) {
-      console.error("Error calculating pool stats:", error);
       throw new Error(`Failed to get pool stats: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Get native STRK balance for an account
+   */
+  async getNativeSTRKBalance(address: string): Promise<{ balance: string; formatted: string }> {
+    try {
+      // STRK token contract address on Starknet mainnet
+      const strkTokenAddress = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
+      
+      // ERC20 balanceOf function selector
+      const balanceOfSelector = "0x2e42684afd9ff2fdb8ea8e9d9b29a9a468420ce969663ce48f8c417e2ae5a7b";
+      
+      // Call balanceOf on STRK token contract
+      const result = await this.provider.callContract({
+        contractAddress: strkTokenAddress,
+        entrypoint: "balanceOf",
+        calldata: [address]
+      });
+
+      // Extract balance from result (first element is the balance)
+      const balance = result[0];
+      const formattedBalance = (Number(balance) / Math.pow(10, 18)).toFixed(6);
+
+      return {
+        balance: balance,
+        formatted: formattedBalance
+      };
+    } catch (error) {
+      return {
+        balance: "0",
+        formatted: "0.000000"
+      };
     }
   }
 }

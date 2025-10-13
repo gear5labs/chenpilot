@@ -9,7 +9,6 @@ export interface VesuPool {
   totalBorrowed: string;
   utilizationRate: number;
   isActive: boolean;
-  // Additional Vesu-specific fields
   vTokenAddress?: string;
   vTokenSymbol?: string;
   borrowApr?: number;
@@ -42,7 +41,7 @@ export interface VesuQuote {
   amount: string;
   apy: number;
   estimatedYield: string;
-  timeHorizon: number; // in days
+  timeHorizon: number;
 }
 
 export interface VesuHealthCheck {
@@ -56,14 +55,12 @@ export interface VesuConfig {
   rpcUrl: string;
   network: 'mainnet' | 'sepolia';
   contractAddresses: {
-    // Vesu V2 Core Contracts
     poolFactory: string;
     oracle: string;
     multiply: string;
     liquidate: string;
     defiSpringDistributor: string;
     btcFiDistributor: string;
-    // Vesu V2 Pools
     primePool: string;
     re7UsdcCore: string;
     re7UsdcPrime: string;

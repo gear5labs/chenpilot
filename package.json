@@ -44,6 +44,7 @@
     "passport-jwt": "^4.0.1",
     "pg": "^8.16.3",
     "reflect-metadata": "^0.2.2",
+    "sqlite3": "5.1.7",
     "starknet": "^7.6.4",
     "tiny-secp256k1": "^2.2.4",
     "ts-node": "^10.9.2",

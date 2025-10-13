@@ -1,12 +1,9 @@
-// Troves.fi Types
 export interface TrovesConfig {
   rpcUrl: string;
   network: 'mainnet' | 'sepolia';
   contractAddresses: {
-    // Troves core contracts from https://docs.troves.fi/p/developers/contracts
     accessControl: string;
     timelock: string;
-    // Individual vault contracts are now fetched dynamically from Troves API
   };
   supportedAssets: string[];
   apiBaseUrl?: string;
@@ -108,13 +105,27 @@ export interface TrovesHealthCheck {
 export interface TrovesYieldData {
   vaultId: string;
   asset: string;
+  vaultName: string;
   currentApy: number;
-  historicalApy: number[];
-  totalYield: string;
-  dailyYield: string;
-  weeklyYield: string;
-  monthlyYield: string;
+  historicalApy: Array<{
+    period: string;
+    apy: number;
+  }>;
+  yields: Array<{
+    positionSize: number;
+    dailyYield: string;
+    weeklyYield: string;
+    monthlyYield: string;
+    annualYield: string;
+  }>;
+  tvl: string;
+  riskLevel: string;
   lastUpdated: Date;
+  performanceMetrics: {
+    sharpeRatio: number;
+    volatility: number;
+    maxDrawdown: number;
+  };
 }
 
 export interface TrovesHarvestOperation {

@@ -22,46 +22,24 @@ export class ToolAutoDiscovery {
 
     try {
       const { WalletTool } = await import("../tools/wallet");
-      toolRegistry.register(new WalletTool());
-
-      const { swapTool } = await import("../tools/swap");
-      toolRegistry.register(swapTool);
       const { metaTool } = await import("../tools/meta");
-      toolRegistry.register(metaTool);
       const { contactTool } = await import("../tools/contact");
-      const { crossChainSwapTool } = await import("../tools/crossChainSwap");
-      const { swapStateManagerTool } = await import("../tools/swapStateManager");
-      const { trovesTool } = await import("../tools/troves");
       
-      // Import Bitcoin tools
-      const { 
-        bitcoinBalanceTool,
-        bitcoinUTXOsTool,
-        bitcoinTransactionsTool,
-        bitcoinTransactionTool,
-        bitcoinPriceTool,
-        bitcoinCreateTransactionTool,
-        bitcoinSendTransactionTool,
-        bitcoinCreateWalletTool,
-        bitcoinValidateAddressTool
-      } = await import("../tools/bitcoin");
-      
-      toolRegistry.register(qaTool);
+      toolRegistry.register(new WalletTool());
+      toolRegistry.register(metaTool);
       toolRegistry.register(contactTool);
-      toolRegistry.register(crossChainSwapTool);
-      toolRegistry.register(swapStateManagerTool);
-      toolRegistry.register(trovesTool);
+      toolRegistry.register(qaTool);
+
+      // Register new consolidated DeFi tools
+      const { xverseTool } = await import("../tools/xverse");
+      const { vesuTool } = await import("../tools/vesu");
+      const { trovesTool } = await import("../tools/troves");
+      const { atomiqTool } = await import("../tools/atomiq");
       
-      // Register Bitcoin tools
-      toolRegistry.register(bitcoinBalanceTool);
-      toolRegistry.register(bitcoinUTXOsTool);
-      toolRegistry.register(bitcoinTransactionsTool);
-      toolRegistry.register(bitcoinTransactionTool);
-      toolRegistry.register(bitcoinPriceTool);
-      toolRegistry.register(bitcoinCreateTransactionTool);
-      toolRegistry.register(bitcoinSendTransactionTool);
-      toolRegistry.register(bitcoinCreateWalletTool);
-      toolRegistry.register(bitcoinValidateAddressTool);
+      toolRegistry.register(xverseTool);
+      toolRegistry.register(vesuTool);
+      toolRegistry.register(trovesTool);
+      toolRegistry.register(atomiqTool);
 
       this.initialized = true;
       console.log(

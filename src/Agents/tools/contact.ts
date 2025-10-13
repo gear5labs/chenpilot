@@ -27,7 +27,7 @@ export class ContactTool extends BaseTool {
       },
       payload: {
         type: "object",
-        description: "Payload for the operation",
+        description: "Payload for the operation. For create: {name: string, address: string, tokenType: 'STRK'|'ETH'|'DAI'}. For delete: {id: string}. For list: empty object",
         required: false,
       },
     },

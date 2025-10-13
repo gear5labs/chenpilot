@@ -11,9 +11,9 @@ import {
 } from "../utils/error";
 import authRoutes from "../Auth/auth.routes";
 import vesuRoutes from "./vesu.routes";
-import bitcoinRoutes from "./bitcoin.routes";
 import trovesRoutes from "./troves.routes";
-import chatRoutes from "../Chat/chat.routes";
+import xverseRoutes from "./xverse.routes";
+import atomiqRoutes from "./atomiq.routes";
 
 const app = express();
 
@@ -26,14 +26,15 @@ app.use("/auth", authRoutes);
 // Vesu DeFi routes
 app.use("/vesu", vesuRoutes);
 
-// Bitcoin routes
-app.use("/bitcoin", bitcoinRoutes);
-
 // Troves yield farming routes
 app.use("/troves", trovesRoutes);
 
-// Chat routes
-app.use("/chat", chatRoutes);
+// Xverse Bitcoin routes
+app.use("/xverse", xverseRoutes);
+
+// Atomiq cross-chain routes
+app.use("/atomiq", atomiqRoutes);
+
 
 app.post("/query", async (req, res) => {
   const { userId, query } = req.body;
