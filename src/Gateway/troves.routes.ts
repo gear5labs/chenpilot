@@ -10,7 +10,6 @@ import config from "../config/config";
 
 const router = express.Router();
 
-// Helper function to get real Starknet account for user
 async function getUserStarknetAccount(userId: string): Promise<Account> {
   const authService = container.resolve(AuthService);
   const userAccountData = await authService.getUserAccountData(userId);

@@ -6,7 +6,6 @@ import { UnauthorizedError, ValidationError } from "../utils/error";
 
 const router = express.Router();
 
-// Health check endpoint
 router.get("/health", async (req, res) => {
   try {
     const health = await vesuService.healthCheck();
@@ -19,7 +18,6 @@ router.get("/health", async (req, res) => {
   }
 });
 
-// Get available lending pools
 router.get("/pools", async (req, res) => {
   try {
     const pools = await vesuService.getAvailablePools();
@@ -32,7 +30,6 @@ router.get("/pools", async (req, res) => {
   }
 });
 
-// Get user positions
 router.get("/positions/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -52,7 +49,6 @@ router.get("/positions/:userId", async (req, res) => {
   }
 });
 
-// Get best yield quote
 router.post("/quote", async (req, res) => {
   try {
     const { amount, timeHorizon = 30 } = req.body;
@@ -71,7 +67,6 @@ router.post("/quote", async (req, res) => {
   }
 });
 
-// Get pool statistics
 router.get("/stats", async (req, res) => {
   try {
     const stats = await vesuService.getPoolStats();
@@ -84,7 +79,6 @@ router.get("/stats", async (req, res) => {
   }
 });
 
-// Get specific pool by asset
 router.get("/pool/:asset", async (req, res) => {
   try {
     const { asset } = req.params;
@@ -106,7 +100,6 @@ router.get("/pool/:asset", async (req, res) => {
   }
 });
 
-// Check health factor
 router.get("/health-factor/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -126,7 +119,6 @@ router.get("/health-factor/:userId", async (req, res) => {
   }
 });
 
-// DeFi agent endpoint for natural language commands
 router.post("/defi", async (req, res) => {
   try {
     const { userId, command } = req.body;
@@ -150,7 +142,6 @@ router.post("/defi", async (req, res) => {
   }
 });
 
-// Execute lending operation (requires wallet connection)
 router.post("/execute", async (req, res) => {
   try {
     const { userId, operation, account } = req.body;
@@ -164,8 +155,9 @@ router.post("/execute", async (req, res) => {
       throw new UnauthorizedError("Invalid credentials");
     }
 
-    // Execute lending operation using IntentAgent
-    const result = await intentAgent.executeLendingOperation(operation, account.address);
+    // Use the intent agent with a natural language command
+    const command = `Execute ${operation.type} operation with ${operation.amount} ${operation.asset} for account ${account.address}`;
+    const result = await intentAgent.handle(command, userId);
     res.json(result);
   } catch (error) {
     res.status(500).json({

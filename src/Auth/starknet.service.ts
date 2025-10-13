@@ -19,7 +19,7 @@ export class StarknetService {
 
   constructor() {
     // Use environment variables for configuration
-    const nodeUrl = process.env.STARKNET_NODE_URL || 'https://docs-demo.strk-sepolia.quiknode.pro/rpc/v0_7';
+    const nodeUrl = process.env.NODE_URL || 'https://starknet-sepolia.public.blastapi.io/rpc/v0_8';
     this.provider = new RpcProvider({ nodeUrl });
     
     // OpenZeppelin Account class hash for Sepolia
@@ -118,7 +118,7 @@ export class StarknetService {
         };
       }
 
-      // Create signer and account
+      // Create signer and account with proper configuration for RPC v0.8
       const signer = new Signer(accountData.privateKey);
       const account = new Account(
         this.provider, 
@@ -138,7 +138,7 @@ export class StarknetService {
 
       console.log(`Deploying account ${accountData.precalculatedAddress} with balance: ${balance}`);
 
-      // Deploy the account
+      // Deploy the account with proper configuration for RPC v0.8
       const { transaction_hash, contract_address } = await account.deployAccount({
         classHash: this.OZAccountClassHash,
         constructorCalldata: accountData.constructorCalldata,

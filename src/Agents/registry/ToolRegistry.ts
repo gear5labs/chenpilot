@@ -18,7 +18,8 @@ export class ToolRegistry {
     const name = metadata.name;
 
     if (this.tools.has(name)) {
-      throw new Error(`Tool '${name}' is already registered`);
+      console.warn(`Tool '${name}' is already registered, skipping duplicate registration`);
+      return;
     }
 
     this.validateToolMetadata(metadata);

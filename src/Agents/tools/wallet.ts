@@ -255,6 +255,7 @@ export class WalletTool extends BaseTool {
       const account = await this.getAccount(userId);
       return this.createSuccessResult("address", {
         address: account.precalculatedAddress,
+        message: `Your wallet address is: ${account.precalculatedAddress}`
       });
     } catch (error) {
       return this.createErrorResult(

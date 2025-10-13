@@ -6,7 +6,7 @@ import { ECPairFactory } from 'ecpair';
 import * as ecc from 'tiny-secp256k1';
 import config from "../config/config";
 import {
-  XVerseConfig,
+  XverseConfig,
   BitcoinUTXO,
   BitcoinBalance,
   BitcoinTransaction,
@@ -32,7 +32,7 @@ bitcoin.initEccLib(ecc);
 
 @injectable()
 export class XVerseService {
-  private config: XVerseConfig;
+  private config: XverseConfig;
   private network: bitcoin.Network;
   private baseUrl: string;
   private rateLimitDelay: number;
@@ -40,9 +40,9 @@ export class XVerseService {
 
   constructor() {
     this.config = {
-      network: (config.bitcoinNetwork as 'mainnet'),
-      apiKey: config.xverseApiKey,
-      baseUrl: config.xverseBaseUrl,
+      network: (config.bitcoinNetwork as 'mainnet') || 'mainnet',
+      apiKey: config.xverseApiKey || '',
+      baseUrl: config.xverseBaseUrl || '',
       rateLimitDelay: 100
     };
     
@@ -57,7 +57,7 @@ export class XVerseService {
     this.rateLimitDelay = this.config.rateLimitDelay || 100;
   }
 
-  public setConfig(config: Partial<XVerseConfig>): void {
+  public setConfig(config: Partial<XverseConfig>): void {
     this.config = { ...this.config, ...config };
     this.network = this.config.network === 'mainnet' 
       ? bitcoin.networks.bitcoin 
@@ -118,7 +118,6 @@ export class XVerseService {
    * Error handling helper
    */
   private handleError(error: any, message: string): Error {
-    console.error(message, error);
     if (error instanceof Error) {
       return error;
     }
@@ -161,7 +160,6 @@ export class XVerseService {
         utxos
       };
     } catch (error) {
-      console.error('Error fetching address balance:', error);
       throw this.handleError(error, 'Failed to fetch address balance');
     }
   }
@@ -183,7 +181,6 @@ export class XVerseService {
         satoshis: utxo.value
       }));
     } catch (error) {
-      console.error('Error fetching UTXOs:', error);
       throw this.handleError(error, 'Failed to fetch UTXOs');
     }
   }
@@ -230,7 +227,6 @@ export class XVerseService {
         blocktime: tx.blockTime
       }));
     } catch (error) {
-      console.error('Error fetching transaction history:', error);
       throw this.handleError(error, 'Failed to fetch transaction history');
     }
   }
@@ -243,7 +239,6 @@ export class XVerseService {
       const data = await this.makeRequest<XVerseTransactionResponse>(`/v1/bitcoin/transactions/${txid}`);
       return this.convertXVerseTransactionToBitcoinTransaction(data);
     } catch (error) {
-      console.error('Error fetching transaction:', error);
       throw this.handleError(error, 'Failed to fetch transaction');
     }
   }
@@ -256,7 +251,6 @@ export class XVerseService {
       const data = await this.makeRequest<{ hex: string }>(`/v1/bitcoin/transactions/${txid}/hex`);
       return data.hex;
     } catch (error) {
-      console.error('Error fetching raw transaction:', error);
       throw this.handleError(error, 'Failed to fetch raw transaction');
     }
   }
@@ -273,7 +267,6 @@ export class XVerseService {
       
       return this.convertXVerseTransactionToBitcoinTransaction(data);
     } catch (error) {
-      console.error('Error decoding transaction:', error);
       throw this.handleError(error, 'Failed to decode transaction');
     }
   }
@@ -291,7 +284,6 @@ export class XVerseService {
       
       return data.txid;
     } catch (error) {
-      console.error('Error sending transaction:', error);
       throw this.handleError(error, 'Failed to send transaction');
     }
   }
@@ -304,7 +296,6 @@ export class XVerseService {
       const data = await this.makeRequest<{ currency: string; rate: number }>('/v1/bitcoin/price');
       return { usd: data.rate };
     } catch (error) {
-      console.error('Error fetching Bitcoin price:', error);
       throw this.handleError(error, 'Failed to fetch Bitcoin price');
     }
   }
@@ -332,7 +323,6 @@ export class XVerseService {
         tx_count: data.tx_count
       };
     } catch (error) {
-      console.error('Error fetching current block:', error);
       throw this.handleError(error, 'Failed to fetch current block');
     }
   }
@@ -364,13 +354,25 @@ export class XVerseService {
         next_block_hash: data.next_block_hash
       };
     } catch (error) {
-      console.error('Error fetching block by height:', error);
       throw this.handleError(error, 'Failed to fetch block by height');
     }
   }
 
   /**
-   * Create and sign Bitcoin transaction
+   * Create and sign Bitcoin transaction using mnemonic
+   */
+  public async createTransactionWithMnemonic(request: BitcoinTransactionRequest, mnemonic: string, derivationPath: string = "m/84'/0'/0'/0/0"): Promise<BitcoinSignedTransaction> {
+    try {
+      // Import wallet from mnemonic to get private key
+      const walletInfo = this.importWalletFromMnemonic(mnemonic);
+      return await this.createTransaction(request, walletInfo.privateKey);
+    } catch (error) {
+      throw this.handleError(error, 'Failed to create transaction with mnemonic');
+    }
+  }
+
+  /**
+   * Create and sign Bitcoin transaction using private key
    */
   public async createTransaction(request: BitcoinTransactionRequest, privateKey: string): Promise<BitcoinSignedTransaction> {
     try {
@@ -439,7 +441,6 @@ export class XVerseService {
         fee
       };
     } catch (error) {
-      console.error('Error creating transaction:', error);
       throw this.handleError(error, 'Failed to create transaction');
     }
   }
@@ -465,7 +466,6 @@ export class XVerseService {
         mnemonic
       };
     } catch (error) {
-      console.error('Error creating wallet:', error);
       throw this.handleError(error, 'Failed to create wallet');
     }
   }
@@ -494,7 +494,6 @@ export class XVerseService {
         mnemonic
       };
     } catch (error) {
-      console.error('Error importing wallet:', error);
       throw this.handleError(error, 'Failed to import wallet');
     }
   }
@@ -514,7 +513,6 @@ export class XVerseService {
         wif: keyPair.toWIF()
       };
     } catch (error) {
-      console.error('Error importing wallet:', error);
       throw this.handleError(error, 'Failed to import wallet');
     }
   }
@@ -538,7 +536,6 @@ export class XVerseService {
     try {
       return await this.makeRequest<any[]>(`/v1/swaps/destination-tokens?sourceChain=${sourceChain}&sourceToken=${sourceToken}`);
     } catch (error) {
-      console.error('Error fetching destination tokens:', error);
       throw this.handleError(error, 'Failed to fetch destination tokens');
     }
   }
@@ -565,7 +562,6 @@ export class XVerseService {
         })
       });
     } catch (error) {
-      console.error('Error fetching swap quotes:', error);
       throw this.handleError(error, 'Failed to fetch swap quotes');
     }
   }
@@ -580,7 +576,6 @@ export class XVerseService {
         body: JSON.stringify(orderData)
       });
     } catch (error) {
-      console.error('Error placing swap order:', error);
       throw this.handleError(error, 'Failed to place swap order');
     }
   }
@@ -595,7 +590,6 @@ export class XVerseService {
         body: JSON.stringify({ signature })
       });
     } catch (error) {
-      console.error('Error executing swap order:', error);
       throw this.handleError(error, 'Failed to execute swap order');
     }
   }
@@ -629,6 +623,287 @@ export class XVerseService {
     const keyPair = ECPair.fromWIF(privateKey, this.network);
     return bitcoin.payments.p2wpkh({ pubkey: Buffer.from(keyPair.publicKey), network: this.network }).address!;
   }
+
+  /**
+   * Get address from mnemonic
+   */
+  public getAddressFromMnemonic(mnemonic: string, derivationPath: string = "m/84'/0'/0'/0/0"): string {
+    try {
+      const walletInfo = this.importWalletFromMnemonic(mnemonic);
+      return walletInfo.address;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get address from mnemonic');
+    }
+  }
+  /**
+   * Get address activity (confirmed transactions)
+   */
+  public async getAddressActivity(address: string, limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/bitcoin/address/${address}/activity?limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get address activity');
+    }
+  }
+
+  /**
+   * Get mempool activity (unconfirmed transactions)
+   */
+  public async getAddressMempoolActivity(address: string, limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/bitcoin/address/${address}/activity/mempool?limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get mempool activity');
+    }
+  }
+
+  /**
+   * Get unconfirmed transactions
+   */
+  public async getAddressUnconfirmedTransactions(address: string, limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/bitcoin/address/${address}/activity/unconfirmed?limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get unconfirmed transactions');
+    }
+  }
+
+  /**
+   * Get raw transaction hex
+   */
+  public async getRawTransactionHex(txid: string): Promise<string> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<{ hex: string }>(`/v1/bitcoin/transactions/${txid}/hex`);
+      return response.hex;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get raw transaction hex');
+    }
+  }
+
+  /**
+   * Get ordinal transaction outputs
+   */
+  public async getOrdinalTransactionOutputs(txid: string): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/bitcoin/transactions/${txid}/ordinals`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get ordinal transaction outputs');
+    }
+  }
+  /**
+   * Get Ordinals by address
+   */
+  public async getOrdinalsByAddress(address: string, limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/ordinals/address/${address}/inscriptions?limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get Ordinals by address');
+    }
+  }
+
+  /**
+   * Get Ordinal collections by address
+   */
+  public async getOrdinalCollectionsByAddress(address: string, limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/ordinals/address/${address}/collections?limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get Ordinal collections by address');
+    }
+  }
+
+  /**
+   * Get Ordinal by ID
+   */
+  public async getOrdinalById(inscriptionId: string): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/ordinals/inscriptions/${inscriptionId}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get Ordinal by ID');
+    }
+  }
+
+  /**
+   * Get top Ordinal collections
+   */
+  public async getTopOrdinalCollections(limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/ordinals/collections/top?limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get top Ordinal collections');
+    }
+  }
+  /**
+   * Get Runes by address (v1)
+   */
+  public async getRunesByAddressV1(address: string, limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/runes/address/${address}/balances?limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get Runes by address (v1)');
+    }
+  }
+
+  /**
+   * Get Runes by address (v2)
+   */
+  public async getRunesByAddressV2(address: string, limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/runes/address/${address}/balances/v2?limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get Runes by address (v2)');
+    }
+  }
+
+  /**
+   * Get Rune by ID
+   */
+  public async getRuneById(runeId: string): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/runes/${runeId}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get Rune by ID');
+    }
+  }
+
+  /**
+   * Search Runes
+   */
+  public async searchRunes(query: string, limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/runes/search?query=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to search Runes');
+    }
+  }
+
+  /**
+   * Get top Runes by volume
+   */
+  public async getTopRunesByVolume(limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/runes/top/volume?limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get top Runes by volume');
+    }
+  }
+
+  /**
+   * Get Runes top gainers and losers
+   */
+  public async getRunesTopGainersLosers(limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/runes/top/gainers-losers?limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get Runes top gainers and losers');
+    }
+  }
+  /**
+   * Get BRC-20 balances by address
+   */
+  public async getBRC20BalancesByAddress(address: string, limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/brc20/address/${address}/balances?limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get BRC-20 balances by address');
+    }
+  }
+
+  /**
+   * Get BRC-20 transaction history by address
+   */
+  public async getBRC20TransactionHistoryByAddress(address: string, limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/brc20/address/${address}/transactions?limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get BRC-20 transaction history by address');
+    }
+  }
+
+  /**
+   * Get BRC-20 by ticker
+   */
+  public async getBRC20ByTicker(ticker: string): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/brc20/ticker/${ticker}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get BRC-20 by ticker');
+    }
+  }
+  /**
+   * Get Spark balances by address
+   */
+  public async getSparkBalancesByAddress(address: string, limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/spark/address/${address}/balances?limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get Spark balances by address');
+    }
+  }
+
+  /**
+   * Get Spark transaction history by address
+   */
+  public async getSparkTransactionHistoryByAddress(address: string, limit: number = 50, offset: number = 0): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>(`/v1/global/spark/address/${address}/transactions?limit=${limit}&offset=${offset}`);
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get Spark transaction history by address');
+    }
+  }
+
+  /**
+   * Get mempool fees
+   */
+  public async getMempoolFees(): Promise<any> {
+    try {
+      await this.rateLimit();
+      const response = await this.makeRequest<any>('/v1/bitcoin/node/mempool/fees');
+      return response;
+    } catch (error) {
+      throw this.handleError(error, 'Failed to get mempool fees');
+    }
+  }
+
 }
 
 export const xverseService = new XVerseService();
