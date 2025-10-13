@@ -1,7 +1,7 @@
-import { agentLLM } from "./agent";
-import { memoryStore } from "./memory/memory";
-import { promptGenerator } from "./registry/PromptGenerator";
-import { toolAutoDiscovery } from "./registry/ToolAutoDiscovery";
+import { agentLLM } from './agent';
+import { memoryStore } from './memory/memory';
+import { promptGenerator } from './registry/PromptGenerator';
+import { toolAutoDiscovery } from './registry/ToolAutoDiscovery';
 
 let initialized = false;
 
@@ -18,11 +18,11 @@ export async function validateQuery(
   const context = memoryStore.get(userId);
 
   validationPrompt = validationPrompt.replace(
-    "{{CONTEXT}}",
+    '{{CONTEXT}}',
     JSON.stringify(context)
   );
   console.log(validationPrompt);
   const result = await agentLLM.callLLM(userId, validationPrompt, query, false);
 
-  return result.trim() === "1";
+  return result.trim() === '1';
 }

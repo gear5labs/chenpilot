@@ -10,9 +10,9 @@ export class MemoryStore {
   constructor(maxContextPerAgent = 10) {
     this.maxContextPerAgent = maxContextPerAgent;
   }
-  
+
   add(agentId: string, entry: string) {
-    let memory = this.memories.find((m) => m.agentId === agentId);
+    let memory = this.memories.find(m => m.agentId === agentId);
     if (!memory) {
       memory = { agentId, context: [] };
       this.memories.push(memory);
@@ -24,12 +24,12 @@ export class MemoryStore {
   }
 
   get(agentId: string): string[] {
-    const memory = this.memories.find((m) => m.agentId === agentId);
+    const memory = this.memories.find(m => m.agentId === agentId);
     return memory ? memory.context : [];
   }
 
   clear(agentId: string) {
-    this.memories = this.memories.filter((m) => m.agentId !== agentId);
+    this.memories = this.memories.filter(m => m.agentId !== agentId);
   }
 
   clearAll() {

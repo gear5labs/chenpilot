@@ -4,20 +4,20 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
-} from "typeorm";
+} from 'typeorm';
 
 @Entity()
 export class Contact {
-  @PrimaryGeneratedColumn("uuid")
+  @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ unique: true, type: "varchar" })
+  @Column({ unique: true, type: 'varchar' })
   name!: string;
 
-  @Column({ type: "varchar" })
+  @Column({ type: 'varchar' })
   address!: string;
 
-  @Column({ type: "varchar", default: "STRK" })
+  @Column({ type: 'varchar', default: 'STRK' })
   tokenType!: string;
 
   @CreateDateColumn()

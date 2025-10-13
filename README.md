@@ -5,6 +5,7 @@ Chen Pilot is an intelligent AI agent that enables seamless interaction with mul
 ## 🚀 Features Overview
 
 ### Core Capabilities
+
 - **Natural Language Processing**: Chat with the agent using plain English
 - **Multi-Chain Support**: Bitcoin, Starknet, and cross-chain operations
 - **DeFi Integration**: Lending, borrowing, and yield farming on Vesu protocol and Troves aggregator
@@ -15,6 +16,7 @@ Chen Pilot is an intelligent AI agent that enables seamless interaction with mul
 ## 🏗️ Architecture
 
 ### Services Integration
+
 - **Atomiq**: Cross-chain swap infrastructure for Bitcoin ↔ Starknet
 - **Vesu**: DeFi lending and borrowing protocol on Starknet
 - **Troves**: Yield farming aggregator for optimized returns on Starknet
@@ -22,6 +24,7 @@ Chen Pilot is an intelligent AI agent that enables seamless interaction with mul
 - **Starknet**: Native blockchain operations and smart contracts
 
 ### Agent System
+
 - **Intent Agent**: Parses natural language commands and routes to appropriate services
 - **Execution Agent**: Executes planned workflows across multiple tools
 - **Tool Registry**: Dynamic tool discovery and management system
@@ -29,30 +32,34 @@ Chen Pilot is an intelligent AI agent that enables seamless interaction with mul
 
 ## 📋 Prerequisites
 
-- Node.js 18+ 
+- Node.js 18+
 - PostgreSQL database
 - Environment variables configured (see Configuration section)
 
 ## 🛠️ Installation
 
 1. **Clone the repository**
+
    ```bash
    git clone <repository-url>
    cd chenpilot-experimental
    ```
 
 2. **Install dependencies**
+
    ```bash
    npm install
    ```
 
 3. **Set up environment variables**
+
    ```bash
    cp .env.example .env
    # Edit .env with your configuration
    ```
 
 4. **Set up the database**
+
    ```bash
    npm run migration:run
    ```
@@ -95,9 +102,11 @@ XVERSE_BASE_URL=https://api.secretkeylabs.io
 ### Registration Process
 
 1. **Create Account**
+
    ```bash
    POST /auth/register
    ```
+
    ```json
    {
      "email": "user@example.com",
@@ -124,6 +133,7 @@ XVERSE_BASE_URL=https://api.secretkeylabs.io
    ```
 
 ### Account Features
+
 - **Starknet Integration**: Each user gets a unique Starknet account
 - **Security**: Private keys are encrypted and stored securely
 - **Auto-Deployment**: Accounts are automatically deployed to the network
@@ -138,6 +148,7 @@ Send queries to the agent via the `/query` endpoint:
 ```bash
 POST /query
 ```
+
 ```json
 {
   "userId": "your-user-id",
@@ -150,12 +161,14 @@ POST /query
 The agent understands natural language commands. Here are examples:
 
 **Wallet Operations:**
+
 - "Check my STRK balance"
 - "Transfer 10 STRK to 0x123..."
 - "What's my wallet address?"
 - "Show me my ETH balance"
 
 **DeFi Operations:**
+
 - "Lend 100 STRK"
 - "Borrow 500 USDC"
 - "What's my lending balance?"
@@ -164,6 +177,7 @@ The agent understands natural language commands. Here are examples:
 - "Claim my rewards"
 
 **Yield Farming Operations:**
+
 - "Show me available Troves vaults"
 - "Deposit 100 STRK to Troves vault"
 - "What are my Troves positions?"
@@ -171,11 +185,13 @@ The agent understands natural language commands. Here are examples:
 - "Show me yield farming strategies"
 
 **Cross-Chain Swaps:**
+
 - "Swap 0.01 BTC to STRK"
 - "Check my swap status"
 - "Get swap quote for 0.005 BTC"
 
 **Bitcoin Operations:**
+
 - "Check my Bitcoin balance"
 - "Send 0.001 BTC to bc1q..."
 - "What's the current Bitcoin price?"
@@ -187,6 +203,7 @@ The agent understands natural language commands. Here are examples:
 **Purpose**: Enables seamless swaps between Bitcoin and Starknet assets using the Atomiq protocol
 
 **Current Integration Status**: ✅ **FULLY INTEGRATED**
+
 - ✅ AtomiqService initialized with production SQLite storage
 - ✅ Cross-chain swap tools available
 - ✅ Bitcoin PSBT tools for transaction handling
@@ -195,6 +212,7 @@ The agent understands natural language commands. Here are examples:
 - ✅ Refund and claim operations (limited by current SDK)
 
 **Features**:
+
 - Bitcoin to Starknet token swaps (BTC → STRK)
 - Starknet to Bitcoin swaps (STRK → BTC)
 - Lightning network swaps for instant Bitcoin transactions
@@ -205,37 +223,39 @@ The agent understands natural language commands. Here are examples:
 - Automatic swap execution and monitoring
 
 **Supported Operations**:
+
 ```typescript
 // Get swap quotes
-"Get quote for swapping 0.01 BTC to STRK"
-"Get quote for swapping 100 STRK to BTC"
+'Get quote for swapping 0.01 BTC to STRK';
+'Get quote for swapping 100 STRK to BTC';
 
 // Execute swaps
-"Swap 0.01 BTC to STRK"
-"Swap 100 STRK to BTC"
+'Swap 0.01 BTC to STRK';
+'Swap 100 STRK to BTC';
 
 // Lightning network swaps
-"Create lightning swap for 0.005 BTC to STRK"
-"Pay lightning invoice for swap abc123"
+'Create lightning swap for 0.005 BTC to STRK';
+'Pay lightning invoice for swap abc123';
 
 // Check balances and status
-"Check my STRK balance"
-"Check my Bitcoin balance"
-"Check status of swap abc123"
+'Check my STRK balance';
+'Check my Bitcoin balance';
+'Check status of swap abc123';
 
 // Manage swaps
-"Get all refundable swaps"
-"Get all claimable swaps"
-"Refund swap abc123"
-"Claim swap abc123"
+'Get all refundable swaps';
+'Get all claimable swaps';
+'Refund swap abc123';
+'Claim swap abc123';
 
 // Bitcoin transaction handling
-"Get PSBT for swap abc123"
-"Submit signed PSBT for swap abc123"
-"Wait for Bitcoin confirmation for swap abc123"
+'Get PSBT for swap abc123';
+'Submit signed PSBT for swap abc123';
+'Wait for Bitcoin confirmation for swap abc123';
 ```
 
 **Available Tools**:
+
 - `crossChainSwapTool` - Main cross-chain swap operations
   - BTC to STRK swaps
   - STRK to BTC swaps
@@ -263,15 +283,18 @@ The agent understands natural language commands. Here are examples:
   - Claim funds from lightning swaps
 
 **API Endpoints**:
+
 - `POST /query` - Natural language interface for all Atomiq operations
 - All operations are handled through the unified query endpoint
 
 **Current Limitations**:
+
 - Some advanced SDK methods are not available in current version
 - Manual refund/claim operations may require direct SDK usage
 - Lightning network swaps require proper invoice handling
 
 **Testing Results** (as of latest integration):
+
 - ✅ Balance checking: "Check my STRK balance" → Returns current balance (148.09 STRK)
 - ✅ Refundable swaps: "Get all refundable swaps" → Returns empty list (no active refundable swaps)
 - ✅ Claimable swaps: "Get all claimable swaps" → Returns appropriate response
@@ -286,6 +309,7 @@ The agent understands natural language commands. Here are examples:
 **Purpose**: DeFi protocol for lending and borrowing on Starknet
 
 **Features**:
+
 - Supply assets to lending pools
 - Borrow against collateral
 - Withdraw supplied assets
@@ -297,6 +321,7 @@ The agent understands natural language commands. Here are examples:
 **Supported Assets**: ETH, STRK, USDC, USDT, WBTC, wstETH, EKUBO, xSTRK
 
 **Available Pools**:
+
 - Prime Pool
 - RE7 USDC Core
 - RE7 USDC Prime
@@ -305,33 +330,35 @@ The agent understands natural language commands. Here are examples:
 - RE7 USDC Stable Core
 
 **DeFi Operations**:
+
 ```typescript
 // Lending
-"Lend 100 STRK"
-"Supply 50 ETH to the prime pool"
+'Lend 100 STRK';
+'Supply 50 ETH to the prime pool';
 
 // Borrowing
-"Borrow 500 USDC"
-"Borrow 1000 USDT against my STRK collateral"
+'Borrow 500 USDC';
+'Borrow 1000 USDT against my STRK collateral';
 
 // Management
-"Withdraw 25 STRK from lending"
-"Repay 200 USDC"
-"Check my lending positions"
-"Show me the best APY rates"
+'Withdraw 25 STRK from lending';
+'Repay 200 USDC';
+'Check my lending positions';
+'Show me the best APY rates';
 
 // Health & Risk
-"Check my health factor"
-"Am I at risk of liquidation?"
-"Add 50 STRK as collateral"
-"Remove 25 USDC collateral"
+'Check my health factor';
+'Am I at risk of liquidation?';
+'Add 50 STRK as collateral';
+'Remove 25 USDC collateral';
 
 // Advanced
-"Liquidate USDC position for user 0x123"
-"Claim my DeFi Spring rewards"
+'Liquidate USDC position for user 0x123';
+'Claim my DeFi Spring rewards';
 ```
 
 **API Endpoints**:
+
 - `GET /vesu/health` - Service health check
 - `GET /vesu/pools` - Get available lending pools
 - `GET /vesu/positions/:userId` - Get user positions
@@ -342,6 +369,7 @@ The agent understands natural language commands. Here are examples:
 **Purpose**: Automated yield farming and vault management on Starknet
 
 **Features**:
+
 - Automated yield optimization across multiple DeFi protocols
 - Vault-based asset management
 - Strategy diversification
@@ -352,34 +380,38 @@ The agent understands natural language commands. Here are examples:
 **Supported Assets**: STRK, ETH, USDC, WBTC, USDT
 
 **Available Vaults**:
+
 - STRK Yield Vault (12.5% APY)
 - ETH Yield Vault (8.7% APY)
 - USDC Stable Vault (6.2% APY)
 
 **Available Strategies**:
+
 - Liquidity Provision (Medium Risk, 15% Target APY)
 - Lending Strategy (Low Risk, 8% Target APY)
 
 **Yield Farming Operations**:
+
 ```typescript
 // Vault Operations
-"Show me available Troves vaults"
-"Deposit 100 STRK to Troves vault"
-"Withdraw 50 shares from ETH vault"
-"What are my Troves positions?"
+'Show me available Troves vaults';
+'Deposit 100 STRK to Troves vault';
+'Withdraw 50 shares from ETH vault';
+'What are my Troves positions?';
 
 // Strategy Management
-"Show me yield farming strategies"
-"Get yield data for STRK vault"
-"Harvest my Troves rewards"
+'Show me yield farming strategies';
+'Get yield data for STRK vault';
+'Harvest my Troves rewards';
 
 // Information
-"Check Troves health status"
-"Get deposit quote for 100 STRK"
-"What's the current APY for USDC vault?"
+'Check Troves health status';
+'Get deposit quote for 100 STRK';
+"What's the current APY for USDC vault?";
 ```
 
 **API Endpoints**:
+
 - `GET /troves/health` - Service health check
 - `GET /troves/vaults` - Get available vaults
 - `GET /troves/strategies` - Get available strategies
@@ -395,6 +427,7 @@ The agent understands natural language commands. Here are examples:
 **Purpose**: Complete Bitcoin wallet and transaction management
 
 **Features**:
+
 - Bitcoin wallet creation
 - Balance checking
 - Transaction history
@@ -404,28 +437,30 @@ The agent understands natural language commands. Here are examples:
 - Price monitoring
 
 **Bitcoin Operations**:
+
 ```typescript
 // Wallet Management
-"Create a new Bitcoin wallet"
-"Check my Bitcoin balance"
-"Get my Bitcoin address"
+'Create a new Bitcoin wallet';
+'Check my Bitcoin balance';
+'Get my Bitcoin address';
 
 // Transactions
-"Send 0.001 BTC to bc1q..."
-"Check my transaction history"
-"Get my UTXOs"
+'Send 0.001 BTC to bc1q...';
+'Check my transaction history';
+'Get my UTXOs';
 
 // Information
-"What's the current Bitcoin price?"
-"Estimate transaction fees"
-"Validate Bitcoin address bc1q..."
+"What's the current Bitcoin price?";
+'Estimate transaction fees';
+'Validate Bitcoin address bc1q...';
 
 // Advanced
-"Create transaction with custom fees"
-"Sign and broadcast transaction"
+'Create transaction with custom fees';
+'Sign and broadcast transaction';
 ```
 
 **API Endpoints**:
+
 - `GET /bitcoin/health` - Service health check
 - `GET /bitcoin/balance/:address` - Get Bitcoin balance
 - `GET /bitcoin/transactions/:address` - Get transaction history
@@ -436,6 +471,7 @@ The agent understands natural language commands. Here are examples:
 **Purpose**: Native Starknet wallet operations
 
 **Features**:
+
 - Balance checking for multiple tokens
 - Token transfers
 - Address management
@@ -444,21 +480,22 @@ The agent understands natural language commands. Here are examples:
 **Supported Tokens**: STRK, ETH, DAI
 
 **Wallet Operations**:
+
 ```typescript
 // Balance & Address
-"Check my STRK balance"
-"Check my ETH balance"
-"Get my wallet address"
+'Check my STRK balance';
+'Check my ETH balance';
+'Get my wallet address';
 
 // Transfers
-"Transfer 100 STRK to 0x123..."
-"Send 5 ETH to alice.eth"
+'Transfer 100 STRK to 0x123...';
+'Send 5 ETH to alice.eth';
 
 // Contacts
-"Add contact Alice with address 0x123..."
-"Delete contact Bob"
-"Show my contacts"
-"Edit contact Alice's address"
+'Add contact Alice with address 0x123...';
+'Delete contact Bob';
+'Show my contacts';
+"Edit contact Alice's address";
 ```
 
 ### 6. Meta Tool - Agent Information
@@ -466,11 +503,12 @@ The agent understands natural language commands. Here are examples:
 **Purpose**: Get information about the agent itself
 
 **Operations**:
+
 ```typescript
-"What is your name?"
-"What can you do?"
-"What version are you?"
-"Who created you?"
+'What is your name?';
+'What can you do?';
+'What version are you?';
+'Who created you?';
 ```
 
 ## 🔄 Workflow System
@@ -484,6 +522,7 @@ The agent uses an intelligent workflow system that:
 5. **Provides Feedback**: Returns structured responses
 
 ### Example Workflow
+
 ```
 User: "Lend 100 STRK and then check my balance"
 
@@ -512,6 +551,7 @@ Each service provides health check endpoints:
 ## 🚀 Getting Started Examples
 
 ### 1. Basic Wallet Operations
+
 ```bash
 # Check balance
 curl -X POST http://localhost:2333/query \
@@ -525,6 +565,7 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 2. DeFi Operations
+
 ```bash
 # Lend assets
 curl -X POST http://localhost:2333/query \
@@ -538,6 +579,7 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 3. Yield Farming Operations
+
 ```bash
 # Show available vaults
 curl -X POST http://localhost:2333/query \
@@ -550,7 +592,7 @@ curl -X POST http://localhost:2333/query \
   -d '{"userId": "your-user-id", "query": "Deposit 100 STRK to Troves vault"}'
 
 # Check positions
-curl -X POST http://localhost:2333/query \  
+curl -X POST http://localhost:2333/query \
   -H "Content-Type: application/json" \
   -d '{"userId": "your-user-id", "query": "What are my Troves positions?"}'
 ```
@@ -560,6 +602,7 @@ curl -X POST http://localhost:2333/query \
 The agent now supports advanced natural language understanding for comprehensive DeFi operations:
 
 ### 📊 Portfolio Analytics & Insights
+
 ```bash
 # Portfolio performance analysis
 curl -X POST http://localhost:2333/query \
@@ -578,6 +621,7 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 🎯 Smart Recommendations
+
 ```bash
 # Personalized investment advice
 curl -X POST http://localhost:2333/query \
@@ -596,6 +640,7 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 📈 Market Intelligence & Trends
+
 ```bash
 # Market trends and insights
 curl -X POST http://localhost:2333/query \
@@ -614,6 +659,7 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 🎓 Educational & How-To Queries
+
 ```bash
 # How-to instructions
 curl -X POST http://localhost:2333/query \
@@ -634,30 +680,35 @@ curl -X POST http://localhost:2333/query \
 ### 🔍 Advanced Query Types
 
 #### **Portfolio Management**
+
 - "Show my portfolio performance"
-- "Analyze my risk exposure" 
+- "Analyze my risk exposure"
 - "What's my best performing vault?"
 - "Should I rebalance my portfolio?"
 
 #### **Investment Intelligence**
+
 - "What should I invest in?"
 - "Best vault for 100 STRK"
 - "Safest yield option"
 - "High-yield opportunities"
 
 #### **Market Analysis**
+
 - "Show market trends"
 - "Compare STRK vaults"
 - "What's trending in yield farming?"
 - "Market conditions for Troves"
 
 #### **Educational Queries**
+
 - "How do I deposit to vault?"
 - "How to withdraw from vault?"
 - "How to harvest rewards?"
 - "What is yield farming?"
 
 #### **Context-Aware Responses**
+
 - "I want to earn 10% APY safely"
 - "Show me the best returns"
 - "Help me diversify my portfolio"
@@ -666,27 +717,33 @@ curl -X POST http://localhost:2333/query \
 ### 🚀 Natural Language Features
 
 #### **Intent Recognition**
+
 The agent understands various ways to express the same intent:
+
 - "Deposit 100 STRK" = "Invest 100 STRK" = "Put 100 STRK in vault"
 - "Show vaults" = "List vaults" = "What vaults are available"
 - "My positions" = "My investments" = "What I have invested"
 
 #### **Context Awareness**
+
 - Remembers your previous queries and positions
 - Provides personalized recommendations based on your portfolio
 - Suggests relevant actions based on your current holdings
 
 #### **Smart Suggestions**
+
 - Proactive recommendations for portfolio optimization
 - Risk-adjusted investment advice
 - Diversification suggestions based on your current assets
 
 #### **Educational Integration**
+
 - Explains complex DeFi concepts in simple terms
 - Provides step-by-step instructions for new users
 - Offers best practices and pro tips
 
 ### 4. Cross-Chain Swaps
+
 ```bash
 # Get swap quote
 curl -X POST http://localhost:2333/query \
@@ -704,6 +761,7 @@ curl -X POST http://localhost:2333/query \
 The agent now supports comprehensive Bitcoin ecosystem operations through Xverse Wallet integration:
 
 ### ✨ Key Features
+
 - **🔗 Wallet Connection**: Connect Xverse wallets with Bitcoin addresses
 - **💰 Native Balance Detection**: Smart detection of Bitcoin, STRK, and token balances
 - **🎨 Ordinals Support**: View and manage Bitcoin NFTs
@@ -715,6 +773,7 @@ The agent now supports comprehensive Bitcoin ecosystem operations through Xverse
 - **🔄 Swap Operations**: Cross-chain and Bitcoin ecosystem swaps
 
 ### 💰 Bitcoin Operations
+
 ```bash
 # Connect Xverse wallet
 curl -X POST http://localhost:2333/query \
@@ -738,6 +797,7 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 🎨 Ordinals (Bitcoin NFTs)
+
 ```bash
 # View Ordinals collection
 curl -X POST http://localhost:2333/query \
@@ -756,6 +816,7 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 🪙 Runes (Bitcoin Tokens)
+
 ```bash
 # Check Runes balance
 curl -X POST http://localhost:2333/query \
@@ -774,6 +835,7 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 📊 BRC-20 & Spark Tokens
+
 ```bash
 # Check BRC-20 balances
 curl -X POST http://localhost:2333/query \
@@ -792,6 +854,7 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 🔄 Smart Balance Detection
+
 ```bash
 # Specific balance queries
 curl -X POST http://localhost:2333/query \
@@ -810,6 +873,7 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 📚 Educational Content
+
 ```bash
 # Learn about Bitcoin
 curl -X POST http://localhost:2333/query \
@@ -828,6 +892,7 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 🛠️ How-To Guides
+
 ```bash
 # How to buy Bitcoin
 curl -X POST http://localhost:2333/query \
@@ -851,6 +916,7 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 📈 Analytics & Insights
+
 ```bash
 # Bitcoin analytics
 curl -X POST http://localhost:2333/query \
@@ -869,6 +935,7 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 🔄 Swap Operations
+
 ```bash
 # Get swap quotes
 curl -X POST http://localhost:2333/query \
@@ -884,6 +951,7 @@ curl -X POST http://localhost:2333/query \
 ## 🔧 Development
 
 ### Project Structure
+
 ```
 src/
 ├── Agents/           # AI agent system
@@ -904,11 +972,13 @@ src/
 3. The tool will be automatically discovered and registered
 
 ### Running Tests
+
 ```bash
 npm test
 ```
 
 ### Building for Production
+
 ```bash
 npm run build
 npm start
@@ -917,14 +987,17 @@ npm start
 ## 📝 API Documentation
 
 ### Authentication Endpoints
+
 - `POST /auth/register` - Create new account
 - `POST /auth/login` - Login to account
 - `POST /auth/refresh` - Refresh JWT token
 
 ### Query Endpoint
+
 - `POST /query` - Send natural language queries to the agent
 
 ### Service-Specific Endpoints
+
 - `/vesu/*` - Vesu DeFi operations
 - `/troves/*` - Troves yield farming operations
 - `/bitcoin/*` - Bitcoin wallet operations
@@ -943,10 +1016,10 @@ npm start
 
 This project is licensed under the ISC License.
 
-
 ## 🆘 Support
 
 For support and questions:
+
 - Create an issue in the repository
 - Check the API health endpoints
 - Review the logs for error details

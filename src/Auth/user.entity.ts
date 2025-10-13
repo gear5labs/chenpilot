@@ -4,85 +4,85 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
-} from "typeorm";
+} from 'typeorm';
 
 export enum AuthProvider {
-  EMAIL = "email",
-  GOOGLE = "google",
+  EMAIL = 'email',
+  GOOGLE = 'google',
 }
 
 @Entity()
 export class User {
-  @PrimaryGeneratedColumn("uuid")
+  @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ unique: true, type: "varchar", nullable: true })
+  @Column({ unique: true, type: 'varchar', nullable: true })
   email?: string;
 
-  @Column({ type: "varchar", nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   password?: string;
 
-  @Column({ type: "varchar", nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   name?: string;
 
-  @Column({ type: "varchar", nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   address?: string;
 
-  @Column({ type: "text", nullable: true, comment: "Encrypted private key" })
+  @Column({ type: 'text', nullable: true, comment: 'Encrypted private key' })
   pk?: string;
 
-  @Column({ type: "varchar", nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   publicKey?: string;
 
-  @Column({ type: "varchar", nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   addressSalt?: string;
 
-  @Column({ type: "text", nullable: true })
+  @Column({ type: 'text', nullable: true })
   constructorCalldata?: string;
-  
-  @Column({ type: "boolean", default: false })
+
+  @Column({ type: 'boolean', default: false })
   isDeployed!: boolean;
 
-  @Column({ type: "varchar", nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   deploymentTransactionHash?: string;
 
-  @Column({ type: "varchar", default: "STRK" })
+  @Column({ type: 'varchar', default: 'STRK' })
   tokenType!: string;
 
-  @Column({ type: "enum", enum: AuthProvider, default: AuthProvider.EMAIL })
+  @Column({ type: 'enum', enum: AuthProvider, default: AuthProvider.EMAIL })
   authProvider!: AuthProvider;
 
-  @Column({ type: "varchar", nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   googleId?: string;
 
-  @Column({ type: "varchar", nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   profilePicture?: string;
 
-  @Column({ type: "boolean", default: false })
+  @Column({ type: 'boolean', default: false })
   isEmailVerified!: boolean;
 
-  @Column({ type: "varchar", nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   emailVerificationToken?: string;
 
-  @Column({ type: "varchar", nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   passwordResetToken?: string;
 
-  @Column({ type: "timestamp", nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   passwordResetExpires?: Date;
 
-  @Column({ type: "boolean", default: false })
+  @Column({ type: 'boolean', default: false })
   isFunded!: boolean;
 
-  @Column({ type: "varchar", nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   fundingTransactionHash?: string;
 
-  @Column({ type: "timestamp", nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   fundedAt?: Date;
 
-  @Column({ type: "boolean", default: false })
+  @Column({ type: 'boolean', default: false })
   isDeploymentPending!: boolean;
 
-  @Column({ type: "timestamp", nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   deploymentRequestedAt?: Date;
 
   @CreateDateColumn()

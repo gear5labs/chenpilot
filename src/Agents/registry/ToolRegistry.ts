@@ -4,7 +4,7 @@ import {
   ToolRegistryEntry,
   ToolPayload,
   ToolResult,
-} from "./ToolMetadata";
+} from './ToolMetadata';
 
 export class ToolRegistry {
   private tools: Map<string, ToolRegistryEntry> = new Map();
@@ -18,7 +18,9 @@ export class ToolRegistry {
     const name = metadata.name;
 
     if (this.tools.has(name)) {
-      console.warn(`Tool '${name}' is already registered, skipping duplicate registration`);
+      console.warn(
+        `Tool '${name}' is already registered, skipping duplicate registration`
+      );
       return;
     }
 
@@ -53,8 +55,8 @@ export class ToolRegistry {
    */
   getAllTools(): ToolDefinition[] {
     return Array.from(this.tools.values())
-      .filter((entry) => entry.enabled)
-      .map((entry) => entry.definition);
+      .filter(entry => entry.enabled)
+      .map(entry => entry.definition);
   }
 
   /**
@@ -62,7 +64,7 @@ export class ToolRegistry {
    */
   getToolsByCategory(category: string): ToolDefinition[] {
     return this.getAllTools().filter(
-      (tool) => tool.metadata.category === category
+      tool => tool.metadata.category === category
     );
   }
 
@@ -93,7 +95,7 @@ export class ToolRegistry {
       if (!validation.valid) {
         throw new ToolExecutionError(
           `Invalid payload for tool '${toolName}': ${validation.errors.join(
-            ", "
+            ', '
           )}`
         );
       }
@@ -112,7 +114,7 @@ export class ToolRegistry {
     } catch (error) {
       const toolError = new ToolExecutionError(
         `Tool execution failed: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
       toolError.toolName = toolName;
@@ -126,7 +128,7 @@ export class ToolRegistry {
    * Get tool metadata for prompt generation
    */
   getToolMetadata(): ToolMetadata[] {
-    return this.getAllTools().map((tool) => tool.metadata);
+    return this.getAllTools().map(tool => tool.metadata);
   }
 
   /**
@@ -135,10 +137,10 @@ export class ToolRegistry {
   searchTools(query: string): ToolDefinition[] {
     const lowerQuery = query.toLowerCase();
     return this.getAllTools().filter(
-      (tool) =>
+      tool =>
         tool.metadata.name.toLowerCase().includes(lowerQuery) ||
         tool.metadata.description.toLowerCase().includes(lowerQuery) ||
-        tool.metadata.examples.some((example) =>
+        tool.metadata.examples.some(example =>
           example.toLowerCase().includes(lowerQuery)
         )
     );
@@ -168,7 +170,7 @@ export class ToolRegistry {
     const allTools = this.getAllTools();
     const toolsByCategory: Record<string, number> = {};
 
-    allTools.forEach((tool) => {
+    allTools.forEach(tool => {
       const category = tool.metadata.category;
       toolsByCategory[category] = (toolsByCategory[category] || 0) + 1;
     });
@@ -185,28 +187,28 @@ export class ToolRegistry {
    * Validate tool metadata structure
    */
   private validateToolMetadata(metadata: ToolMetadata): void {
-    if (!metadata.name || typeof metadata.name !== "string") {
-      throw new Error("Tool metadata must have a valid name");
+    if (!metadata.name || typeof metadata.name !== 'string') {
+      throw new Error('Tool metadata must have a valid name');
     }
 
-    if (!metadata.description || typeof metadata.description !== "string") {
-      throw new Error("Tool metadata must have a valid description");
+    if (!metadata.description || typeof metadata.description !== 'string') {
+      throw new Error('Tool metadata must have a valid description');
     }
 
-    if (!metadata.parameters || typeof metadata.parameters !== "object") {
-      throw new Error("Tool metadata must have valid parameters");
+    if (!metadata.parameters || typeof metadata.parameters !== 'object') {
+      throw new Error('Tool metadata must have valid parameters');
     }
 
     if (!Array.isArray(metadata.examples)) {
-      throw new Error("Tool metadata must have valid examples array");
+      throw new Error('Tool metadata must have valid examples array');
     }
 
-    if (!metadata.category || typeof metadata.category !== "string") {
-      throw new Error("Tool metadata must have a valid category");
+    if (!metadata.category || typeof metadata.category !== 'string') {
+      throw new Error('Tool metadata must have a valid category');
     }
 
-    if (!metadata.version || typeof metadata.version !== "string") {
-      throw new Error("Tool metadata must have a valid version");
+    if (!metadata.version || typeof metadata.version !== 'string') {
+      throw new Error('Tool metadata must have a valid version');
     }
 
     // Validate parameter definitions
@@ -214,7 +216,7 @@ export class ToolRegistry {
       if (
         !paramDef.type ||
         !paramDef.description ||
-        typeof paramDef.required !== "boolean"
+        typeof paramDef.required !== 'boolean'
       ) {
         throw new Error(`Invalid parameter definition for '${paramName}'`);
       }
@@ -224,13 +226,13 @@ export class ToolRegistry {
 
 // Custom error class for tool execution errors
 class ToolExecutionError extends Error {
-  public toolName: string = "";
+  public toolName: string = '';
   public payload: Record<string, unknown> = {};
-  public userId: string = "";
+  public userId: string = '';
 
   constructor(message: string) {
     super(message);
-    this.name = "ToolExecutionError";
+    this.name = 'ToolExecutionError';
   }
 }
 

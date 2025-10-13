@@ -1,5 +1,5 @@
-import { injectable } from "tsyringe";
-import { agentLLM } from "../Agents/agent";
+import { injectable } from 'tsyringe';
+import { agentLLM } from '../Agents/agent';
 
 @injectable()
 export default class QaService {
@@ -10,7 +10,6 @@ export default class QaService {
     input: string,
     context: Record<string, any>
   ): Promise<string> {
-
     const contextString = JSON.stringify(context, null, 2);
 
     const prompt = `

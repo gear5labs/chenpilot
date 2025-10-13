@@ -31,8 +31,8 @@ Create a new file in the `tools/` directory:
 
 ```typescript
 // tools/myNewTool.ts
-import { BaseTool } from "./base/BaseTool";
-import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
+import { BaseTool } from './base/BaseTool';
+import { ToolMetadata, ToolResult } from '../registry/ToolMetadata';
 
 interface MyToolPayload {
   param1: string;
@@ -42,31 +42,31 @@ interface MyToolPayload {
 
 export class MyNewTool extends BaseTool<MyToolPayload> {
   metadata: ToolMetadata = {
-    name: "my_new_tool",
-    description: "Description of what this tool does",
+    name: 'my_new_tool',
+    description: 'Description of what this tool does',
     parameters: {
       param1: {
-        type: "string",
-        description: "Description of param1",
+        type: 'string',
+        description: 'Description of param1',
         required: true,
-        enum: ["option1", "option2", "option3"],
+        enum: ['option1', 'option2', 'option3'],
       },
       param2: {
-        type: "number",
-        description: "Description of param2",
+        type: 'number',
+        description: 'Description of param2',
         required: true,
         min: 0,
         max: 100,
       },
       param3: {
-        type: "boolean",
-        description: "Description of param3",
+        type: 'boolean',
+        description: 'Description of param3',
         required: false,
       },
     },
-    examples: ["Example usage 1", "Example usage 2", "Example usage 3"],
-    category: "my_category",
-    version: "1.0.0",
+    examples: ['Example usage 1', 'Example usage 2', 'Example usage 3'],
+    category: 'my_category',
+    version: '1.0.0',
   };
 
   async execute(payload: MyToolPayload, userId: string): Promise<ToolResult> {
@@ -75,18 +75,18 @@ export class MyNewTool extends BaseTool<MyToolPayload> {
       console.log(`Executing my tool with payload:`, payload);
 
       // Simulate some work
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
-      return this.createSuccessResult("my_tool_action", {
-        result: "success",
+      return this.createSuccessResult('my_tool_action', {
+        result: 'success',
         data: payload,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
       return this.createErrorResult(
-        "my_tool_action",
+        'my_tool_action',
         `Tool execution failed: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : 'Unknown error'
         }`
       );
     }
@@ -102,7 +102,7 @@ Add the tool to the auto-discovery system in `ToolAutoDiscovery.ts`:
 
 ```typescript
 // Import and register the new tool
-const { myNewTool } = await import("../tools/myNewTool");
+const { myNewTool } = await import('../tools/myNewTool');
 toolRegistry.register(myNewTool);
 ```
 
@@ -183,13 +183,13 @@ The tool registry provides several useful methods:
 const tools = toolRegistry.getAllTools();
 
 // Get tools by category
-const walletTools = toolRegistry.getToolsByCategory("wallet");
+const walletTools = toolRegistry.getToolsByCategory('wallet');
 
 // Execute a tool
-const result = await toolRegistry.executeTool("my_tool", payload, userId);
+const result = await toolRegistry.executeTool('my_tool', payload, userId);
 
 // Search tools
-const searchResults = toolRegistry.searchTools("wallet");
+const searchResults = toolRegistry.searchTools('wallet');
 
 // Get registry statistics
 const stats = toolRegistry.getStats();
@@ -215,4 +215,3 @@ The new system is backward compatible. Existing tools can be gradually migrated:
 4. Register tools with the registry
 
 The old hardcoded system will continue to work during migration.
-
