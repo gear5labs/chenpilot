@@ -2,6 +2,12 @@ import { BaseTool } from './base/BaseTool';
 import { ToolMetadata, ToolResult } from '../registry/ToolMetadata';
 import { container } from 'tsyringe';
 import { TrovesService } from '../../services/TrovesService';
+import { authenticate } from '../../Auth/auth';
+import { UnauthorizedError } from '../../utils/error';
+import { Account } from 'starknet';
+import { AuthService } from '../../Auth/auth.service';
+import config from '../../config/config';
+import { RpcProvider } from 'starknet';
 
 interface TrovesPayload extends Record<string, unknown> {
   operation: string;
@@ -105,6 +111,27 @@ export class TrovesTool extends BaseTool<TrovesPayload> {
   };
 
   private trovesService = container.resolve(TrovesService);
+  private authService = container.resolve(AuthService);
+
+  private async getUserStarknetAccount(userId: string): Promise<Account> {
+    const userAccountData = await this.authService.getUserAccountData(userId);
+
+    if (!userAccountData) {
+      throw new Error('User account not found');
+    }
+
+    const provider = new RpcProvider({
+      nodeUrl: config.node_url,
+    });
+
+    const account = new Account(
+      provider,
+      userAccountData.precalculatedAddress,
+      userAccountData.privateKey
+    );
+
+    return account;
+  }
 
   async execute(payload: TrovesPayload, userId: string): Promise<ToolResult> {
     const { operation } = payload;
@@ -120,11 +147,11 @@ export class TrovesTool extends BaseTool<TrovesPayload> {
         case 'get_vault_details':
           return await this.getVaultDetails(payload);
         case 'deposit':
-          return await this.deposit(payload);
+          return await this.deposit(payload, userId);
         case 'withdraw':
-          return await this.withdraw(payload);
+          return await this.withdraw(payload, userId);
         case 'harvest':
-          return await this.harvest(payload);
+          return await this.harvest(payload, userId);
         case 'get_positions':
           return await this.getPositions(payload);
         case 'get_position_details':
@@ -248,74 +275,196 @@ export class TrovesTool extends BaseTool<TrovesPayload> {
     }
   }
 
-  private async deposit(payload: TrovesPayload): Promise<ToolResult> {
-    if (!payload.vaultId || !payload.amount || !payload.asset) {
+  private async deposit(payload: TrovesPayload, userId: string): Promise<ToolResult> {
+    if (!payload.amount || !payload.asset) {
       return this.createErrorResult(
         'troves_deposit',
-        'Vault ID, amount, and asset are required for deposit'
+        'Amount and asset are required for deposit'
       );
     }
 
     try {
-      // Note: This would require user wallet connection for actual deposit
-      // For now, return instructions
-      return this.createSuccessResult('troves_deposit', {
-        vaultId: payload.vaultId,
-        amount: payload.amount,
+      // Authenticate user
+      const user = await authenticate(userId);
+      if (!user) {
+        throw new UnauthorizedError('Invalid credentials or user not authenticated.');
+      }
+
+      // Get user's deployed account
+      const account = await this.getUserStarknetAccount(userId);
+
+      // If no vaultId provided, find the best vault for the asset
+      let targetVaultId = payload.vaultId;
+      if (!targetVaultId) {
+        const vaults = await this.trovesService.getAvailableVaults();
+        const assetVault = vaults.find(vault => 
+          vault.asset === payload.asset && vault.isActive
+        );
+        if (assetVault) {
+          targetVaultId = assetVault.id;
+        }
+      }
+
+      if (!targetVaultId) {
+        return this.createErrorResult(
+          'troves_deposit',
+          'Vault ID is required for deposit. Please specify a vault or asset.'
+        );
+      }
+
+      // Create deposit operation
+      const depositOperation = {
+        vaultId: targetVaultId,
+        amount: payload.amount.toString(),
         asset: payload.asset,
-        message: `Ready to deposit ${payload.amount} ${payload.asset} into vault ${payload.vaultId}. Wallet connection required for execution.`,
-      });
+        userAddress: account.address,
+      };
+
+      // Execute deposit transaction
+      const depositResult = await this.trovesService.executeDeposit(
+        depositOperation,
+        account
+      );
+
+      if (depositResult.success) {
+        return this.createSuccessResult('troves_deposit', {
+          message: `Successfully deposited ${payload.amount} ${payload.asset} into Troves vault. Transaction: ${depositResult.transactionHash}`,
+          transactionHash: depositResult.transactionHash,
+          amount: payload.amount,
+          asset: payload.asset,
+          vaultId: targetVaultId
+        });
+      } else {
+        return this.createErrorResult('troves_deposit', depositResult.error || 'Deposit failed');
+      }
     } catch (error) {
       return this.createErrorResult(
         'troves_deposit',
-        `Failed to prepare deposit: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `Failed to execute deposit: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
   }
 
-  private async withdraw(payload: TrovesPayload): Promise<ToolResult> {
-    if (!payload.vaultId || !payload.amount) {
+  private async withdraw(payload: TrovesPayload, userId: string): Promise<ToolResult> {
+    if (!payload.amount) {
       return this.createErrorResult(
         'troves_withdraw',
-        'Vault ID and amount are required for withdrawal'
+        'Amount is required for withdrawal'
       );
     }
 
     try {
-      // Note: This would require user wallet connection for actual withdrawal
-      // For now, return instructions
-      return this.createSuccessResult('troves_withdraw', {
-        vaultId: payload.vaultId,
-        amount: payload.amount,
-        message: `Ready to withdraw ${payload.amount} from vault ${payload.vaultId}. Wallet connection required for execution.`,
-      });
+      // Authenticate user
+      const user = await authenticate(userId);
+      if (!user) {
+        throw new UnauthorizedError('Invalid credentials or user not authenticated.');
+      }
+
+      // Get user's deployed account
+      const account = await this.getUserStarknetAccount(userId);
+
+      // If no vaultId provided, find the user's vault positions
+      let targetVaultId = payload.vaultId;
+      if (!targetVaultId) {
+        const positions = await this.trovesService.getUserPositions(account.address);
+        if (positions.length > 0) {
+          // Use the first position's vault
+          targetVaultId = (positions[0] as any).vaultId;
+        }
+      }
+
+      if (!targetVaultId) {
+        return this.createErrorResult(
+          'troves_withdraw',
+          'Vault ID is required for withdrawal. Please specify a vault or ensure you have positions.'
+        );
+      }
+
+      // Create withdraw operation - convert amount to shares
+      const withdrawOperation = {
+        vaultId: targetVaultId,
+        shares: payload.amount.toString(), // For now, treating amount as shares
+        userAddress: account.address,
+      };
+
+      // Execute withdraw transaction
+      const withdrawResult = await this.trovesService.executeWithdraw(
+        withdrawOperation,
+        account
+      );
+
+      if (withdrawResult.success) {
+        return this.createSuccessResult('troves_withdraw', {
+          message: `Successfully withdrew ${payload.amount} from Troves vault. Transaction: ${withdrawResult.transactionHash}`,
+          transactionHash: withdrawResult.transactionHash,
+          amount: payload.amount,
+          vaultId: targetVaultId
+        });
+      } else {
+        return this.createErrorResult('troves_withdraw', withdrawResult.error || 'Withdrawal failed');
+      }
     } catch (error) {
       return this.createErrorResult(
         'troves_withdraw',
-        `Failed to prepare withdrawal: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `Failed to execute withdrawal: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
   }
 
-  private async harvest(payload: TrovesPayload): Promise<ToolResult> {
-    if (!payload.vaultId) {
-      return this.createErrorResult(
-        'troves_harvest',
-        'Vault ID is required for harvest'
-      );
-    }
-
+  private async harvest(payload: TrovesPayload, userId: string): Promise<ToolResult> {
     try {
-      // Note: This would require user wallet connection for actual harvest
-      // For now, return instructions
-      return this.createSuccessResult('troves_harvest', {
-        vaultId: payload.vaultId,
-        message: `Ready to harvest rewards from vault ${payload.vaultId}. Wallet connection required for execution.`,
-      });
+      // Authenticate user
+      const user = await authenticate(userId);
+      if (!user) {
+        throw new UnauthorizedError('Invalid credentials or user not authenticated.');
+      }
+
+      // Get user's deployed account
+      const account = await this.getUserStarknetAccount(userId);
+
+      // If no vaultId provided, find the user's vault positions
+      let targetVaultId = payload.vaultId;
+      if (!targetVaultId) {
+        const positions = await this.trovesService.getUserPositions(account.address);
+        if (positions.length > 0) {
+          // Use the first position's vault
+          targetVaultId = (positions[0] as any).vaultId;
+        }
+      }
+
+      if (!targetVaultId) {
+        return this.createErrorResult(
+          'troves_harvest',
+          'Vault ID is required for harvest. Please specify a vault or ensure you have positions.'
+        );
+      }
+
+      // Create harvest operation
+      const harvestOperation = {
+        vaultId: targetVaultId,
+        userAddress: account.address,
+        estimatedRewards: payload.harvestAmount?.toString() || '0', // Estimated rewards to harvest
+      };
+
+      // Execute harvest transaction
+      const harvestResult = await this.trovesService.harvestRewards(
+        harvestOperation,
+        account
+      );
+
+      if (harvestResult.success) {
+        return this.createSuccessResult('troves_harvest', {
+          message: `Successfully harvested rewards from Troves vault. Transaction: ${harvestResult.transactionHash}`,
+          transactionHash: harvestResult.transactionHash,
+          vaultId: targetVaultId
+        });
+      } else {
+        return this.createErrorResult('troves_harvest', harvestResult.error || 'Harvest failed');
+      }
     } catch (error) {
       return this.createErrorResult(
         'troves_harvest',
-        `Failed to prepare harvest: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `Failed to execute harvest: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
   }
