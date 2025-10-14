@@ -36,7 +36,15 @@ export class AgentLLM {
 
     if (asJson) {
       try {
-        const parsed = JSON.parse(content);
+        // Strip markdown code blocks if present
+        let jsonContent = content.trim();
+        if (jsonContent.startsWith('```json')) {
+          jsonContent = jsonContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+        } else if (jsonContent.startsWith('```')) {
+          jsonContent = jsonContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
+        }
+        
+        const parsed = JSON.parse(jsonContent);
         return parsed;
       } catch (err) {
         console.error('JSON parse error:', err, 'raw:', content);

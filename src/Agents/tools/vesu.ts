@@ -205,40 +205,102 @@ export class VesuTool extends BaseTool<VesuPayload> {
           });
 
         case 'lend':
-          if (!account || !poolId || !amount)
+          if (!account || !amount)
             return this.createErrorResult(
               'vesu_lend',
-              'Account, pool ID, and amount are required for lending.'
+              'Account and amount are required for lending.'
             );
+          
+          // If no poolId provided, find the best pool for the asset
+          let targetPoolId = poolId;
+          if (!targetPoolId && asset) {
+            const pools = await this.vesuService.getAvailablePools();
+            const assetPool = pools.find(pool => 
+              pool.asset === asset && pool.isActive
+            );
+            if (assetPool) {
+              targetPoolId = assetPool.id;
+            }
+          }
+          
+          if (!targetPoolId) {
+            return this.createErrorResult(
+              'vesu_lend',
+              'Pool ID is required for lending. Please specify a pool or asset.'
+            );
+          }
+          
           const lendOperation = {
-            poolId,
+            poolId: targetPoolId,
             amount: amount.toString(),
             operation: 'supply' as const,
             userAddress: account.address,
           };
+          
           const lendResult = await this.vesuService.executeLendingOperation(
             lendOperation,
             account
           );
-          return this.createSuccessResult('vesu_lend', { lendResult });
+          
+          if (lendResult.success) {
+            return this.createSuccessResult('vesu_lend', { 
+              message: `Successfully deposited ${amount} ${asset || 'tokens'} into Vesu pool. Transaction: ${lendResult.transactionHash}`,
+              transactionHash: lendResult.transactionHash,
+              amount: amount,
+              poolId: targetPoolId
+            });
+          } else {
+            return this.createErrorResult('vesu_lend', lendResult.error || 'Deposit failed');
+          }
 
         case 'borrow':
-          if (!account || !poolId || !amount)
+          if (!account || !amount)
             return this.createErrorResult(
               'vesu_borrow',
-              'Account, pool ID, and amount are required for borrowing.'
+              'Account and amount are required for borrowing.'
             );
+          
+          // If no poolId provided, find the best pool for the asset
+          let borrowPoolId = poolId;
+          if (!borrowPoolId && asset) {
+            const pools = await this.vesuService.getAvailablePools();
+            const assetPool = pools.find(pool => 
+              pool.asset === asset && pool.isActive
+            );
+            if (assetPool) {
+              borrowPoolId = assetPool.id;
+            }
+          }
+          
+          if (!borrowPoolId) {
+            return this.createErrorResult(
+              'vesu_borrow',
+              'Pool ID is required for borrowing. Please specify a pool or asset.'
+            );
+          }
+          
           const borrowOperation = {
-            poolId,
+            poolId: borrowPoolId,
             amount: amount.toString(),
             operation: 'borrow' as const,
             userAddress: account.address,
           };
+          
           const borrowResult = await this.vesuService.executeLendingOperation(
             borrowOperation,
             account
           );
-          return this.createSuccessResult('vesu_borrow', { borrowResult });
+          
+          if (borrowResult.success) {
+            return this.createSuccessResult('vesu_borrow', { 
+              message: `Successfully borrowed ${amount} ${asset || 'tokens'} from Vesu pool. Transaction: ${borrowResult.transactionHash}`,
+              transactionHash: borrowResult.transactionHash,
+              amount: amount,
+              poolId: borrowPoolId
+            });
+          } else {
+            return this.createErrorResult('vesu_borrow', borrowResult.error || 'Borrow failed');
+          }
 
         case 'withdraw':
           if (!account || !poolId || !amount)
