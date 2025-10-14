@@ -43,7 +43,16 @@ export class ExecutionAgent {
       input
     );
     console.log(res, 'resss');
-    return { success: true, data: res?.response };
+    
+    // Ensure we always return a valid response
+    if (!res || !res.response) {
+      return { 
+        success: true, 
+        data: 'I processed your request but didn\'t receive a clear response. Please try rephrasing your query.' 
+      };
+    }
+    
+    return { success: true, data: res.response };
   }
 }
 
