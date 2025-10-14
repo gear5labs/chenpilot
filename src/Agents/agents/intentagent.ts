@@ -15,6 +15,7 @@ export class IntentAgent {
       this.initialized = true;
     }
 
+    // Validate query first - ensures all queries are crypto/DeFi related
     const isValid = await validateQuery(input, userId);
     if (!isValid) {
       return { success: false, error: 'Invalid request format' };

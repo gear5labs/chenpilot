@@ -96,6 +96,16 @@ export class TrovesTool extends BaseTool<TrovesPayload> {
         description: 'Slippage tolerance percentage',
         required: false,
       },
+      minAmountOut: {
+        type: "number",
+        description: "Minimum amount out for swaps",
+        required: false
+      },
+      slippageTolerance: {
+        type: "number",
+        description: "Slippage tolerance percentage",
+        required: false
+      }
     },
     examples: [
       'Show available yield farming strategies',
@@ -311,6 +321,15 @@ export class TrovesTool extends BaseTool<TrovesPayload> {
           'Vault ID is required for deposit. Please specify a vault or asset.'
         );
       }
+      return this.createSuccessResult("troves_vault", {
+        vaultId: payload.vaultId,
+        vault: vault,
+        message: `Vault details for ${payload.vaultId}`
+      });
+    } catch (error) {
+      return this.createErrorResult("troves_vault", `Failed to get vault details: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
 
       // Create deposit operation
       const depositOperation = {
@@ -699,3 +718,4 @@ export class TrovesTool extends BaseTool<TrovesPayload> {
 }
 
 export const trovesTool = new TrovesTool();
+

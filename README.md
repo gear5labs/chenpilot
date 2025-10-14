@@ -203,7 +203,6 @@ The agent understands natural language commands. Here are examples:
 **Purpose**: Enables seamless swaps between Bitcoin and Starknet assets using the Atomiq protocol
 
 **Current Integration Status**: ✅ **FULLY INTEGRATED**
-
 - ✅ AtomiqService initialized with production SQLite storage
 - ✅ Cross-chain swap tools available
 - ✅ Bitcoin PSBT tools for transaction handling
@@ -212,7 +211,6 @@ The agent understands natural language commands. Here are examples:
 - ✅ Refund and claim operations (limited by current SDK)
 
 **Features**:
-
 - Bitcoin to Starknet token swaps (BTC → STRK)
 - Starknet to Bitcoin swaps (STRK → BTC)
 - Lightning network swaps for instant Bitcoin transactions
@@ -226,36 +224,35 @@ The agent understands natural language commands. Here are examples:
 
 ```typescript
 // Get swap quotes
-'Get quote for swapping 0.01 BTC to STRK';
-'Get quote for swapping 100 STRK to BTC';
+"Get quote for swapping 0.01 BTC to STRK"
+"Get quote for swapping 100 STRK to BTC"
 
 // Execute swaps
-'Swap 0.01 BTC to STRK';
-'Swap 100 STRK to BTC';
+"Swap 0.01 BTC to STRK"
+"Swap 100 STRK to BTC"
 
 // Lightning network swaps
-'Create lightning swap for 0.005 BTC to STRK';
-'Pay lightning invoice for swap abc123';
+"Create lightning swap for 0.005 BTC to STRK"
+"Pay lightning invoice for swap abc123"
 
 // Check balances and status
-'Check my STRK balance';
-'Check my Bitcoin balance';
-'Check status of swap abc123';
+"Check my STRK balance"
+"Check my Bitcoin balance"
+"Check status of swap abc123"
 
 // Manage swaps
-'Get all refundable swaps';
-'Get all claimable swaps';
-'Refund swap abc123';
-'Claim swap abc123';
+"Get all refundable swaps"
+"Get all claimable swaps"
+"Refund swap abc123"
+"Claim swap abc123"
 
 // Bitcoin transaction handling
-'Get PSBT for swap abc123';
-'Submit signed PSBT for swap abc123';
-'Wait for Bitcoin confirmation for swap abc123';
+"Get PSBT for swap abc123"
+"Submit signed PSBT for swap abc123"
+"Wait for Bitcoin confirmation for swap abc123"
 ```
 
 **Available Tools**:
-
 - `crossChainSwapTool` - Main cross-chain swap operations
   - BTC to STRK swaps
   - STRK to BTC swaps
@@ -283,18 +280,15 @@ The agent understands natural language commands. Here are examples:
   - Claim funds from lightning swaps
 
 **API Endpoints**:
-
 - `POST /query` - Natural language interface for all Atomiq operations
 - All operations are handled through the unified query endpoint
 
 **Current Limitations**:
-
 - Some advanced SDK methods are not available in current version
 - Manual refund/claim operations may require direct SDK usage
 - Lightning network swaps require proper invoice handling
 
 **Testing Results** (as of latest integration):
-
 - ✅ Balance checking: "Check my STRK balance" → Returns current balance (148.09 STRK)
 - ✅ Refundable swaps: "Get all refundable swaps" → Returns empty list (no active refundable swaps)
 - ✅ Claimable swaps: "Get all claimable swaps" → Returns appropriate response
@@ -592,7 +586,7 @@ curl -X POST http://localhost:2333/query \
   -d '{"userId": "your-user-id", "query": "Deposit 100 STRK to Troves vault"}'
 
 # Check positions
-curl -X POST http://localhost:2333/query \
+curl -X POST http://localhost:2333/query \  
   -H "Content-Type: application/json" \
   -d '{"userId": "your-user-id", "query": "What are my Troves positions?"}'
 ```
@@ -602,7 +596,6 @@ curl -X POST http://localhost:2333/query \
 The agent now supports advanced natural language understanding for comprehensive DeFi operations:
 
 ### 📊 Portfolio Analytics & Insights
-
 ```bash
 # Portfolio performance analysis
 curl -X POST http://localhost:2333/query \
@@ -621,7 +614,6 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 🎯 Smart Recommendations
-
 ```bash
 # Personalized investment advice
 curl -X POST http://localhost:2333/query \
@@ -640,7 +632,6 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 📈 Market Intelligence & Trends
-
 ```bash
 # Market trends and insights
 curl -X POST http://localhost:2333/query \
@@ -659,7 +650,6 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 🎓 Educational & How-To Queries
-
 ```bash
 # How-to instructions
 curl -X POST http://localhost:2333/query \
@@ -680,35 +670,30 @@ curl -X POST http://localhost:2333/query \
 ### 🔍 Advanced Query Types
 
 #### **Portfolio Management**
-
 - "Show my portfolio performance"
-- "Analyze my risk exposure"
+- "Analyze my risk exposure" 
 - "What's my best performing vault?"
 - "Should I rebalance my portfolio?"
 
 #### **Investment Intelligence**
-
 - "What should I invest in?"
 - "Best vault for 100 STRK"
 - "Safest yield option"
 - "High-yield opportunities"
 
 #### **Market Analysis**
-
 - "Show market trends"
 - "Compare STRK vaults"
 - "What's trending in yield farming?"
 - "Market conditions for Troves"
 
 #### **Educational Queries**
-
 - "How do I deposit to vault?"
 - "How to withdraw from vault?"
 - "How to harvest rewards?"
 - "What is yield farming?"
 
 #### **Context-Aware Responses**
-
 - "I want to earn 10% APY safely"
 - "Show me the best returns"
 - "Help me diversify my portfolio"
@@ -717,27 +702,22 @@ curl -X POST http://localhost:2333/query \
 ### 🚀 Natural Language Features
 
 #### **Intent Recognition**
-
 The agent understands various ways to express the same intent:
-
 - "Deposit 100 STRK" = "Invest 100 STRK" = "Put 100 STRK in vault"
 - "Show vaults" = "List vaults" = "What vaults are available"
 - "My positions" = "My investments" = "What I have invested"
 
 #### **Context Awareness**
-
 - Remembers your previous queries and positions
 - Provides personalized recommendations based on your portfolio
 - Suggests relevant actions based on your current holdings
 
 #### **Smart Suggestions**
-
 - Proactive recommendations for portfolio optimization
 - Risk-adjusted investment advice
 - Diversification suggestions based on your current assets
 
 #### **Educational Integration**
-
 - Explains complex DeFi concepts in simple terms
 - Provides step-by-step instructions for new users
 - Offers best practices and pro tips
@@ -761,7 +741,6 @@ curl -X POST http://localhost:2333/query \
 The agent now supports comprehensive Bitcoin ecosystem operations through Xverse Wallet integration:
 
 ### ✨ Key Features
-
 - **🔗 Wallet Connection**: Connect Xverse wallets with Bitcoin addresses
 - **💰 Native Balance Detection**: Smart detection of Bitcoin, STRK, and token balances
 - **🎨 Ordinals Support**: View and manage Bitcoin NFTs
@@ -773,7 +752,6 @@ The agent now supports comprehensive Bitcoin ecosystem operations through Xverse
 - **🔄 Swap Operations**: Cross-chain and Bitcoin ecosystem swaps
 
 ### 💰 Bitcoin Operations
-
 ```bash
 # Connect Xverse wallet
 curl -X POST http://localhost:2333/query \
@@ -797,7 +775,6 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 🎨 Ordinals (Bitcoin NFTs)
-
 ```bash
 # View Ordinals collection
 curl -X POST http://localhost:2333/query \
@@ -816,7 +793,6 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 🪙 Runes (Bitcoin Tokens)
-
 ```bash
 # Check Runes balance
 curl -X POST http://localhost:2333/query \
@@ -835,7 +811,6 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 📊 BRC-20 & Spark Tokens
-
 ```bash
 # Check BRC-20 balances
 curl -X POST http://localhost:2333/query \
@@ -854,7 +829,6 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 🔄 Smart Balance Detection
-
 ```bash
 # Specific balance queries
 curl -X POST http://localhost:2333/query \
@@ -873,7 +847,6 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 📚 Educational Content
-
 ```bash
 # Learn about Bitcoin
 curl -X POST http://localhost:2333/query \
@@ -892,7 +865,6 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 🛠️ How-To Guides
-
 ```bash
 # How to buy Bitcoin
 curl -X POST http://localhost:2333/query \
@@ -916,7 +888,6 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 📈 Analytics & Insights
-
 ```bash
 # Bitcoin analytics
 curl -X POST http://localhost:2333/query \
@@ -935,7 +906,6 @@ curl -X POST http://localhost:2333/query \
 ```
 
 ### 🔄 Swap Operations
-
 ```bash
 # Get swap quotes
 curl -X POST http://localhost:2333/query \

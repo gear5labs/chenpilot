@@ -597,6 +597,40 @@ export class VesuService {
       };
     }
   }
+
+  /**
+   * Get native STRK balance for an account
+   */
+  async getNativeSTRKBalance(address: string): Promise<{ balance: string; formatted: string }> {
+    try {
+      // STRK token contract address on Starknet mainnet
+      const strkTokenAddress = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
+      
+      // ERC20 balanceOf function selector
+      const balanceOfSelector = "0x2e42684afd9ff2fdb8ea8e9d9b29a9a468420ce969663ce48f8c417e2ae5a7b";
+      
+      // Call balanceOf on STRK token contract
+      const result = await this.provider.callContract({
+        contractAddress: strkTokenAddress,
+        entrypoint: "balanceOf",
+        calldata: [address]
+      });
+
+      // Extract balance from result (first element is the balance)
+      const balance = result[0];
+      const formattedBalance = (Number(balance) / Math.pow(10, 18)).toFixed(6);
+
+      return {
+        balance: balance,
+        formatted: formattedBalance
+      };
+    } catch (error) {
+      return {
+        balance: "0",
+        formatted: "0.000000"
+      };
+    }
+  }
 }
 
 export const vesuService = new VesuService();
