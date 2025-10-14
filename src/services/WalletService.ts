@@ -36,7 +36,7 @@ export class ProductionWalletService implements WalletService {
         privateKey: userAccountData.privateKey,
         publicKey: userAccountData.publicKey,
         address: userAccountData.precalculatedAddress,
-        chainId: 'SN_SEPOLIA',
+        chainId: 'SN_MAIN',
         isActive: userAccountData.deployed,
         createdAt: new Date(),
         lastUsed: new Date(),

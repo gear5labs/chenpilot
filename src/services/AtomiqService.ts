@@ -59,9 +59,9 @@ export class AtomiqService {
       // Try multiple RPC endpoints for better reliability
       const rpcUrls = [
         process.env.NODE_URL ||
-          'https://starknet-sepolia.public.blastapi.io/rpc/v0_8',
-        'https://starknet-sepolia.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161',
-        'https://rpc.sepolia.starknet.io',
+          'https://starknet-mainnet.public.blastapi.io/rpc/v0_8',
+        'https://starknet-mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161',
+        'https://rpc.mainnet.starknet.io',
       ];
 
       let starknetProvider;
@@ -90,7 +90,7 @@ export class AtomiqService {
             rpcUrl: starknetProvider!,
           },
         },
-        bitcoinNetwork: BitcoinNetwork.TESTNET,
+        bitcoinNetwork: BitcoinNetwork.MAINNET,
         // Following the exact documentation pattern for NodeJS
         swapStorage: (chainId: string) =>
           new SqliteUnifiedStorage(`CHAIN_${chainId}.sqlite3`),

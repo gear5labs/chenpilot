@@ -40,7 +40,7 @@ export class AutoFundingService {
     // Use environment variables for configuration
     const nodeUrl =
       process.env.STARKNET_NODE_URL ||
-      'https://docs-demo.strk-sepolia.quiknode.pro/rpc/v0_7';
+      'https://starknet-mainnet.public.blastapi.io/rpc/v0_8';
     this.provider = new RpcProvider({ nodeUrl });
 
     this.config = {
