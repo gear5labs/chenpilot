@@ -16,8 +16,8 @@ export class VesuService {
 
   constructor() {
     this.config = {
-      rpcUrl: 'https://starknet-sepolia.public.blastapi.io/rpc/v0_7',
-      network: 'sepolia',
+      rpcUrl: 'https://starknet-mainnet.public.blastapi.io/rpc/v0_8',
+      network: 'mainnet',
       contractAddresses: {
         poolFactory:
           '0x3760f903a37948f97302736f89ce30290e45f441559325026842b7a6fb388c0',

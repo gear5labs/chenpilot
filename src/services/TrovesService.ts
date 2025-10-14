@@ -22,8 +22,8 @@ export class TrovesService {
     this.config = {
       rpcUrl:
         process.env.NODE_URL ||
-        'https://starknet-sepolia.public.blastapi.io/rpc/v0_8',
-      network: 'sepolia',
+        'https://starknet-mainnet.public.blastapi.io/rpc/v0_8',
+      network: 'mainnet',
       contractAddresses: {
         accessControl:
           '0x0636a3f51cc37f5729e4da4b1de6a8549a28f3c0d5bf3b17f150971e451ff9c2',
