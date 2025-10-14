@@ -30,10 +30,10 @@ export class StarknetService {
     // Use environment variables for configuration
     const nodeUrl =
       process.env.NODE_URL ||
-      'https://starknet-sepolia.public.blastapi.io/rpc/v0_8';
+      'https://starknet-mainnet.public.blastapi.io/rpc/v0_8';
     this.provider = new RpcProvider({ nodeUrl });
 
-    // OpenZeppelin Account class hash for Sepolia
+    // OpenZeppelin Account class hash for Mainnet
     this.OZAccountClassHash =
       process.env.STARKNET_ACCOUNT_CLASS_HASH ||
       '0x061dac032f228abef9c6626f995015233097ae253a7f72d68552db02f2971b8f';
@@ -146,9 +146,7 @@ export class StarknetService {
       const account = new Account(
         this.provider,
         accountData.precalculatedAddress,
-        signer,
-        '1', // chainId for Sepolia
-        '0x3' // account version
+        signer
       );
 
       // Check if account has sufficient balance for deployment

@@ -40,19 +40,19 @@ export class AutoFundingService {
     // Use environment variables for configuration
     const nodeUrl =
       process.env.STARKNET_NODE_URL ||
-      'https://docs-demo.strk-sepolia.quiknode.pro/rpc/v0_7';
+      'https://starknet-mainnet.public.blastapi.io/rpc/v0_7';
     this.provider = new RpcProvider({ nodeUrl });
 
     this.config = {
       fundedAccountPrivateKey: process.env.FUNDED_ACCOUNT_PRIVATE_KEY || '',
       fundedAccountAddress: process.env.FUNDED_ACCOUNT_ADDRESS || '',
-      fundingAmount: process.env.FUNDING_AMOUNT || '100000000000000000', // 0.1 STRK
+      fundingAmount: process.env.FUNDING_AMOUNT || '10000000000000', // 0.00001 STRK
       tokenAddress:
         process.env.TOKEN_ADDRESS ||
         '0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d',
       maxFundingPerDay: parseInt(process.env.MAX_FUNDING_PER_DAY || '100'),
       maxFundingAmount:
-        process.env.MAX_FUNDING_AMOUNT || '100000000000000000000', // 100 STRK
+        process.env.MAX_FUNDING_AMOUNT || '10000000000000000000', // 10 STRK
     };
 
     console.log('Auto-funding configuration:');
