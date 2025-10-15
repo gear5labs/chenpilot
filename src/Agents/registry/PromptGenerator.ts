@@ -85,6 +85,7 @@ Guidelines:
   OR if it is a related natural question (e.g. "is it safe to swap?", 
   "who did I send money to?", "what's my balance?", "how does this transaction work?").
 - Return "0" only if the query is completely unrelated to crypto or system operations.
+NOTE, GREETINGS ARE VALID PROMPTs but only if they are not spammed more than 2x in a row
 
 
 Respond ONLY with:
@@ -96,7 +97,6 @@ here is the  to help make a decision
 REMEMBER: Yes or No can be valid depending on the context, use the context to decide
 system "{{CONTEXT}}"
 `;
-
   }
   /**
    * response prompt
