@@ -10,6 +10,7 @@ on:
 
 jobs:
   build:
+    name: Build Application
     runs-on: ubuntu-latest
 
     steps:
@@ -26,55 +27,41 @@ jobs:
         with:
           version: 10.13.1
 
-      - name: Setup pnpm cache
+      - name: Cache pnpm store
         uses: actions/cache@v4
         with:
           path: ~/.pnpm-store
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-pnpm-store-
+            ${{ runner.os }}-pnpm-
 
-      - name: Install and Build
+      - name: Install Dependencies and Build
         run: |
           pnpm install --frozen-lockfile
           pnpm run build
 
+      - name: Create Deployment Package
+        run: |
+          tar -czf deployment.tar.gz dist/ package.json pnpm-lock.yaml
+
+      - name: Upload Deployment Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chenpilot-build
+          path: deployment.tar.gz
+
   deploy:
+    name: Deploy to Production Server
     needs: build
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Download Build Artifact
+        uses: actions/download-artifact@v4
         with:
-          node-version: 20.x
+          name: chenpilot-build
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.13.1
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.pnpm-store
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install and Build
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm run build
-
-      - name: Create deployment package
-        run: |
-          tar -czf deployment.tar.gz dist/ package.json pnpm-lock.yaml
-
-      - name: Upload build to AWS server via SCP
+      - name: Upload Build to AWS VPS
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.AWS_HOST }}
@@ -85,7 +72,7 @@ jobs:
           overwrite: true
           rm: true
 
-      - name: Restart chenpilot-prod on AWS
+      - name: Deploy and Restart chenpilot-prod
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.AWS_HOST }}
@@ -93,8 +80,19 @@ jobs:
           key: ${{ secrets.AWS_SSH_KEY }}
           script: |
             cd /var/www/chenpilot-prod
+            echo "Extracting build..."
             tar -xzf deployment.tar.gz
             rm deployment.tar.gz
-            echo "${{ secrets.PROD_ENV }}" > .env
+
+            echo "Writing .env file..."
+            cat << 'EOF' > .env
+            ${{ secrets.PROD_ENV }}
+            EOF
+
+            echo "Installing production dependencies..."
             pnpm install --prod
+
+            echo "Restarting PM2 process..."
             pm2 start dist/index.js --name chenpilot-prod || pm2 restart chenpilot-prod
+
+            echo "Deployment completed successfully!"
