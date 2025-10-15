@@ -37,14 +37,12 @@ jobs:
 
       - name: Install Dependencies and Build
         run: |
-          export npm_config_build_from_source=false
-          pnpm install --frozen-lockfile
-          pnpm rebuild sqlite3
+          pnpm install --frozen-lockfile --ignore-scripts
           pnpm run build
 
       - name: Create Deployment Package
         run: |
-          tar -czf deployment.tar.gz dist/ package.json pnpm-lock.yaml node_modules/
+          tar -czf deployment.tar.gz dist/ package.json pnpm-lock.yaml
 
       - name: Upload Deployment Artifact
         uses: actions/upload-artifact@v4
@@ -85,6 +83,9 @@ jobs:
             echo "Extracting build..."
             tar -xzf deployment.tar.gz
             rm deployment.tar.gz
+
+            echo "Installing dependencies and building native modules..."
+            pnpm install --frozen-lockfile --prod
 
             echo "Writing .env file..."
             cat << 'EOF' > .env
