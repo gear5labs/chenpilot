@@ -20,7 +20,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20.x
+          node-version: 22.x 
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -37,12 +37,14 @@ jobs:
 
       - name: Install Dependencies and Build
         run: |
+          export npm_config_build_from_source=false
           pnpm install --frozen-lockfile
+          pnpm rebuild sqlite3
           pnpm run build
 
       - name: Create Deployment Package
         run: |
-          tar -czf deployment.tar.gz dist/ package.json pnpm-lock.yaml
+          tar -czf deployment.tar.gz dist/ package.json pnpm-lock.yaml node_modules/
 
       - name: Upload Deployment Artifact
         uses: actions/upload-artifact@v4
@@ -88,9 +90,6 @@ jobs:
             cat << 'EOF' > .env
             ${{ secrets.PROD_ENV }}
             EOF
-
-            echo "Installing production dependencies..."
-            pnpm install --prod
 
             echo "Restarting PM2 process..."
             pm2 start dist/index.js --name chenpilot-prod || pm2 restart chenpilot-prod
