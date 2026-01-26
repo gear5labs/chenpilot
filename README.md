@@ -23,7 +23,7 @@ cd chenpilot-experimental
 ### Install dependencies
 
 ```bash
-npm install
+pnpm install
 ```
 
 ### Set up environment variables
@@ -47,6 +47,96 @@ npm run dev
 
 ---
 
+## 🧹 Code Quality & Git Hooks
+
+This project uses **Husky**, **lint-staged**, and **commitlint** to enforce code quality and commit message standards.
+
+### What Runs Automatically
+
+* **pre-commit**
+
+  * Runs ESLint with auto-fix
+  * Runs Prettier formatting
+  * Blocks commits if checks fail
+
+* **commit-msg**
+
+  * Validates commit messages using Commitlint
+  * Enforces Conventional Commits format
+  * Blocks commits with invalid commit messages
+
+This setup helps maintain consistent code style and a clean, readable git history.
+
+---
+
+### Local Setup
+
+Git hooks are enabled automatically after installing dependencies:
+
+```bash
+pnpm install
+```
+
+If hooks do not run for any reason, re-enable Husky manually:
+
+```bash
+pnpm exec husky install
+```
+
+---
+
+### Configuration Overview
+
+#### pre-commit hook
+
+```sh
+pnpm exec lint-staged
+```
+
+#### commit-msg hook
+
+```sh
+pnpm exec commitlint --edit $1
+```
+
+#### lint-staged configuration
+
+```json
+{
+  "**/*.{ts,tsx}": [
+    "eslint --fix",
+    "prettier --write"
+  ]
+}
+```
+
+#### commitlint configuration
+
+Commit messages must follow the **Conventional Commits** specification.
+
+Examples of valid commit messages:
+
+```text
+feat: add cross-chain swap workflow
+fix: handle null wallet address
+chore: update dependencies
+docs: update README
+```
+
+---
+
+### Skipping Hooks (Not Recommended)
+
+Hooks can be skipped in exceptional cases:
+
+```bash
+git commit --no-verify
+```
+
+> ⚠️ Use sparingly. CI checks will still run and invalid commits may be rejected.
+
+---
+
 ## Workflow System
 
 The agent uses an intelligent workflow system that:
@@ -64,6 +154,7 @@ The agent uses an intelligent workflow system that:
 * Fork the repository
 * Create a feature branch
 * Make your changes
+* Ensure pre-commit and commit message checks pass
 * Add tests if applicable
 * Submit a pull request
 
@@ -85,5 +176,7 @@ For support and questions:
 
 ---
 
-Chen Pilot - Your intelligent gateway to cross-chain DeFi operations
+Chen Pilot — Your intelligent gateway to cross-chain DeFi operations
 
+```
+```

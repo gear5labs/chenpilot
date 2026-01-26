@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { container } from "tsyringe";
+import routes from "./routes";
 
 import { authenticate } from "../Auth/auth";
 import UserService from "../Auth/user.service";
@@ -62,6 +63,8 @@ app.post("/query", async (req, res, next) => {
     next(error);
   }
 });
+
+app.use("/api", routes);
 
 app.use(ErrorHandler);
 

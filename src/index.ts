@@ -30,7 +30,7 @@ class Server {
       this.server.on("error", (error: NodeJS.ErrnoException) => {
         if (error.code === "EADDRINUSE") {
           console.log(
-            `Port ${this.port} in use, retrying on ${this.port + 1}...`
+            `Port ${this.port} in use, retrying on ${this.port + 1}...`,
           );
           this.port += 1;
           this.start();
