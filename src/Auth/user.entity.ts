@@ -18,12 +18,9 @@ export class User {
   address!: string;
 
   @Column({ type: "varchar" })
-  pk!: string;
-  
-  @Column({ type: "boolean", default: false })
-  isDeployed!: boolean;
+  encryptedPrivateKey!: string;
 
-  @Column({ type: "varchar", default: "STRK" })
+  @Column({ type: "varchar", default: "XLM" })
   tokenType!: string;
 
   @CreateDateColumn()

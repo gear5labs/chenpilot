@@ -5,6 +5,7 @@ export default {
   port: 2333,
   apiKey: process.env.ANTHROPIC_API_KEY!,
   node_url: process.env.NODE_URL!,
+  encryptionKey: process.env.ENCRYPTION_KEY!,
   db: {
     postgres: {
       host: process.env.DB_HOST!,
