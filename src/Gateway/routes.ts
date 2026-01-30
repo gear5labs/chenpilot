@@ -7,6 +7,7 @@ import {
   type TransactionQueryParams,
   type TransactionType,
 } from "./transaction.service";
+import logger from "../config/logger";
 
 const router = Router();
 
@@ -80,7 +81,7 @@ router.post("/signup", async (req: Request, res: Response) => {
       userId: savedUser.id,
     });
   } catch (error) {
-    console.error("Signup error:", error);
+    logger.error("Signup error", { error, name: req.body?.name });
     return res.status(500).json({
       success: false,
       message: "Internal server error",

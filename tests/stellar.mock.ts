@@ -1,5 +1,7 @@
 // Jest globals are available after installing @types/jest
 // No import needed for jest global
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { jest } from "@jest/globals";
 
 export const mockStellarSdk: Record<string, unknown> = {
   Keypair: {
@@ -15,6 +17,8 @@ export const mockStellarSdk: Record<string, unknown> = {
   Horizon: {
     Server: jest.fn().mockImplementation(() => ({
       loadAccount: jest.fn().mockResolvedValue({
+      // Use "as any" before .mockResolvedValue to stop the 'never' error
+      loadAccount: (jest.fn() as any).mockResolvedValue({
         id: "GD77MOCKPUBLICKEY1234567890",
         balances: [
           { asset_type: "native", balance: "100.0000" },
@@ -28,6 +32,7 @@ export const mockStellarSdk: Record<string, unknown> = {
       }),
       strictReceivePaths: jest.fn().mockImplementation(() => ({
         call: jest.fn().mockResolvedValue({
+        call: (jest.fn() as any).mockResolvedValue({
           records: [{ source_amount: "10.00", source_asset_type: "native" }],
         }),
       })),
@@ -38,6 +43,7 @@ export const mockStellarSdk: Record<string, unknown> = {
     code: string,
     issuer: string,
   ) {
+  Asset: function (this: any, code: string, issuer: string) {
     this.code = code;
     this.issuer = issuer;
     this.isNative = () => !code;

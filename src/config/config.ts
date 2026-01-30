@@ -43,6 +43,7 @@ export default {
   port: 2333,
   apiKey: process.env.ANTHROPIC_API_KEY!,
   node_url: process.env.NODE_URL!,
+  encryptionKey: process.env.ENCRYPTION_KEY!,
   stellar: {
     network: stellarNetwork,
     horizonUrl: process.env.STELLAR_HORIZON_URL || stellarConfig.horizonUrl,

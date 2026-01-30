@@ -3,6 +3,7 @@ import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 import { container } from "tsyringe";
 import ContactService from "../../Contacts/contact.service";
 import { supportedTokens } from "../types";
+import logger from "../../config/logger";
 
 interface CreatePayload {
   name: string;
@@ -72,7 +73,7 @@ export class ContactTool extends BaseTool {
     data: CreatePayload,
     userId: string
   ): Promise<ToolResult> {
-    console.log(data,'hsdd')
+    logger.info("Creating contact", { name: data?.name, tokenType: data?.tokenType, userId });
     if (!data?.name || !data?.address || !data?.tokenType) {
       return this.createErrorResult(
         "create_contact",

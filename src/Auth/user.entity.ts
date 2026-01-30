@@ -27,6 +27,9 @@ export class User {
   isFunded!: boolean;
 
   @Column({ type: "varchar", default: "STRK" })
+  encryptedPrivateKey!: string;
+
+  @Column({ type: "varchar", default: "XLM" })
   tokenType!: string;
 
   @CreateDateColumn()

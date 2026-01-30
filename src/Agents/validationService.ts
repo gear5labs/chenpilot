@@ -2,6 +2,7 @@ import { agentLLM } from "./agent";
 import { memoryStore } from "./memory/memory";
 import { promptGenerator } from "./registry/PromptGenerator";
 import { toolAutoDiscovery } from "./registry/ToolAutoDiscovery";
+import logger from "../config/logger";
 
 let initialized = false;
 
@@ -21,8 +22,9 @@ export async function validateQuery(
     "{{CONTEXT}}",
     JSON.stringify(context)
   );
-  console.log(validationPrompt);
+  logger.debug("Validating query", { userId, query });
   const result = await agentLLM.callLLM(userId, validationPrompt, query, false);
-
-  return result.trim() === "1";
+  const isValid = result.trim() === "1";
+  logger.info("Query validation result", { userId, isValid });
+  return isValid;
 }
