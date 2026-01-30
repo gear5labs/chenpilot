@@ -5,6 +5,7 @@ import { promptGenerator } from "../registry/PromptGenerator";
 import { toolAutoDiscovery } from "../registry/ToolAutoDiscovery";
 import { WorkflowPlan, WorkflowStep } from "../types";
 import { memoryStore } from "../memory/memory";
+import { parseSorobanIntent } from "../planner/sorobanIntent";
 
 export class IntentAgent {
   private initialized = false;
@@ -33,6 +34,12 @@ export class IntentAgent {
     userId: string
   ): Promise<WorkflowPlan> {
     try {
+      const sorobanWorkflow = parseSorobanIntent(input);
+      if (sorobanWorkflow) {
+        memoryStore.add(userId, `User: ${input}`);
+        return sorobanWorkflow;
+      }
+
       const prompt = promptGenerator
         .generateIntentPrompt()
         .replace("{{USER_INPUT}}", input)

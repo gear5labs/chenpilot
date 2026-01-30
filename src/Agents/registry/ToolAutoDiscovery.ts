@@ -31,6 +31,8 @@ export class ToolAutoDiscovery {
       const { contactTool } = await import("../tools/contact");
       toolRegistry.register(qaTool)
       toolRegistry.register(contactTool);
+      const { sorobanTool } = await import("../tools/soroban");
+      toolRegistry.register(sorobanTool);
       // todo
       // await this.discoverToolsFromDirectory();
 

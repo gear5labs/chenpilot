@@ -44,7 +44,7 @@ export const mockStellarSdk: any = {
     addOperation: jest.fn().mockReturnThis(),
     addMemo: jest.fn().mockReturnThis(),
     setTimeout: jest.fn().mockReturnThis(),
-    build: jest.fn().mockReturnThis(),
+    build: jest.fn().mockReturnValue({ type: 'mock_tx' }),
     sign: jest.fn().mockReturnThis(),
   })),
   Operation: {
@@ -54,6 +54,33 @@ export const mockStellarSdk: any = {
   Network: {
     TESTNET: 'Test SDF Network ; September 2015',
   },
+  Networks: {
+    TESTNET: 'Test SDF Network ; September 2015',
+    PUBLIC: 'Public Global Stellar Network ; September 2015',
+  },
+  BASE_FEE: '100',
+  Account: jest.fn().mockImplementation((accountId: string, sequence: string) => ({
+    accountId,
+    sequence,
+  })),
+  Contract: jest.fn().mockImplementation((contractId: string) => ({
+    contractId,
+    call: jest.fn((method: string, ...args: any[]) => ({
+      type: 'invoke',
+      contractId,
+      method,
+      args,
+    })),
+  })),
+  SorobanRpc: {
+    Server: jest.fn().mockImplementation(() => ({
+      simulateTransaction: (jest.fn() as any).mockResolvedValue({
+        result: { retval: 'mock_scval' },
+      }),
+    })),
+  },
+  scValToNative: jest.fn((val: any) => val),
+  nativeToScVal: jest.fn((val: any) => val),
 };
 
 jest.mock('@stellar/stellar-sdk', () => mockStellarSdk);
