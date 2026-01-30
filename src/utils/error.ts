@@ -1,5 +1,6 @@
 /* eslint-env node */
 import express, { NextFunction } from "express";
+import logger from "../config/logger";
 
 
 export class ApplicationError extends Error {
@@ -90,6 +91,7 @@ export async function ErrorHandler(
     code?: string;
     column?: string;
     message?: string;
+    stack?: string;
   },
   req: express.Request,
   res: express.Response,
@@ -98,7 +100,15 @@ export async function ErrorHandler(
   let message = err?.message || "Internal server error";
   let statusCode = err?.statusCode || 500;
 
-  
+  // Log the error with context
+  logger.error("Request error", {
+    message: err?.message,
+    statusCode,
+    code: err?.code,
+    method: req.method,
+    url: req.originalUrl,
+    stack: err?.stack,
+  });
 
   switch (err.code) {
     case "23502":

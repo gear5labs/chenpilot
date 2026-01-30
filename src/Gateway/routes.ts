@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import AppDataSource from "../config/Datasource";
 import { User } from "../Auth/user.entity";
+import logger from "../config/logger";
 
 const router = Router();
 
@@ -47,7 +48,7 @@ router.post("/signup", async (req: Request, res: Response) => {
       userId: savedUser.id,
     });
   } catch (error) {
-    console.error("Signup error:", error);
+    logger.error("Signup error", { error, name: req.body?.name });
     return res.status(500).json({
       success: false,
       message: "Internal server error",

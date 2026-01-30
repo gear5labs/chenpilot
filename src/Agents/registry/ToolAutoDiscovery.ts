@@ -1,6 +1,7 @@
 import { qaTool } from "../tools/qatool";
 import { ToolDefinition } from "./ToolMetadata";
 import { toolRegistry } from "./ToolRegistry";
+import logger from "../../config/logger";
 
 export class ToolAutoDiscovery {
   private static instance: ToolAutoDiscovery;
@@ -35,13 +36,11 @@ export class ToolAutoDiscovery {
       // await this.discoverToolsFromDirectory();
 
       this.initialized = true;
-      console.log(
-        `Tool registry initialized with ${
-          toolRegistry.getAllTools().length
-        } tools`
-      );
+      logger.info("Tool registry initialized", {
+        toolCount: toolRegistry.getAllTools().length
+      });
     } catch (error) {
-      console.error("Failed to initialize tool registry:", error);
+      logger.error("Failed to initialize tool registry", { error });
       throw error;
     }
   }

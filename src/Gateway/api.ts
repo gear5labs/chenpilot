@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import { container } from "tsyringe";
 import routes from "./routes";
+import requestLogger from "../middleware/requestLogger";
 
 import { authenticate } from "../Auth/auth";
 import UserService from "../Auth/user.service";
@@ -18,6 +19,7 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(requestLogger);
 
 function createSuccess<T>(data: T, message: string) {
   return {

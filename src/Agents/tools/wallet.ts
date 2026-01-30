@@ -11,6 +11,7 @@ import { BaseTool } from "./base/BaseTool";
 import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 import ContactService from "../../Contacts/contact.service";
 import config from "../../config/config";
+import logger from "../../config/logger";
 const tokensMap: Record<supportedTokens, string> = {
   DAI: DAITokenAddress,
   STRK: STRKTokenAddress,
@@ -130,7 +131,7 @@ export class WalletTool extends BaseTool {
     userId: string
   ): Promise<ToolResult> {
     try {
-      console.log(payload);
+      logger.info("Getting wallet balance", { token: payload.token, userId });
       const accountData = this.getAccount(userId);
       const acct = this.getStarkAccount(userId);
 
@@ -141,14 +142,17 @@ export class WalletTool extends BaseTool {
         accountData.precalculatedAddress
       );
 
-      return this.createSuccessResult("wallet_balance", {
+      const result = this.createSuccessResult("wallet_balance", {
         balance: `${(Number(balance.balance.toString()) / 10 ** 18).toFixed(
           2
         )} ${payload.token}`,
         token: contractAddress,
         address: accountData.precalculatedAddress,
       });
+      logger.info("Balance retrieved successfully", { token: payload.token, userId });
+      return result;
     } catch (error) {
+      logger.error("Failed to get balance", { error, token: payload.token, userId });
       return this.createErrorResult(
         "wallet_balance",
         `Failed to get balance: ${
@@ -163,6 +167,7 @@ export class WalletTool extends BaseTool {
     userId: string
   ): Promise<ToolResult> {
     try {
+      logger.info("Initiating transfer", { to: payload.to, amount: payload.amount, token: payload.token, userId });
       const starkAccount = this.getStarkAccount(userId);
       const tokenAddress = payload.token
         ? tokensMap[payload.token]
@@ -180,13 +185,21 @@ export class WalletTool extends BaseTool {
 
       await starkAccount.waitForTransaction(tx.transaction_hash);
 
-      return this.createSuccessResult("transfer", {
+      const result = this.createSuccessResult("transfer", {
         from: starkAccount.address,
         to: payload.to,
         amount: payload.amount,
         txHash: tx.transaction_hash,
       });
+      logger.info("Transfer completed successfully", {
+        to: payload.to,
+        amount: payload.amount,
+        txHash: tx.transaction_hash,
+        userId
+      });
+      return result;
     } catch (error) {
+      logger.error("Transfer failed", { error, to: payload.to, amount: payload.amount, userId });
       return this.createErrorResult(
         "transfer",
         `Transfer failed: ${
@@ -199,10 +212,12 @@ export class WalletTool extends BaseTool {
   private async getWalletAddress(userId: string): Promise<ToolResult> {
     try {
       const account = this.getAccount(userId);
+      logger.info("Retrieved wallet address", { userId });
       return this.createSuccessResult("address", {
         address: account.precalculatedAddress,
       });
     } catch (error) {
+      logger.error("Failed to get wallet address", { error, userId });
       return this.createErrorResult(
         "address",
         `Failed to get address: ${

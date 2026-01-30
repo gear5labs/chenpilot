@@ -5,6 +5,7 @@ import { promptGenerator } from "../registry/PromptGenerator";
 import { toolAutoDiscovery } from "../registry/ToolAutoDiscovery";
 import { WorkflowPlan, WorkflowStep } from "../types";
 import { memoryStore } from "../memory/memory";
+import logger from "../../config/logger";
 
 export class IntentAgent {
   private initialized = false;
@@ -21,7 +22,7 @@ export class IntentAgent {
     }
 
     const workflow = await this.planWorkflow(input, userId);
-    console.log(workflow);
+    logger.info("Workflow planned", { workflow, userId });
     if (!workflow.workflow.length) {
       return { success: false, error: "Could not determine workflow" };
     }
@@ -45,7 +46,7 @@ export class IntentAgent {
       memoryStore.add(userId, `User: ${input}`);
       return { workflow: steps };
     } catch (err) {
-      console.error("LLM workflow parsing failed:", err);
+      logger.error("LLM workflow parsing failed", { error: err, userId });
       return { workflow: [] };
     }
   }
