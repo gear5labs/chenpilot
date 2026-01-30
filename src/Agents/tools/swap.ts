@@ -3,6 +3,7 @@ import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import config from "../../config/config";
 import accountsData from "../../Auth/accounts.json";
+import logger from "../../config/logger";
 
 interface SwapPayload extends Record<string, unknown> {
   from: string;
@@ -104,9 +105,12 @@ export class SwapTool extends BaseTool<SwapPayload> {
       const sourceKeypair = this.getStellarAccount(userId);
       const sourcePublicKey = sourceKeypair.publicKey();
 
-      console.log(
-        `User ${userId} swapping ${payload.amount} ${payload.from} → ${payload.to}`
-      );
+      logger.info("Initiating swap", {
+        userId,
+        amount: payload.amount,
+        from: payload.from,
+        to: payload.to
+      });
 
       // Load source account to get sequence number
       const sourceAccount = await this.server.loadAccount(sourcePublicKey);

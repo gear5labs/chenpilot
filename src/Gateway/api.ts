@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import routes from "./routes";
+import requestLogger from "../middleware/requestLogger";
 
 import { authenticate } from "../Auth/auth";
 import { validateQuery } from "../Agents/validationService";
@@ -14,6 +15,7 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(requestLogger);
 
 app.post("/query", async (req, res) => {
   const { userId, query } = req.body;

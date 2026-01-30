@@ -3,12 +3,14 @@ import { toolRegistry } from "../registry/ToolRegistry";
 import { ToolResult } from "../registry/ToolMetadata";
 import { memoryStore } from "../memory/memory";
 import { responseAgent } from "./responseagent";
+import logger from "../../config/logger";
 export class ExecutionAgent {
   async run(plan: WorkflowPlan, userId: string, input: string) {
     const results: ToolResult[] = [];
 
     for (const step of plan.workflow) {
       try {
+        logger.info("Executing tool", { action: step.action, userId });
         const result = await toolRegistry.executeTool(
           step.action,
           step.payload,
@@ -16,6 +18,7 @@ export class ExecutionAgent {
         );
         results.push(result);
       } catch (error) {
+        logger.error("Tool execution failed", { action: step.action, error, userId });
         const errorResult: ToolResult = {
           action: step.action,
           status: "error",
@@ -42,7 +45,7 @@ export class ExecutionAgent {
       userId,
       input
     );
-    console.log(res, "resss");
+    logger.info("Workflow execution completed", { userId, hasResponse: !!res?.response });
     return { success: true, data: res?.response };
   }
 }

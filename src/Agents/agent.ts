@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import config from "../config/config";
 import { memoryStore } from "./memory/memory";
+import logger from "../config/logger";
 
 const client = new Anthropic({
   apiKey: config.apiKey,
@@ -39,7 +40,7 @@ export class AgentLLM {
         const parsed = JSON.parse(content);
         return parsed;
       } catch (err) {
-        console.error("JSON parse error:", err, "raw:", content);
+        logger.error("JSON parse error", { error: err, rawContent: content });
         return {};
       }
     } else {
