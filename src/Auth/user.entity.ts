@@ -19,9 +19,12 @@ export class User {
 
   @Column({ type: "varchar" })
   pk!: string;
-  
+
   @Column({ type: "boolean", default: false })
   isDeployed!: boolean;
+
+  @Column({ type: "boolean", default: false })
+  isFunded!: boolean;
 
   @Column({ type: "varchar", default: "STRK" })
   tokenType!: string;
