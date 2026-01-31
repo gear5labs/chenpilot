@@ -1,4 +1,6 @@
 import { Router, Request, Response } from "express";
+import { rateLimit } from 'express-rate-limit';
+import helmet from 'helmet';
 import AppDataSource from "../config/Datasource";
 import { User } from "../Auth/user.entity";
 import { stellarWebhookService } from "./webhook.service";
@@ -10,6 +12,42 @@ import {
 import logger from "../config/logger";
 
 const router = Router();
+
+router.use(helmet());
+
+// --- RATE LIMITING STRATEGIES ---
+
+// AC: 100 req/min per IP for public/general routes
+const generalLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  limit: 100,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { success: false, message: "Too many requests. Please slow down." },
+});
+
+// AC: 20 req/min for authenticated/sensitive endpoints (Wallet ops)
+const sensitiveLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  limit: 20,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { success: false, message: "Sensitive action limit reached. Please wait a minute." },
+});
+
+// AC: Stricter limits for Signup/Auth-related actions
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { success: false, message: "Too many attempts. Please try again after 15 minutes." },
+});
+
+// Apply general limiter to all routes by default
+router.use(generalLimiter);
+
+// --- ROUTES ---
 
 // Public webhook endpoint for Stellar funding notifications
 router.post("/webhook/stellar/funding", async (req: Request, res: Response) => {
