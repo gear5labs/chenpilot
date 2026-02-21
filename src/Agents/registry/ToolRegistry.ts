@@ -33,6 +33,186 @@ export class ToolRegistry {
   }
 
   /**
+   * Register a custom tool dynamically without modifying core registry
+   * This allows external tools to be added at runtime
+   *
+   * @param tool - The tool definition to register
+   * @param options - Optional configuration
+   * @param options.overwrite - If true, replaces existing tool with same name
+   * @param options.namespace - Optional namespace prefix for the tool name
+   *
+   * @example
+   * // Register a simple custom tool
+   * toolRegistry.registerCustomTool(myCustomTool);
+   *
+   * @example
+   * // Register with namespace
+   * toolRegistry.registerCustomTool(myTool, { namespace: 'custom' });
+   * // Tool will be registered as 'custom:myTool'
+   *
+   * @example
+   * // Overwrite existing tool
+   * toolRegistry.registerCustomTool(updatedTool, { overwrite: true });
+   */
+  registerCustomTool<T extends ToolPayload>(
+    tool: ToolDefinition<T>,
+    options?: {
+      overwrite?: boolean;
+      namespace?: string;
+    }
+  ): void {
+    const { metadata } = tool;
+    let toolName = metadata.name;
+
+    // Apply namespace if provided
+    if (options?.namespace) {
+      toolName = `${options.namespace}:${toolName}`;
+      // Create a new metadata object with namespaced name
+      tool = {
+        ...tool,
+        metadata: {
+          ...metadata,
+          name: toolName,
+        },
+      };
+    }
+
+    // Check if tool already exists
+    if (this.tools.has(toolName)) {
+      if (!options?.overwrite) {
+        throw new Error(
+          `Tool '${toolName}' is already registered. Use overwrite option to replace it.`
+        );
+      }
+      // Unregister existing tool first
+      this.unregister(toolName);
+    }
+
+    this.validateToolMetadata(tool.metadata);
+
+    this.tools.set(toolName, {
+      name: toolName,
+      definition: tool as ToolDefinition,
+      enabled: true,
+    });
+
+    this.categories.add(tool.metadata.category);
+  }
+  /**
+   * Register a custom tool dynamically without modifying core registry
+   * This allows external tools to be added at runtime
+   */
+  registerCustomTool<T extends ToolPayload>(
+    tool: ToolDefinition<T>,
+    options?: {
+      overwrite?: boolean;
+      namespace?: string;
+    }
+  ): void {
+    const { metadata } = tool;
+    let toolName = metadata.name;
+
+    // Apply namespace if provided
+    if (options?.namespace) {
+      toolName = `${options.namespace}:${toolName}`;
+      // Create a new metadata object with namespaced name
+      tool = {
+        ...tool,
+        metadata: {
+          ...metadata,
+          name: toolName,
+        },
+      };
+    }
+
+    // Check if tool already exists
+    if (this.tools.has(toolName)) {
+      if (!options?.overwrite) {
+        throw new Error(
+          `Tool '${toolName}' is already registered. Use overwrite option to replace it.`
+        );
+      }
+      // Unregister existing tool first
+      this.unregister(toolName);
+    }
+
+    this.validateToolMetadata(tool.metadata);
+
+    this.tools.set(toolName, {
+      name: toolName,
+      definition: tool as ToolDefinition,
+      enabled: true,
+    });
+
+    this.categories.add(tool.metadata.category);
+  }
+
+  /**
+   * Register multiple custom tools at once
+   *
+   * @param tools - Array of tool definitions to register
+   * @param options - Optional configuration applied to all tools
+   * @returns Array of successfully registered tool names
+   *
+   * @example
+   * const tools = [tool1, tool2, tool3];
+   * const registered = toolRegistry.registerCustomTools(tools, { namespace: 'plugin' });
+   */
+  registerCustomTools<T extends ToolPayload>(
+    tools: ToolDefinition<T>[],
+    options?: {
+      overwrite?: boolean;
+      namespace?: string;
+      continueOnError?: boolean;
+    }
+  ): string[] {
+    const registered: string[] = [];
+    const errors: Array<{ toolName: string; error: string }> = [];
+
+    for (const tool of tools) {
+      try {
+        this.registerCustomTool(tool, options);
+        registered.push(
+          options?.namespace
+            ? `${options.namespace}:${tool.metadata.name}`
+            : tool.metadata.name
+        );
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+        errors.push({
+          toolName: tool.metadata.name,
+          error: errorMessage,
+        });
+
+        if (!options?.continueOnError) {
+          throw new Error(
+            `Failed to register tool '${tool.metadata.name}': ${errorMessage}`
+          );
+        }
+      }
+    }
+
+    if (errors.length > 0 && options?.continueOnError) {
+      console.warn(
+        `Some tools failed to register: ${JSON.stringify(errors, null, 2)}`
+      );
+    }
+
+    return registered;
+  }
+
+  /**
+   * Check if a tool is registered
+   *
+   * @param toolName - Name of the tool to check
+   * @returns True if the tool exists in the registry
+   */
+  hasCustomTool(toolName: string): boolean {
+    return this.tools.has(toolName);
+  }
+
+  /**
    * Unregister a tool from the registry
    */
   unregister(toolName: string): boolean {

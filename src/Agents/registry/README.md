@@ -205,6 +205,213 @@ const stats = toolRegistry.getStats();
 6. **Testable**: Each tool can be tested independently
 7. **Scalable**: Supports unlimited number of tools
 
+## Custom Tool Registration (Dynamic)
+
+The registry now supports dynamic tool registration without modifying core files. This is perfect for plugins, extensions, or runtime tool additions.
+
+### Method 1: Using CustomToolBuilder (Recommended)
+
+The easiest way to create and register custom tools:
+
+```typescript
+import { toolRegistry } from "./registry/ToolRegistry";
+import { CustomToolBuilder } from "./registry/CustomToolBuilder";
+
+const myTool = new CustomToolBuilder()
+  .setName("my_custom_tool")
+  .setDescription("Does something custom")
+  .setCategory("custom")
+  .setVersion("1.0.0")
+  .addParameter("input", {
+    type: "string",
+    description: "Input value",
+    required: true,
+  })
+  .addExample("Use my custom tool")
+  .setExecutor(async (payload, userId) => {
+    return {
+      action: "custom_action",
+      status: "success",
+      data: { result: "done" },
+    };
+  })
+  .build();
+
+// Register the tool
+toolRegistry.registerCustomTool(myTool);
+```
+
+### Method 2: Using BaseTool Class
+
+For more complex tools with custom validation:
+
+```typescript
+import { BaseTool } from "./tools/base/BaseTool";
+import { toolRegistry } from "./registry/ToolRegistry";
+
+class MyCustomTool extends BaseTool {
+  metadata = {
+    name: "my_custom_tool",
+    description: "Custom tool implementation",
+    parameters: {
+      /* ... */
+    },
+    examples: ["Example 1"],
+    category: "custom",
+    version: "1.0.0",
+  };
+
+  async execute(payload, userId) {
+    // Implementation
+    return this.createSuccessResult("action", { data: "result" });
+  }
+}
+
+const myTool = new MyCustomTool();
+toolRegistry.registerCustomTool(myTool);
+```
+
+### Method 3: Simple Tool Helper
+
+For quick, simple tools:
+
+```typescript
+const simpleTool = CustomToolBuilder.createSimple(
+  "simple_tool",
+  "A simple tool",
+  async (payload, userId) => {
+    return {
+      action: "simple_action",
+      status: "success",
+      data: { result: payload },
+    };
+  },
+  {
+    input: {
+      type: "string",
+      description: "Input parameter",
+      required: true,
+    },
+  }
+);
+
+toolRegistry.registerCustomTool(simpleTool);
+```
+
+### Advanced Features
+
+#### Namespacing
+
+Organize tools with namespaces to avoid conflicts:
+
+```typescript
+toolRegistry.registerCustomTool(myTool, {
+  namespace: "plugin",
+});
+// Tool will be registered as 'plugin:my_custom_tool'
+```
+
+#### Overwriting Tools
+
+Replace existing tools:
+
+```typescript
+toolRegistry.registerCustomTool(updatedTool, {
+  overwrite: true,
+});
+```
+
+#### Batch Registration
+
+Register multiple tools at once:
+
+```typescript
+const tools = [tool1, tool2, tool3];
+const registered = toolRegistry.registerCustomTools(tools, {
+  namespace: "plugin",
+  continueOnError: true, // Don't stop on individual failures
+});
+```
+
+#### Check Tool Existence
+
+```typescript
+if (toolRegistry.hasCustomTool("my_tool")) {
+  console.log("Tool exists");
+}
+```
+
+#### Custom Validation
+
+Add custom validation logic:
+
+```typescript
+const tool = new CustomToolBuilder()
+  .setName("email_tool")
+  .setValidator((payload) => {
+    const errors = [];
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailRegex.test(payload.email as string)) {
+      errors.push("Invalid email format");
+    }
+
+    return { valid: errors.length === 0, errors };
+  })
+  .setExecutor(async (payload, userId) => {
+    // Send email logic
+  })
+  .build();
+```
+
+### API Reference
+
+#### `registerCustomTool(tool, options?)`
+
+Register a single custom tool.
+
+**Parameters:**
+
+- `tool`: ToolDefinition - The tool to register
+- `options.overwrite`: boolean - Replace existing tool with same name
+- `options.namespace`: string - Namespace prefix for the tool
+
+**Throws:** Error if tool already exists and overwrite is false
+
+#### `registerCustomTools(tools, options?)`
+
+Register multiple tools at once.
+
+**Parameters:**
+
+- `tools`: ToolDefinition[] - Array of tools to register
+- `options.overwrite`: boolean - Replace existing tools
+- `options.namespace`: string - Namespace for all tools
+- `options.continueOnError`: boolean - Continue if individual tools fail
+
+**Returns:** string[] - Array of successfully registered tool names
+
+#### `hasCustomTool(toolName)`
+
+Check if a tool is registered.
+
+**Parameters:**
+
+- `toolName`: string - Name of the tool
+
+**Returns:** boolean - True if tool exists
+
+### Examples
+
+See `src/Agents/registry/examples/customToolExample.ts` for complete working examples including:
+
+- Weather tool with CustomToolBuilder
+- Calculator tool with BaseTool class
+- Simple greeting tool
+- Batch registration
+- Tool overwriting
+- Custom validation
+
 ## Migration from Old System
 
 The new system is backward compatible. Existing tools can be gradually migrated:
@@ -215,4 +422,3 @@ The new system is backward compatible. Existing tools can be gradually migrated:
 4. Register tools with the registry
 
 The old hardcoded system will continue to work during migration.
-
