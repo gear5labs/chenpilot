@@ -14,6 +14,12 @@ export class User {
   @Column({ unique: true, type: "varchar" })
   name!: string;
 
+  @Column({ type: "varchar", nullable: true, unique: true })
+  email?: string;
+
+  @Column({ type: "varchar", nullable: true })
+  password?: string;
+
   @Column({ type: "varchar" })
   address!: string;
 
@@ -26,11 +32,20 @@ export class User {
   @Column({ type: "boolean", default: false })
   isFunded!: boolean;
 
+  @Column({ type: "boolean", default: false })
+  isEmailVerified!: boolean;
+
   @Column({ type: "varchar", default: "STRK" })
   encryptedPrivateKey!: string;
 
   @Column({ type: "varchar", default: "XLM" })
   tokenType!: string;
+
+  @Column({ type: "varchar", nullable: true })
+  resetTokenHash?: string;
+
+  @Column({ type: "timestamp", nullable: true })
+  resetTokenExpiry?: Date;
 
   @CreateDateColumn()
   createdAt!: Date;
