@@ -3,6 +3,7 @@ import config from "./config";
 import { Contact } from "../Contacts/contact.entity";
 import { User } from "../Auth/user.entity";
 import { AgentTool } from "../Agents/tools/agent-tool.entity";
+import { PromptVersion, PromptMetric } from "../Agents/registry/PromptVersion.entity";
 
 const isDev = config.env === "development";
 
@@ -14,7 +15,7 @@ const dbOptions: DataSourceOptions = {
   password: config.db.postgres.password || undefined,
   database: config.db.postgres.database,
   synchronize: false,
-  entities: [Contact, User, AgentTool],
+  entities: [Contact, User, AgentTool, PromptVersion, PromptMetric],
   migrations: [isDev ? "src/migrations/**/*.ts" : "dist/migrations/**/*.js"],
   subscribers: [],
 };
@@ -26,3 +27,4 @@ const dbOptions: DataSourceOptions = {
 const AppDataSource = new DataSource(dbOptions);
 
 export default AppDataSource;
+export { AppDataSource };

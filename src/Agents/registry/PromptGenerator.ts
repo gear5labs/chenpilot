@@ -1,11 +1,16 @@
 import { ToolMetadata } from "./ToolMetadata";
 import { toolRegistry } from "./ToolRegistry";
+import { promptVersionService } from "./PromptVersionService";
 
 export class PromptGenerator {
   /**
    * intent prompt
    */
-  generateIntentPrompt(): string {
+  async generateIntentPrompt(): Promise<string> {
+    const versionedPrompt = await promptVersionService.selectPrompt("intent");
+    if (versionedPrompt) {
+      return versionedPrompt.content;
+    }
     const tools = toolRegistry.getToolMetadata();
 
     if (tools.length === 0) {
@@ -56,7 +61,13 @@ Respond with valid JSON only.
   /**
    * validation prompt
    */
-  generateValidationPrompt(): string {
+  async generateValidationPrompt(): Promise<string> {
+    const versionedPrompt = await promptVersionService.selectPrompt(
+      "validation"
+    );
+    if (versionedPrompt) {
+      return versionedPrompt.content;
+    }
     const tools = toolRegistry.getToolMetadata();
     const categories = [...new Set(tools.map((tool) => tool.category))];
 
@@ -101,7 +112,13 @@ system "{{CONTEXT}}"
   /**
    * response prompt
    */
-  generateResponsePrompt(): string {
+  async generateResponsePrompt(): Promise<string> {
+    const versionedPrompt = await promptVersionService.selectPrompt(
+      "response"
+    );
+    if (versionedPrompt) {
+      return versionedPrompt.content;
+    }
     return `
 You are a response agent.
 Your task is to generate a clear, natural language response to the user

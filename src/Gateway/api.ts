@@ -4,6 +4,7 @@ import helmet from "helmet";
 import { rateLimit } from "express-rate-limit"
 import { container } from "tsyringe";
 import routes from "./routes";
+import promptRoutes from "./promptRoutes";
 import requestLogger from "../middleware/requestLogger";
 
 import { authenticate } from "../Auth/auth";
@@ -97,6 +98,7 @@ app.post("/query", async (req, res, next) => {
 });
 
 app.use("/api", routes);
+app.use("/api/prompts", promptRoutes);
 
 app.use(ErrorHandler);
 
