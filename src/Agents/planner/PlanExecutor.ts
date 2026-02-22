@@ -37,7 +37,7 @@ export class PlanExecutor {
   async executePlan(
     plan: ExecutionPlan,
     userId: string,
-    options: ExecutionOptions = {},
+    options: ExecutionOptions = {}
   ): Promise<ExecutionResult> {
     const startTime = Date.now();
     const stepResults: StepResult[] = [];
@@ -78,7 +78,7 @@ export class PlanExecutor {
       const duration = Date.now() - startTime;
       const status = this.determineExecutionStatus(
         completedSteps,
-        plan.totalSteps,
+        plan.totalSteps
       );
 
       return {
@@ -109,7 +109,7 @@ export class PlanExecutor {
   private async executeStep(
     step: PlanStep,
     userId: string,
-    options: ExecutionOptions,
+    options: ExecutionOptions
   ): Promise<StepResult> {
     const startTime = Date.now();
 
@@ -137,7 +137,7 @@ export class PlanExecutor {
       const result = await toolRegistry.executeTool(
         step.action,
         step.payload,
-        userId,
+        userId
       );
 
       return {
@@ -165,7 +165,7 @@ export class PlanExecutor {
 
   private determineExecutionStatus(
     completedSteps: number,
-    totalSteps: number,
+    totalSteps: number
   ): "success" | "partial" | "failed" {
     if (completedSteps === totalSteps) return "success";
     if (completedSteps > 0) return "partial";
@@ -174,7 +174,7 @@ export class PlanExecutor {
 
   async rollback(
     plan: ExecutionPlan,
-    executionResult: ExecutionResult,
+    executionResult: ExecutionResult
   ): Promise<void> {
     logger.info("Starting rollback", {
       planId: plan.planId,

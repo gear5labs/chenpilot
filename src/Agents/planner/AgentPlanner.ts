@@ -90,7 +90,7 @@ export class AgentPlanner {
       context.userId,
       prompt,
       context.userInput,
-      true,
+      true
     );
 
     if (!response.workflow || !Array.isArray(response.workflow)) {
@@ -101,7 +101,7 @@ export class AgentPlanner {
   }
 
   private buildPlannerPrompt(
-    availableTools: Array<{ name: string; description: string }>,
+    availableTools: Array<{ name: string; description: string }>
   ): string {
     const toolDescriptions = availableTools
       .map((tool) => `- ${tool.name}: ${tool.description}`)
@@ -122,7 +122,7 @@ Output JSON format:
 
   private convertToExecutionPlan(
     workflowPlan: WorkflowPlan,
-    context: PlannerContext,
+    context: PlannerContext
   ): ExecutionPlan {
     const planId = `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const steps: PlanStep[] = workflowPlan.workflow.map((step, index) => ({

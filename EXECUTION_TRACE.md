@@ -22,7 +22,7 @@ const plan = await agentPlanner.createPlan({
 ```typescript
 async createPlan(context: PlannerContext): Promise<ExecutionPlan> {
   // Step 1: Log the request
-  logger.info("Creating execution plan", { 
+  logger.info("Creating execution plan", {
     userId: context.userId,  // "user123"
     input: context.userInput // "Swap 100 XLM to USDC"
   });
@@ -31,19 +31,19 @@ async createPlan(context: PlannerContext): Promise<ExecutionPlan> {
 #### 2. Check if it's a Soroban request
 
 ```typescript
-  // Step 2: Try specialized parser
-  const sorobanPlan = parseSorobanIntent(context.userInput);
-  // Returns null (not a Soroban request)
-  if (sorobanPlan) {
-    return this.convertToExecutionPlan(sorobanPlan, context);
-  }
+// Step 2: Try specialized parser
+const sorobanPlan = parseSorobanIntent(context.userInput);
+// Returns null (not a Soroban request)
+if (sorobanPlan) {
+  return this.convertToExecutionPlan(sorobanPlan, context);
+}
 ```
 
 #### 3. Use LLM to analyze the request
 
 ```typescript
-  // Step 3: Call LLM for analysis
-  const workflowPlan = await this.analyzeWithLLM(context);
+// Step 3: Call LLM for analysis
+const workflowPlan = await this.analyzeWithLLM(context);
 ```
 
 **Inside analyzeWithLLM():**
@@ -57,10 +57,10 @@ private async analyzeWithLLM(context: PlannerContext): Promise<WorkflowPlan> {
   //   { name: "swap_tool", description: "...", ... },
   //   { name: "soroban_invoke", description: "...", ... }
   // ]
-  
+
   // Build prompt with tool descriptions
   const prompt = this.buildPlannerPrompt(availableTools, context);
-  
+
   // Call Claude via AgentLLM
   const response = await agentLLM.callLLM(
     context.userId,    // "user123"
@@ -68,7 +68,7 @@ private async analyzeWithLLM(context: PlannerContext): Promise<WorkflowPlan> {
     context.userInput, // "Swap 100 XLM to USDC"
     true               // Return JSON
   );
-  
+
   // Response from LLM:
   // {
   //   "workflow": [
@@ -76,7 +76,7 @@ private async analyzeWithLLM(context: PlannerContext): Promise<WorkflowPlan> {
   //     { "action": "swap_tool", "payload": { "from": "XLM", "to": "USDC", "amount": 100 } }
   //   ]
   // }
-  
+
   return response as WorkflowPlan;
 }
 ```
@@ -84,8 +84,8 @@ private async analyzeWithLLM(context: PlannerContext): Promise<WorkflowPlan> {
 #### 4. Convert to ExecutionPlan
 
 ```typescript
-  // Step 4: Convert workflow to execution plan
-  const executionPlan = this.convertToExecutionPlan(workflowPlan, context);
+// Step 4: Convert workflow to execution plan
+const executionPlan = this.convertToExecutionPlan(workflowPlan, context);
 ```
 
 **Inside convertToExecutionPlan():**
@@ -95,7 +95,7 @@ private convertToExecutionPlan(workflowPlan: WorkflowPlan, context: PlannerConte
   // Generate unique plan ID
   const planId = `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   // Result: "plan_1708534567890_abc123def"
-  
+
   // Convert each workflow step to a PlanStep
   const steps: PlanStep[] = workflowPlan.workflow.map((step, index) => ({
     stepNumber: index + 1,           // 1, 2
@@ -105,11 +105,11 @@ private convertToExecutionPlan(workflowPlan: WorkflowPlan, context: PlannerConte
     estimatedDuration: 3000,         // 3 seconds per step
     dependencies: [],                // No dependencies for now
   }));
-  
+
   // Assess risk based on number of steps
   const riskLevel = this.assessRiskLevel(steps);
   // 2 steps = "medium" risk
-  
+
   return {
     planId: "plan_1708534567890_abc123def",
     steps: [
@@ -142,13 +142,13 @@ private convertToExecutionPlan(workflowPlan: WorkflowPlan, context: PlannerConte
 #### 5. Validate the plan
 
 ```typescript
-  // Step 5: Validate plan
-  const validation = this.validatePlan(executionPlan, context);
-  // Returns: { valid: true, errors: [], warnings: [] }
-  
-  if (!validation.valid) {
-    throw new Error(`Invalid plan: ${validation.errors.join(", ")}`);
-  }
+// Step 5: Validate plan
+const validation = this.validatePlan(executionPlan, context);
+// Returns: { valid: true, errors: [], warnings: [] }
+
+if (!validation.valid) {
+  throw new Error(`Invalid plan: ${validation.errors.join(", ")}`);
+}
 ```
 
 #### 6. Return the plan
@@ -160,7 +160,7 @@ private convertToExecutionPlan(workflowPlan: WorkflowPlan, context: PlannerConte
     totalSteps: executionPlan.totalSteps,
     riskLevel: executionPlan.riskLevel
   });
-  
+
   return executionPlan;
 }
 ```
@@ -190,7 +190,7 @@ async executePlan(
   const startTime = Date.now();
   const stepResults: StepResult[] = [];
   let completedSteps = 0;
-  
+
   // Log execution start
   logger.info("Starting plan execution", {
     planId: plan.planId,
@@ -211,7 +211,7 @@ async executePlan(
       if (elapsed > timeout) {
         throw new Error(`Execution timeout after ${elapsed}ms`);
       }
-      
+
       // Step 2: Execute the step
       const stepResult = await this.executeStep(step, userId, options, stepResults);
 ```
@@ -226,12 +226,12 @@ private async executeStep(
   previousResults: StepResult[]
 ): Promise<StepResult> {
   const startTime = Date.now();
-  
+
   // Call onStepStart callback if provided
   if (options.onStepStart) {
     options.onStepStart(step);
   }
-  
+
   try {
     // DRY RUN MODE - Don't actually execute
     if (options.dryRun) {
@@ -249,7 +249,7 @@ private async executeStep(
         timestamp: "2024-02-21T17:30:00.000Z"
       };
     }
-    
+
     // REAL EXECUTION (if not dry run):
     // const result = await toolRegistry.executeTool(
     //   "wallet_tool",
@@ -263,12 +263,12 @@ private async executeStep(
 ```typescript
       // Add step result to array
       stepResults.push(stepResult);
-      
+
       // Increment completed steps
       if (stepResult.status === "success") {
         completedSteps++; // Now 1
       }
-      
+
       // Call onStepComplete callback
       if (options.onStepComplete) {
         options.onStepComplete(stepResult);
@@ -283,7 +283,7 @@ private async executeStep(
     const duration = Date.now() - startTime; // ~10ms
     const status = this.determineExecutionStatus(completedSteps, plan.totalSteps);
     // completedSteps: 2, totalSteps: 2 → status: "success"
-    
+
     return {
       planId: "plan_1708534567890_abc123def",
       status: "success",

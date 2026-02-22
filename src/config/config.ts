@@ -6,6 +6,7 @@ dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 dotenv.config();
 
 type StellarNetwork = "testnet" | "public";
+//console.log(process.env.DB_PASSWORD,  process.env.DB_NAME)
 
 // Stellar network configurations
 const STELLAR_NETWORKS: Record<
@@ -35,7 +36,7 @@ const stellarNetwork: StellarNetwork =
 // Validate network type
 if (stellarNetwork !== "testnet" && stellarNetwork !== "public") {
   throw new Error(
-    `Invalid STELLAR_NETWORK: ${process.env.STELLAR_NETWORK}. Must be "testnet" or "public"`,
+    `Invalid STELLAR_NETWORK: ${process.env.STELLAR_NETWORK}. Must be "testnet" or "public"`
   );
 }
 

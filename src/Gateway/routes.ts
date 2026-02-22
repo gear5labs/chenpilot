@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
-import { rateLimit } from 'express-rate-limit';
-import helmet from 'helmet';
+import { rateLimit } from "express-rate-limit";
+import helmet from "helmet";
 import AppDataSource from "../config/Datasource";
 import { User } from "../Auth/user.entity";
 import { stellarWebhookService } from "./webhook.service";
@@ -10,6 +10,7 @@ import {
   type TransactionType,
 } from "./transaction.service";
 import logger from "../config/logger";
+import { stellarLiquidityTool } from "../Agents/tools/stellarLiquidityTool";
 
 const router = Router();
 
@@ -21,7 +22,7 @@ router.use(helmet());
 const generalLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
   limit: 100,
-  standardHeaders: 'draft-8',
+  standardHeaders: "draft-8",
   legacyHeaders: false,
   message: { success: false, message: "Too many requests. Please slow down." },
 });
@@ -176,8 +177,8 @@ router.get(
 
       // Fetch transaction history
       const result = await transactionHistoryService.getTransactionHistory(
-        userId,
-        queryParams,
+        userId as string,
+        queryParams
       );
 
       return res.status(200).json({
@@ -196,6 +197,26 @@ router.get(
       });
     }
   },
+
+  router.post("/liquidity", async (req: Request, res: Response) => {
+    try {
+      const { assetCode, assetIssuer, depthLimit } = req.body;
+
+      const result = await stellarLiquidityTool.execute({
+        assetCode,
+        assetIssuer,
+        depthLimit,
+      });
+
+      res.json(result);
+    } catch (err) {
+      // Check if it's a standard Error object
+      const errorMessage =
+        err instanceof Error ? err.message : "An unknown error occurred";
+
+      res.status(500).json({ error: errorMessage });
+    }
+  })
 );
 
 export default router;

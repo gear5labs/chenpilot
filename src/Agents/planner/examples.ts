@@ -44,7 +44,7 @@ export async function simpleSwapExample(userId: string) {
  */
 export async function portfolioLiquidationExample(
   userId: string,
-  approvalCallback: (plan: ExecutionPlan) => Promise<boolean>,
+  approvalCallback: (plan: ExecutionPlan) => Promise<boolean>
 ) {
   const context: PlannerContext = {
     userId,
@@ -81,7 +81,7 @@ export async function portfolioLiquidationExample(
     },
     onStepComplete: (stepResult) => {
       logger.info(
-        `Completed step ${stepResult.stepNumber}: ${stepResult.status}`,
+        `Completed step ${stepResult.stepNumber}: ${stepResult.status}`
       );
     },
   });
@@ -232,7 +232,7 @@ export async function planOptimizationExample(userId: string) {
  */
 export async function progressMonitoringExample(
   userId: string,
-  progressCallback: (progress: number, message: string) => void,
+  progressCallback: (progress: number, message: string) => void
 ) {
   const context: PlannerContext = {
     userId,
@@ -252,7 +252,7 @@ export async function progressMonitoringExample(
       const progress = (completedSteps / plan.totalSteps) * 100;
       progressCallback(
         progress,
-        `Completed: ${stepResult.action} (${stepResult.status})`,
+        `Completed: ${stepResult.action} (${stepResult.status})`
       );
     },
   });
@@ -302,7 +302,7 @@ export async function conditionalExecutionExample(userId: string) {
  */
 export async function multiUserCoordinationExample(
   userIds: string[],
-  operation: string,
+  operation: string
 ) {
   const results = await Promise.all(
     userIds.map(async (userId) => {
@@ -317,7 +317,7 @@ export async function multiUserCoordinationExample(
       });
 
       return { userId, result };
-    }),
+    })
   );
 
   logger.info("Multi-user coordination results", {

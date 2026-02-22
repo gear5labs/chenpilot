@@ -11,6 +11,7 @@ Successfully implemented a comprehensive AgentPlanner system that breaks down co
 #### 1. Core Components
 
 **AgentPlanner** (`src/Agents/planner/AgentPlanner.ts`)
+
 - Intelligent request analysis using LLM
 - Multi-step plan generation
 - Risk assessment (low/medium/high)
@@ -19,6 +20,7 @@ Successfully implemented a comprehensive AgentPlanner system that breaks down co
 - Validation system
 
 **PlanExecutor** (`src/Agents/planner/PlanExecutor.ts`)
+
 - Sequential step execution
 - Dry-run mode for testing
 - Progress tracking with callbacks
@@ -29,30 +31,35 @@ Successfully implemented a comprehensive AgentPlanner system that breaks down co
 #### 2. Features
 
 ✅ **Intelligent Planning**
+
 - Natural language understanding
 - Context-aware planning
 - Tool registry integration
 - Specialized parsers (Soroban)
 
 ✅ **Multi-Step Orchestration**
+
 - Sequential execution
 - Dependency tracking
 - Step ordering
 - Parallel-ready architecture
 
 ✅ **Risk Management**
+
 - Automatic risk assessment
 - Approval workflows
 - Rollback support
 - Critical operation identification
 
 ✅ **Execution Control**
+
 - Dry-run testing
 - Progress callbacks
 - Error handling
 - Timeout management
 
 ✅ **Plan Optimization**
+
 - Duplicate removal
 - Step consolidation
 - Efficiency improvements
@@ -60,6 +67,7 @@ Successfully implemented a comprehensive AgentPlanner system that breaks down co
 ### Supported Operations
 
 #### Simple Operations
+
 ```
 "Check my XLM balance"
 "Transfer 50 XLM to Alice"
@@ -67,6 +75,7 @@ Successfully implemented a comprehensive AgentPlanner system that breaks down co
 ```
 
 #### Complex Operations
+
 ```
 "Liquidate half my portfolio into USDC"
 "Check all balances and swap everything to USDC"
@@ -75,6 +84,7 @@ Successfully implemented a comprehensive AgentPlanner system that breaks down co
 ```
 
 #### DeFi Workflows
+
 ```
 "Check my balance, swap half to USDC, and stake the USDC"
 "Borrow 50 USDC from contract CDEF and swap to XLM"
@@ -84,6 +94,7 @@ Successfully implemented a comprehensive AgentPlanner system that breaks down co
 ### Example Usage
 
 #### Basic
+
 ```typescript
 import { agentPlanner, planExecutor } from "./Agents/planner";
 
@@ -96,6 +107,7 @@ const result = await planExecutor.executePlan(plan, "user123");
 ```
 
 #### Advanced
+
 ```typescript
 const plan = await agentPlanner.createPlan({
   userId: "user123",
@@ -107,7 +119,7 @@ const plan = await agentPlanner.createPlan({
 // Review plan
 console.log(`Risk: ${plan.riskLevel}`);
 console.log(`Steps: ${plan.totalSteps}`);
-plan.steps.forEach(s => console.log(s.description));
+plan.steps.forEach((s) => console.log(s.description));
 
 // Execute with tracking
 const result = await planExecutor.executePlan(plan, "user123", {
@@ -160,6 +172,7 @@ tests/unit/
 ### Testing
 
 Comprehensive test suite covering:
+
 - Plan creation
 - Risk assessment
 - Dependency management
@@ -172,13 +185,17 @@ Comprehensive test suite covering:
 ### Key Capabilities
 
 #### 1. Request Understanding
+
 Understands complex natural language:
+
 - "Liquidate half my portfolio into USDC"
 - "Check balance and swap 50 XLM to USDC"
 - "Stake 100 tokens in contract CABC..."
 
 #### 2. Plan Generation
+
 Creates detailed plans with:
+
 - Ordered steps
 - Dependencies
 - Risk assessment
@@ -186,7 +203,9 @@ Creates detailed plans with:
 - Time estimates
 
 #### 3. Execution Control
+
 Provides:
+
 - Dry-run testing
 - Progress callbacks
 - Error handling
@@ -196,6 +215,7 @@ Provides:
 ### Integration
 
 #### With Existing Code
+
 - ✅ Tool Registry integration
 - ✅ Agent LLM integration
 - ✅ Wallet Tool support
@@ -203,6 +223,7 @@ Provides:
 - ✅ Soroban Tool support
 
 #### API Routes (Ready to Add)
+
 ```typescript
 POST   /agent/plan       # Create plan
 POST   /agent/execute    # Execute plan
@@ -228,6 +249,7 @@ DELETE /agent/plan/:id   # Cancel plan
 ### Production Ready
 
 The implementation includes:
+
 - ✅ Error handling
 - ✅ Logging
 - ✅ Type safety
@@ -250,6 +272,7 @@ To use in production:
 ### Example Scenarios
 
 #### Scenario 1: Portfolio Liquidation
+
 ```
 Input: "Liquidate half my portfolio into USDC"
 
@@ -264,6 +287,7 @@ Approval: Required
 ```
 
 #### Scenario 2: DeFi Staking
+
 ```
 Input: "Stake 100 tokens in contract CABC123"
 
@@ -276,6 +300,7 @@ Approval: Required
 ```
 
 #### Scenario 3: Batch Transfer
+
 ```
 Input: "Send 50 XLM to Alice and 30 USDC to Bob"
 
@@ -304,6 +329,7 @@ Approval: Not required
 The AgentPlanner successfully solves Issue #53 by providing a robust, intelligent system for breaking down complex DeFi operations into executable steps. It's production-ready with comprehensive documentation, examples, and tests.
 
 The implementation is:
+
 - ✅ Feature-complete
 - ✅ Well-documented
 - ✅ Tested
