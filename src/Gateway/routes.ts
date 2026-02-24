@@ -11,7 +11,14 @@ import {
   type TransactionType,
 } from "./transaction.service";
 import logger from "../config/logger";
+import authRoutes from "../Auth/auth.routes";
 import { stellarLiquidityTool } from "../Agents/tools/stellarLiquidityTool";
+import { authenticateToken } from "../Auth/auth.middleware";
+import {
+  requireAdmin,
+  requireModerator,
+  requireOwnerOrElevated,
+} from "./middleware/rbac.middleware";
 
 const router = Router();
 
@@ -33,59 +40,10 @@ router.use(generalLimiter);
 
 // --- ROUTES ---
 
-/**
- * @swagger
- * /api/webhook/stellar/funding:
- *   post:
- *     summary: Process a Stellar funding webhook
- *     description: Receives and validates funding notifications from Stellar Horizon. Verifies HMAC-SHA256 signature, checks idempotency, updates user funding status, and triggers auto-deployment.
- *     tags: [Webhooks]
- *     parameters:
- *       - in: header
- *         name: x-stellar-signature
- *         schema:
- *           type: string
- *         description: HMAC-SHA256 signature for payload verification
- *       - in: header
- *         name: x-stellar-timestamp
- *         schema:
- *           type: string
- *         description: Timestamp for replay-attack prevention
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/WebhookPayload'
- *     responses:
- *       200:
- *         description: Webhook processed successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 message:
- *                   type: string
- *                 userId:
- *                   type: string
- *                 deploymentTriggered:
- *                   type: boolean
- *       400:
- *         description: Invalid payload or signature
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- */
+// Mount auth routes
+router.use("/auth", authRoutes);
+
+// Public webhook endpoint for Stellar funding notifications
 router.post("/webhook/stellar/funding", async (req: Request, res: Response) => {
   try {
     const result = await stellarWebhookService.processFundingWebhook(req);
@@ -313,6 +271,8 @@ router.post("/signup", async (req: Request, res: Response) => {
  */
 router.get(
   "/account/:userId/transactions",
+  authenticateToken,
+  requireOwnerOrElevated("userId"),
   async (req: Request, res: Response) => {
     try {
       const { userId } = req.params;
@@ -377,7 +337,7 @@ router.get(
 
       // Fetch transaction history
       const result = await transactionHistoryService.getTransactionHistory(
-        userId as string,
+        userId,
         queryParams
       );
 
@@ -420,7 +380,7 @@ router.get(
 );
 
 // GET /admin/stats - Internal admin route for CPU and memory usage
-router.get("/admin/stats", (req: Request, res: Response) => {
+router.get("/admin/stats", authenticateToken, requireAdmin, (req: Request, res: Response) => {
   const memUsage = process.memoryUsage();
   const cpuUsage = process.cpuUsage();
 
