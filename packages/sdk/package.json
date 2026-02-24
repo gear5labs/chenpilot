@@ -16,6 +16,9 @@
   ],
   "author": "",
   "license": "ISC",
+  "dependencies": {
+    "stellar-sdk": "^13.3.0"
+  },
   "devDependencies": {
     "typescript": "^5.7.3"
   }
