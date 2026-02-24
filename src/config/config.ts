@@ -5,7 +5,11 @@ import path from "path";
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 dotenv.config();
 
+// Import DeFi adapter configurations
+import { generateDeFiAdapterConfigs, getEnabledAdapters } from "./defiAdapters";
+
 type StellarNetwork = "testnet" | "public";
+//console.log(process.env.DB_PASSWORD,  process.env.DB_NAME)
 
 // Stellar network configurations
 const STELLAR_NETWORKS: Record<
@@ -69,5 +73,9 @@ export default {
       password: process.env.DB_PASSWORD || undefined,
       database: process.env.DB_NAME!,
     },
+  },
+  defi: {
+    adapters: generateDeFiAdapterConfigs(),
+    enabledAdapters: getEnabledAdapters(),
   },
 };

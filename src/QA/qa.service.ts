@@ -8,7 +8,7 @@ export default class QaService {
   async answer(
     userId: string,
     input: string,
-    context: Record<string, any>
+    context: Record<string, unknown>
   ): Promise<string> {
 
     const contextString = JSON.stringify(context, null, 2);

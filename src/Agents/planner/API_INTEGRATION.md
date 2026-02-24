@@ -473,7 +473,7 @@ const redis = new Redis();
 await redis.setex(
   `plan:${plan.planId}`,
   3600, // 1 hour TTL
-  JSON.stringify(plan),
+  JSON.stringify(plan)
 );
 
 // Retrieve plan
@@ -529,7 +529,7 @@ router.post(
       return res.status(400).json({ success: false, errors: errors.array() });
     }
     // ...
-  },
+  }
 );
 ```
 

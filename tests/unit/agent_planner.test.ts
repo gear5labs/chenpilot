@@ -184,7 +184,7 @@ describe("AgentPlanner", () => {
         (s) =>
           s.action === "wallet_tool" &&
           s.payload.operation === "get_balance" &&
-          s.payload.token === "XLM",
+          s.payload.token === "XLM"
       );
 
       expect(balanceChecks.length).toBeLessThanOrEqual(1);
