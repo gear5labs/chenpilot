@@ -69,3 +69,45 @@ export interface RecoveryEngineOptions {
   retryHandler?: RetryHandler;
   refundHandler?: RefundHandler;
 }
+
+// ─── Soroban execution logs ──────────────────────────────────────────────────
+
+export type SorobanNetwork = "testnet" | "mainnet";
+
+export interface GetExecutionLogsParams {
+  /** Transaction hash returned from a Soroban contract call. */
+  txHash: string;
+  network: SorobanNetwork;
+  /** Override the default RPC URL for the selected network. */
+  rpcUrl?: string;
+}
+
+/** A single contract event emitted during transaction execution. */
+export interface ExecutionLogEntry {
+  /** Position of the event within the transaction result. */
+  index: number;
+  /** Bech32m contract address, or null for system events. */
+  contractId: string | null;
+  /** "contract" | "system" | "diagnostic" */
+  type: string;
+  /** Decoded topic values. */
+  topics: unknown[];
+  /** Decoded data value. */
+  data: unknown;
+}
+
+/** Formatted execution log for a Soroban transaction. */
+export interface ExecutionLog {
+  txHash: string;
+  status: "SUCCESS" | "FAILED" | "NOT_FOUND";
+  /** Ledger sequence number the transaction was included in, if known. */
+  ledger: number | null;
+  /** Unix timestamp (seconds) of ledger close, if known. */
+  createdAt: number | null;
+  /** Decoded return value of the contract call, if available. */
+  returnValue: unknown | null;
+  /** Contract events emitted during execution. */
+  events: ExecutionLogEntry[];
+  /** Human-readable error description for FAILED or NOT_FOUND transactions. */
+  errorMessage: string | null;
+}

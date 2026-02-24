@@ -3,23 +3,6 @@ import config from "./config";
 import { Contact } from "../Contacts/contact.entity";
 import { User } from "../Auth/user.entity";
 import { RefreshToken } from "../Auth/refreshToken.entity";
-
-const isDev = config.env === "development";
-
-interface DbOptions {
-  type: "postgres";
-  host: string;
-  port: number;
-  username: string;
-  password?: string;
-  database: string;
-  synchronize: boolean;
-  entities: unknown[];
-  migrations: string[];
-  subscribers: unknown[];
-}
-
-const dbOptions: DbOptions = {
 import { AgentTool } from "../Agents/tools/agent-tool.entity";
 
 const isDev = config.env === "development";
@@ -27,19 +10,15 @@ const isDev = config.env === "development";
 const dbOptions: DataSourceOptions = {
   type: "postgres",
   host: config.db.postgres.host,
-  port: Number(config.db.postgres.port), // Ensure port is a number
+  port: Number(config.db.postgres.port),
   username: config.db.postgres.username,
   password: config.db.postgres.password || undefined,
   database: config.db.postgres.database,
   synchronize: false,
-  entities: [Contact, User, RefreshToken,AgentTool],
+  entities: [Contact, User, RefreshToken, AgentTool],
   migrations: [isDev ? "src/migrations/**/*.ts" : "dist/migrations/**/*.js"],
   subscribers: [],
 };
-
-// if (config.db.postgres.password) {
-//   dbOptions.password = config.db.postgres.password;
-// }
 
 const AppDataSource = new DataSource(dbOptions);
 

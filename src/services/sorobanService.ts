@@ -24,6 +24,26 @@ export interface InvokeContractResult {
   raw?: unknown;
 }
 
+export interface GetContractLogsParams {
+  /** The transaction hash returned from a contract call. */
+  txHash: string;
+  network: SorobanNetwork;
+  rpcUrl?: string;
+}
+
+export interface ContractLogEntry {
+  /** Index of the event in the transaction result. */
+  index: number;
+  /** Contract address that emitted the event. */
+  contractId: string | null;
+  /** Event type: "contract" | "system" | "diagnostic". */
+  type: string;
+  /** Decoded topic values. */
+  topics: unknown[];
+  /** Decoded data value. */
+  data: unknown;
+}
+
 const DEFAULT_RPC_URLS: Record<SorobanNetwork, string> = {
   testnet: "https://soroban-testnet.stellar.org",
   mainnet: "https://soroban-mainnet.stellar.org",
@@ -87,14 +107,15 @@ export async function invokeContract(
 ): Promise<InvokeContractResult> {
   // Check if we should use local chain simulation
   try {
-    const { getInterceptor } = await import('../simulation/ServiceInterceptor');
+    const { getInterceptor } = await import("../simulation/ServiceInterceptor");
     const interceptor = getInterceptor();
-    if (interceptor && interceptor.isSimulationEnabled('soroban')) {
+    if (interceptor && interceptor.isSimulationEnabled("soroban")) {
       return interceptor.intercept(
-        'soroban',
-        'invoke_contract',
+        "soroban",
+        "invoke_contract",
         [params],
-        (...args: unknown[]) => invokeContractLive(args[0] as InvokeContractParams)
+        (...args: unknown[]) =>
+          invokeContractLive(args[0] as InvokeContractParams)
       ) as Promise<InvokeContractResult>;
     }
   } catch {
@@ -117,16 +138,29 @@ async function invokeContractLive(
   let server: unknown;
   try {
     // Try newer SDK structure - use Soroban instead of SorobanRpc
-    const SorobanServer = (StellarSdk as unknown as { Soroban: { Server: new (url: string, options?: { allowHttp?: boolean }) => unknown } }).Soroban.Server;
+    const SorobanServer = (
+      StellarSdk as unknown as {
+        Soroban: {
+          Server: new (
+            url: string,
+            options?: { allowHttp?: boolean }
+          ) => unknown;
+        };
+      }
+    ).Soroban.Server;
     server = new SorobanServer(rpcUrl, {
       allowHttp: rpcUrl.startsWith("http://"),
     });
   } catch (error) {
     try {
       // Try alternative structure
-      const HorizonServer = (StellarSdk as unknown as { Horizon: { Server: new (url: string) => unknown } }).Horizon.Server;
+      const HorizonServer = (
+        StellarSdk as unknown as {
+          Horizon: { Server: new (url: string) => unknown };
+        }
+      ).Horizon.Server;
       server = new HorizonServer(rpcUrl);
-    } catch (fallbackError) {
+    } catch {
       throw new Error(`Failed to initialize Stellar server: ${error}`);
     }
   }
@@ -138,7 +172,9 @@ async function invokeContractLive(
   const contract = new StellarSdk.Contract(params.contractId);
   const normalizedArgs = normalizeArgs(params.args);
   // Use spread operator with proper typing
-  const contractCall = (contract as { call: (method: string, ...args: unknown[]) => unknown }).call;
+  const contractCall = (
+    contract as { call: (method: string, ...args: unknown[]) => unknown }
+  ).call;
   const op = contractCall.call(contract, params.method, ...normalizedArgs);
 
   const fee = params.fee ? params.fee.toString() : String(StellarSdk.BASE_FEE);
@@ -156,12 +192,23 @@ async function invokeContractLive(
 
   let simulation: unknown;
   try {
-    simulation = await (server as { simulateTransaction: (tx: StellarSdk.Transaction) => Promise<unknown> }).simulateTransaction(tx);
+    simulation = await (
+      server as {
+        simulateTransaction: (tx: StellarSdk.Transaction) => Promise<unknown>;
+      }
+    ).simulateTransaction(tx);
   } catch (error) {
     throw new Error(`Failed to simulate transaction: ${error}`);
   }
 
-  const simResult = simulation as { error?: string; result?: { auth?: unknown[]; retval?: unknown; result?: { retval?: unknown } } };
+  const simResult = simulation as {
+    error?: string;
+    result?: {
+      auth?: unknown[];
+      retval?: unknown;
+      result?: { retval?: unknown };
+    };
+  };
   if (simResult?.error) {
     throw new Error(`Soroban simulation failed: ${simResult.error}`);
   }
@@ -174,9 +221,7 @@ async function invokeContractLive(
   }
 
   const retval =
-    simResult?.result?.retval ||
-    simResult?.result?.result?.retval ||
-    null;
+    simResult?.result?.retval || simResult?.result?.result?.retval || null;
 
   const decoded =
     retval && typeof StellarSdk.scValToNative === "function"
@@ -190,4 +235,85 @@ async function invokeContractLive(
     result: decoded,
     raw: simResult,
   };
+}
+
+/**
+ * Retrieves and formats execution logs (contract events) for a Soroban
+ * transaction from the Stellar RPC.
+ */
+export async function getContractLogs(
+  params: GetContractLogsParams
+): Promise<ContractLogEntry[]> {
+  if (!params.txHash || typeof params.txHash !== "string") {
+    throw new Error("Missing or invalid txHash");
+  }
+
+  const rpcUrl = resolveRpcUrl(params.network, params.rpcUrl);
+
+  let server: unknown;
+  try {
+    const RpcServer = (
+      StellarSdk as unknown as {
+        SorobanRpc: {
+          Server: new (url: string, opts?: { allowHttp?: boolean }) => unknown;
+        };
+      }
+    ).SorobanRpc.Server;
+    server = new RpcServer(rpcUrl, { allowHttp: rpcUrl.startsWith("http://") });
+  } catch {
+    throw new Error("Failed to initialize Soroban RPC server");
+  }
+
+  const rpcServer = server as {
+    getTransaction: (hash: string) => Promise<{
+      status: string;
+      resultXdr?: unknown;
+      resultMetaXdr?: unknown;
+      events?: Array<{
+        type?: string;
+        contractId?: string;
+        topic?: unknown[];
+        value?: unknown;
+      }>;
+    }>;
+  };
+
+  const txResult = await rpcServer.getTransaction(params.txHash);
+
+  if (txResult.status === "NOT_FOUND") {
+    throw new Error(`Transaction not found: ${params.txHash}`);
+  }
+
+  if (txResult.status === "FAILED") {
+    throw new Error(`Transaction failed: ${params.txHash}`);
+  }
+
+  // Events may be returned directly on the result or within resultMetaXdr.
+  const raw = txResult.events ?? [];
+
+  return raw.map((ev, index): ContractLogEntry => {
+    const topics: unknown[] = (ev.topic ?? []).map((t) =>
+      typeof StellarSdk.scValToNative === "function" ? safeScValToNative(t) : t
+    );
+    const data: unknown =
+      ev.value !== undefined && typeof StellarSdk.scValToNative === "function"
+        ? safeScValToNative(ev.value)
+        : (ev.value ?? null);
+
+    return {
+      index,
+      contractId: ev.contractId ?? null,
+      type: ev.type ?? "contract",
+      topics,
+      data,
+    };
+  });
+}
+
+function safeScValToNative(val: unknown): unknown {
+  try {
+    return StellarSdk.scValToNative(val as never);
+  } catch {
+    return val;
+  }
 }
