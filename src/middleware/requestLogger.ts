@@ -7,7 +7,7 @@ const SENSITIVE_FIELDS = ["pk", "privateKey", "password", "token", "secret", "au
 /**
  * Redacts sensitive fields from an object
  */
-function sanitizeObject(obj: any): any {
+function sanitizeObject(obj: unknown): unknown {
   if (obj === null || obj === undefined) {
     return obj;
   }
@@ -17,14 +17,14 @@ function sanitizeObject(obj: any): any {
   }
 
   if (typeof obj === "object") {
-    const sanitized: any = {};
-    for (const key in obj) {
+    const sanitized: Record<string, unknown> = {};
+    for (const key in obj as Record<string, unknown>) {
       if (Object.prototype.hasOwnProperty.call(obj, key)) {
         const lowerKey = key.toLowerCase();
         if (SENSITIVE_FIELDS.some((field) => lowerKey.includes(field))) {
           sanitized[key] = "[REDACTED]";
         } else {
-          sanitized[key] = sanitizeObject(obj[key]);
+          sanitized[key] = sanitizeObject((obj as Record<string, unknown>)[key]);
         }
       }
     }
@@ -52,7 +52,7 @@ export const requestLogger = (req: Request, res: Response, next: NextFunction) =
 
   // Capture original res.json to log response
   const originalJson = res.json.bind(res);
-  res.json = function (body: any) {
+  res.json = function (body: unknown) {
     const duration = Date.now() - startTime;
 
     logger.info("Outgoing response", {

@@ -5,6 +5,9 @@ import {
   ToolPayload,
   ToolResult,
 } from "./ToolMetadata";
+import { withTimeout, TimeoutError } from "../../utils/timeout";
+import config from "../../config/config";
+import logger from "../../config/logger";
 
 export class ToolRegistry {
   private tools: Map<string, ToolRegistryEntry> = new Map();
@@ -53,54 +56,6 @@ export class ToolRegistry {
    * @example
    * // Overwrite existing tool
    * toolRegistry.registerCustomTool(updatedTool, { overwrite: true });
-   */
-  registerCustomTool<T extends ToolPayload>(
-    tool: ToolDefinition<T>,
-    options?: {
-      overwrite?: boolean;
-      namespace?: string;
-    }
-  ): void {
-    const { metadata } = tool;
-    let toolName = metadata.name;
-
-    // Apply namespace if provided
-    if (options?.namespace) {
-      toolName = `${options.namespace}:${toolName}`;
-      // Create a new metadata object with namespaced name
-      tool = {
-        ...tool,
-        metadata: {
-          ...metadata,
-          name: toolName,
-        },
-      };
-    }
-
-    // Check if tool already exists
-    if (this.tools.has(toolName)) {
-      if (!options?.overwrite) {
-        throw new Error(
-          `Tool '${toolName}' is already registered. Use overwrite option to replace it.`
-        );
-      }
-      // Unregister existing tool first
-      this.unregister(toolName);
-    }
-
-    this.validateToolMetadata(tool.metadata);
-
-    this.tools.set(toolName, {
-      name: toolName,
-      definition: tool as ToolDefinition,
-      enabled: true,
-    });
-
-    this.categories.add(tool.metadata.category);
-  }
-  /**
-   * Register a custom tool dynamically without modifying core registry
-   * This allows external tools to be added at runtime
    */
   registerCustomTool<T extends ToolPayload>(
     tool: ToolDefinition<T>,
@@ -253,12 +208,13 @@ export class ToolRegistry {
   }
 
   /**
-   * Execute a tool with payload validation
+   * Execute a tool with payload validation and timeout
    */
   async executeTool(
     toolName: string,
     payload: ToolPayload,
-    userId: string
+    userId: string,
+    timeoutMs?: number
   ): Promise<ToolResult> {
     const tool = this.getTool(toolName);
 
@@ -278,8 +234,20 @@ export class ToolRegistry {
       }
     }
 
+    const timeout = timeoutMs || config.agent.timeouts.toolExecution;
+    logger.debug("Executing tool with timeout", { toolName, userId, timeout });
+
     try {
-      const result = await tool.execute(payload, userId);
+      const result = await withTimeout(
+        tool.execute(payload, userId),
+        {
+          timeoutMs: timeout,
+          operation: `Tool execution: ${toolName}`,
+          onTimeout: () => {
+            logger.error("Tool execution timeout", { toolName, userId, timeout });
+          },
+        }
+      );
 
       // Update last used timestamp
       const entry = this.tools.get(toolName);
@@ -289,6 +257,16 @@ export class ToolRegistry {
 
       return result;
     } catch (error) {
+      if (error instanceof TimeoutError) {
+        const toolError = new ToolExecutionError(
+          `Tool '${toolName}' execution timed out after ${timeout}ms`
+        );
+        toolError.toolName = toolName;
+        toolError.payload = payload;
+        toolError.userId = userId;
+        throw toolError;
+      }
+
       const toolError = new ToolExecutionError(
         `Tool execution failed: ${
           error instanceof Error ? error.message : "Unknown error"

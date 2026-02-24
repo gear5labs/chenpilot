@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import config from "../config/config";
 import { memoryStore } from "./memory/memory";
 import logger from "../config/logger";
-import { randomUUID } from "crypto";
+import { withTimeout, TimeoutError } from "../utils/timeout";
 
 const client = new Anthropic({
   apiKey: config.apiKey,
@@ -14,9 +14,9 @@ export class AgentLLM {
     prompt: string,
     userInput: string,
     asJson = true,
-    traceId?: string
-  ): Promise<any> {
-    const trace = traceId || randomUUID();
+    timeoutMs?: number
+  ): Promise<unknown> {
+    const timeout = timeoutMs || config.agent.timeouts.llmCall;
     const memoryContext = memoryStore.get(agentId).join("\n");
     const fullPrompt = `${
       memoryContext ? "Previous context:\n" + memoryContext + "\n\n" : ""
@@ -24,34 +24,53 @@ export class AgentLLM {
       asJson ? "\n\nPlease respond with valid JSON only." : ""
     }`;
 
-    logger.info("LLM call initiated", { traceId: trace, agentId, asJson });
+    logger.debug("Starting LLM call", { agentId, timeout, asJson });
 
-    const message = await client.messages.create({
-      model: "claude-3-5-haiku-20241022",
-      max_tokens: 4096,
-      messages: [
+    try {
+      const message = await withTimeout(
+        client.messages.create({
+          model: "claude-3-5-haiku-20241022",
+          max_tokens: 4096,
+          messages: [
+            {
+              role: "user",
+              content: fullPrompt,
+            },
+          ],
+        }),
         {
-          role: "user",
-          content: fullPrompt,
-        },
-      ],
-    });
+          timeoutMs: timeout,
+          operation: `LLM call for agent ${agentId}`,
+          onTimeout: () => {
+            logger.error("LLM call timeout", { agentId, timeout });
+          },
+        }
+      );
 
-    const content =
-      message.content[0].type === "text" ? message.content[0].text : "{}";
+      const content =
+        message.content[0].type === "text" ? message.content[0].text : "{}";
 
-    logger.info("LLM call completed", { traceId: trace, agentId, contentLength: content.length });
-
-    if (asJson) {
-      try {
-        const parsed = JSON.parse(content);
-        return parsed;
-      } catch (err) {
-        logger.error("JSON parse error", { traceId: trace, error: err, rawContent: content });
-        return {};
+      if (asJson) {
+        try {
+          const parsed = JSON.parse(content);
+          return parsed;
+        } catch (err) {
+          logger.error("JSON parse error", { error: err, rawContent: content });
+          return {};
+        }
+      } else {
+        return content;
       }
-    } else {
-      return content;
+    } catch (error) {
+      if (error instanceof TimeoutError) {
+        logger.error("LLM call timed out", {
+          agentId,
+          timeout,
+          operation: error.operation,
+        });
+        throw new Error(`LLM call timed out after ${timeout}ms`);
+      }
+      throw error;
     }
   }
 }

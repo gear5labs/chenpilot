@@ -30,8 +30,8 @@ export function parseSorobanIntent(input: string): WorkflowPlan | null {
   const network = text.includes("mainnet")
     ? "mainnet"
     : text.includes("testnet") || text.includes("test net")
-    ? "testnet"
-    : "testnet";
+      ? "testnet"
+      : "testnet";
 
   const methodMatch =
     input.match(/\b(?:method|function|fn)\s+([a-zA-Z_][\w]*)/i) ||
