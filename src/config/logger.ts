@@ -8,7 +8,7 @@ const SENSITIVE_FIELDS = ["pk", "privateKey", "password", "token", "secret"];
 /**
  * Recursively redacts sensitive data from objects
  */
-function redactSensitiveData(obj: any): any {
+function redactSensitiveData(obj: unknown): unknown {
   if (obj === null || obj === undefined) {
     return obj;
   }
@@ -18,13 +18,13 @@ function redactSensitiveData(obj: any): any {
   }
 
   if (typeof obj === "object") {
-    const redacted: any = {};
-    for (const key in obj) {
+    const redacted: Record<string, unknown> = {};
+    for (const key in obj as Record<string, unknown>) {
       if (Object.prototype.hasOwnProperty.call(obj, key)) {
         if (SENSITIVE_FIELDS.includes(key)) {
           redacted[key] = "[REDACTED]";
         } else {
-          redacted[key] = redactSensitiveData(obj[key]);
+          redacted[key] = redactSensitiveData((obj as Record<string, unknown>)[key]);
         }
       }
     }
@@ -164,19 +164,19 @@ const logger = winston.createLogger({
 });
 
 // Helper functions for common log patterns
-export const logError = (message: string, error?: Error | any, meta?: any) => {
+export const logError = (message: string, error?: Error | unknown, meta?: Record<string, unknown>) => {
   logger.error(message, { error: error?.message || error, stack: error?.stack, ...meta });
 };
 
-export const logInfo = (message: string, meta?: any) => {
+export const logInfo = (message: string, meta?: Record<string, unknown>) => {
   logger.info(message, meta);
 };
 
-export const logWarn = (message: string, meta?: any) => {
+export const logWarn = (message: string, meta?: Record<string, unknown>) => {
   logger.warn(message, meta);
 };
 
-export const logDebug = (message: string, meta?: any) => {
+export const logDebug = (message: string, meta?: Record<string, unknown>) => {
   logger.debug(message, meta);
 };
 

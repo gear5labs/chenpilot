@@ -13,7 +13,7 @@ export class AgentLLM {
     prompt: string,
     userInput: string,
     asJson = true
-  ): Promise<any> {
+  ): Promise<unknown> {
     const memoryContext = memoryStore.get(agentId).join("\n");
     const fullPrompt = `${
       memoryContext ? "Previous context:\n" + memoryContext + "\n\n" : ""

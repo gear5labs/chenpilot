@@ -98,54 +98,6 @@ export class ToolRegistry {
 
     this.categories.add(tool.metadata.category);
   }
-  /**
-   * Register a custom tool dynamically without modifying core registry
-   * This allows external tools to be added at runtime
-   */
-  registerCustomTool<T extends ToolPayload>(
-    tool: ToolDefinition<T>,
-    options?: {
-      overwrite?: boolean;
-      namespace?: string;
-    }
-  ): void {
-    const { metadata } = tool;
-    let toolName = metadata.name;
-
-    // Apply namespace if provided
-    if (options?.namespace) {
-      toolName = `${options.namespace}:${toolName}`;
-      // Create a new metadata object with namespaced name
-      tool = {
-        ...tool,
-        metadata: {
-          ...metadata,
-          name: toolName,
-        },
-      };
-    }
-
-    // Check if tool already exists
-    if (this.tools.has(toolName)) {
-      if (!options?.overwrite) {
-        throw new Error(
-          `Tool '${toolName}' is already registered. Use overwrite option to replace it.`
-        );
-      }
-      // Unregister existing tool first
-      this.unregister(toolName);
-    }
-
-    this.validateToolMetadata(tool.metadata);
-
-    this.tools.set(toolName, {
-      name: toolName,
-      definition: tool as ToolDefinition,
-      enabled: true,
-    });
-
-    this.categories.add(tool.metadata.category);
-  }
 
   /**
    * Register multiple custom tools at once
