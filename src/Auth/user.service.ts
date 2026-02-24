@@ -35,7 +35,9 @@ export default class UserService {
     }
 
     if (!/^[a-zA-Z0-9_]+$/.test(name)) {
-      throw new BadError("Name can only contain alphanumeric characters and underscores");
+      throw new BadError(
+        "Name can only contain alphanumeric characters and underscores"
+      );
     }
 
     // Check if username exists
