@@ -4,6 +4,7 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 import config from "../../config/config";
 import accountsData from "../../Auth/accounts.json";
 import logger from "../../config/logger";
+import stellarPriceService from "../../services/stellarPrice.service";
 import { flashSwapRiskAnalyzer } from "../../services/flashSwapRiskAnalyzer";
 
 interface SwapPayload extends Record<string, unknown> {
@@ -74,7 +75,7 @@ export class SwapTool extends BaseTool<SwapPayload> {
   private getStellarAccount(userId: string): StellarSdk.Keypair {
     const accounts = accountsData as StellarAccountData[];
     const accountData = accounts.find((a) => a.userId === userId);
-    
+
     if (!accountData) {
       throw new Error(`Stellar account not found for user: ${userId}`);
     }
@@ -101,6 +102,20 @@ export class SwapTool extends BaseTool<SwapPayload> {
           "Invalid token symbol. Supported: XLM, USDC, USDT"
         );
       }
+
+      // Get price quote (with caching)
+      const priceQuote = await stellarPriceService.getPrice(
+        payload.from,
+        payload.to,
+        payload.amount
+      );
+
+      logger.info("Price quote obtained", {
+        price: priceQuote.price,
+        estimatedOutput: priceQuote.estimatedOutput,
+        cached: priceQuote.cached,
+        path: priceQuote.path,
+      });
 
       // Analyze swap risk for sandwich attacks
       logger.info("Analyzing swap risk", { userId, amount: payload.amount });
@@ -141,7 +156,7 @@ export class SwapTool extends BaseTool<SwapPayload> {
       const sendAmount = payload.amount.toFixed(7);
 
       // Calculate minimum destination amount with 1% slippage tolerance
-      const minDestAmount = (payload.amount * 0.99).toFixed(7);
+      const minDestAmount = (priceQuote.estimatedOutput * 0.99).toFixed(7);
 
       // Build transaction with path payment strict send
       // This automatically finds the best path through Stellar's DEX
@@ -171,6 +186,8 @@ export class SwapTool extends BaseTool<SwapPayload> {
         from: payload.from,
         to: payload.to,
         amount: payload.amount,
+        estimatedOutput: priceQuote.estimatedOutput,
+        price: priceQuote.price,
         txHash: result.hash,
         timestamp: new Date().toISOString(),
         ledger: result.ledger,
@@ -184,14 +201,24 @@ export class SwapTool extends BaseTool<SwapPayload> {
       });
     } catch (error) {
       let errorMessage = "Unknown error";
-      
+
       if (error instanceof Error) {
         errorMessage = error.message;
       }
 
       // Handle specific Stellar errors
       if (typeof error === "object" && error !== null) {
-        const stellarError = error as { response?: { data?: { extras?: { result_codes?: unknown } } } };
+        const stellarError = error as {
+          response?: {
+            data?: {
+              extras?: {
+                result_codes?: {
+                  operations?: string[];
+                };
+              };
+            };
+          };
+        };
         if (stellarError.response?.data?.extras?.result_codes) {
           const codes = stellarError.response.data.extras.result_codes;
           if (codes.operations?.includes("op_no_trust")) {

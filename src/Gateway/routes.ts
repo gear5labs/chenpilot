@@ -12,6 +12,7 @@ import {
 } from "./transaction.service";
 import logger from "../config/logger";
 import authRoutes from "../Auth/auth.routes";
+import dataExportRoutes from "../services/dataExport.routes";
 import { stellarLiquidityTool } from "../Agents/tools/stellarLiquidityTool";
 import { authenticateToken } from "../Auth/auth.middleware";
 import {
@@ -42,6 +43,9 @@ router.use(generalLimiter);
 
 // Mount auth routes
 router.use("/auth", authRoutes);
+
+// Mount data export routes
+router.use("/export", dataExportRoutes);
 
 // Public webhook endpoint for Stellar funding notifications
 router.post("/webhook/stellar/funding", async (req: Request, res: Response) => {
