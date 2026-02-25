@@ -4,6 +4,7 @@ import app from "./Gateway/api";
 import config from "./config/config";
 import AppDataSource from "./config/Datasource";
 import logger from "./config/logger";
+import { horizonOperationStreamerService } from "./services/horizonOperationStreamer.service";
 class Server {
   private server: http.Server;
   private port: number;
@@ -15,8 +16,13 @@ class Server {
 
   public async start(): Promise<void> {
     try {
+      horizonOperationStreamerService.onLargeOperation((alert) => {
+        logger.info("Stellar large operation alert emitted", alert);
+      });
+
       const shutdown = async () => {
         logger.info("Shutting down gracefully...");
+        horizonOperationStreamerService.stop();
         await AppDataSource.destroy();
         this.server.close(() => {
           logger.info("Server closed");
@@ -27,6 +33,7 @@ class Server {
       await AppDataSource.initialize();
       console.log("DB connection established!");
       logger.info("Database connected successfully");
+      horizonOperationStreamerService.start();
       process.on("SIGTERM", shutdown);
       process.on("SIGINT", shutdown);
 

@@ -18,7 +18,12 @@ This module implements a Redis-backed caching layer for Stellar asset prices, re
    - Path-finding for optimal swap routes
    - Orderbook depth analysis
 
-3. **PriceTool** (`../Agents/tools/price.ts`)
+3. **HorizonOperationStreamerService** (`horizonOperationStreamer.service.ts`)
+   - Streams Stellar Horizon operations in real time
+   - Detects large transfer/payment operations above a configured threshold
+   - Emits backend alert callbacks for downstream processing
+
+4. **PriceTool** (`../Agents/tools/price.ts`)
    - Agent-facing tool for price queries
    - Multiple operations: single price, batch prices, orderbook, stats
    - User-friendly interface for AI agents
@@ -53,7 +58,32 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=
 REDIS_DB=0
+
+# Horizon operation alert streamer
+STELLAR_ALERT_STREAM_ENABLED=true
+STELLAR_ALERT_MIN_AMOUNT=1000
+STELLAR_ALERT_STREAM_RECONNECT_MS=5000
 ```
+
+## Horizon Operation Stream Alerts
+
+The backend starts a Horizon operation stream on server boot and emits alerts when
+large operations are detected.
+
+### Alert Trigger Rules
+
+- `payment`: compares `amount`
+- `create_account`: compares `starting_balance`
+- `path_payment_strict_send`: compares `source_amount`
+- `path_payment_strict_receive`: compares `destination_amount`
+
+If the amount is `>= STELLAR_ALERT_MIN_AMOUNT`, a large-operation alert is emitted.
+
+### Runtime Behavior
+
+- Stream starts with cursor `now` to avoid replaying historical operations
+- Uses automatic reconnect when stream errors occur
+- Logs each detected alert with operation metadata
 
 ### Redis Setup
 
