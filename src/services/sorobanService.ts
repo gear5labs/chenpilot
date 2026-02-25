@@ -78,12 +78,44 @@ function normalizeArgs(args?: unknown[]): any[] {
     if (isScValLike(arg)) return arg;
     if (typeof StellarSdk.nativeToScVal === "function") {
       return StellarSdk.nativeToScVal(arg as any);
+      try {
+        return StellarSdk.nativeToScVal(arg as never);
+      } catch {
+        return arg;
+      }
     }
     return arg;
   });
 }
 
 // --- SorobanService Class ---
+export async function invokeContract(
+  params: InvokeContractParams
+): Promise<InvokeContractResult> {
+  // Check if we should use local chain simulation
+  try {
+    const { getInterceptor } = await import('../simulation/ServiceInterceptor');
+    const interceptor = getInterceptor();
+    if (interceptor && interceptor.isSimulationEnabled('soroban')) {
+      return interceptor.intercept(
+        'soroban',
+        'invoke_contract',
+        [params],
+        (...args: unknown[]) => invokeContractLive(args[0] as InvokeContractParams)
+      ) as Promise<InvokeContractResult>;
+    }
+  } catch {
+    // Simulation not available, continue with live network
+  }
+
+  // Use live network
+  return invokeContractLive(params);
+}
+
+async function invokeContractLive(
+  params: InvokeContractParams
+): Promise<InvokeContractResult> {
+  validateParams(params);
 
 export class SorobanService {
   /**
@@ -96,6 +128,23 @@ export class SorobanService {
     const rpcUrl = resolveRpcUrl(params.network, params.rpcUrl);
     const passphrase = NETWORK_PASSPHRASES[params.network];
     const server = new StellarSdk.SorobanRpc.Server(rpcUrl);
+  // Try different server initialization approaches for different SDK versions
+  let server: unknown;
+  try {
+    // Try newer SDK structure - use Soroban instead of SorobanRpc
+    const SorobanServer = (StellarSdk as unknown as { Soroban: { Server: new (url: string, options?: { allowHttp?: boolean }) => unknown } }).Soroban.Server;
+    server = new SorobanServer(rpcUrl, {
+      allowHttp: rpcUrl.startsWith("http://"),
+    });
+  } catch (error) {
+    try {
+      // Try alternative structure
+      const HorizonServer = (StellarSdk as unknown as { Horizon: { Server: new (url: string) => unknown } }).Horizon.Server;
+      server = new HorizonServer(rpcUrl);
+    } catch (fallbackError) {
+      throw new Error(`Failed to initialize Stellar server: ${error}`);
+    }
+  }
 
     // Use G...A dummy if no public key provided to allow simulation
     const sourcePublicKey = params.source?.publicKey || "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
@@ -103,6 +152,11 @@ export class SorobanService {
 
     const contract = new StellarSdk.Contract(params.contractId);
     const op = contract.call(params.method, ...normalizeArgs(params.args));
+  const contract = new StellarSdk.Contract(params.contractId);
+  const normalizedArgs = normalizeArgs(params.args);
+  // Use spread operator with proper typing
+  const contractCall = (contract as { call: (method: string, ...args: unknown[]) => unknown }).call;
+  const op = contractCall.call(contract, params.method, ...normalizedArgs);
 
     const tx = new StellarSdk.TransactionBuilder(account, {
       fee: StellarSdk.BASE_FEE,
@@ -174,3 +228,48 @@ export class SorobanService {
 
 // Export a singleton instance for ease of use
 export const sorobanService = new SorobanService();
+  const tx = new StellarSdk.TransactionBuilder(account, {
+    fee,
+    networkPassphrase: passphrase,
+  })
+    .addOperation(op as never)
+    .setTimeout(timeoutSeconds)
+    .build();
+
+  let simulation: unknown;
+  try {
+    simulation = await (server as { simulateTransaction: (tx: StellarSdk.Transaction) => Promise<unknown> }).simulateTransaction(tx);
+  } catch (error) {
+    throw new Error(`Failed to simulate transaction: ${error}`);
+  }
+
+  const simResult = simulation as { error?: string; result?: { auth?: unknown[]; retval?: unknown; result?: { retval?: unknown } } };
+  if (simResult?.error) {
+    throw new Error(`Soroban simulation failed: ${simResult.error}`);
+  }
+
+  const auth = simResult?.result?.auth;
+  if (Array.isArray(auth) && auth.length > 0 && !params.source?.secretKey) {
+    throw new Error(
+      "Soroban invocation requires authorization; signing is not supported"
+    );
+  }
+
+  const retval =
+    simResult?.result?.retval ||
+    simResult?.result?.result?.retval ||
+    null;
+
+  const decoded =
+    retval && typeof StellarSdk.scValToNative === "function"
+      ? StellarSdk.scValToNative(retval as never)
+      : retval;
+
+  return {
+    network: params.network,
+    contractId: params.contractId,
+    method: params.method,
+    result: decoded,
+    raw: simResult,
+  };
+}

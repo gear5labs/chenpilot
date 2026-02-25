@@ -5,6 +5,9 @@ import {
   ToolPayload,
   ToolResult,
 } from "./ToolMetadata";
+import { withTimeout, TimeoutError } from "../../utils/timeout";
+import config from "../../config/config";
+import logger from "../../config/logger";
 
 export class ToolRegistry {
   private tools: Map<string, ToolRegistryEntry> = new Map();
@@ -30,6 +33,138 @@ export class ToolRegistry {
     });
 
     this.categories.add(metadata.category);
+  }
+
+  /**
+   * Register a custom tool dynamically without modifying core registry
+   * This allows external tools to be added at runtime
+   *
+   * @param tool - The tool definition to register
+   * @param options - Optional configuration
+   * @param options.overwrite - If true, replaces existing tool with same name
+   * @param options.namespace - Optional namespace prefix for the tool name
+   *
+   * @example
+   * // Register a simple custom tool
+   * toolRegistry.registerCustomTool(myCustomTool);
+   *
+   * @example
+   * // Register with namespace
+   * toolRegistry.registerCustomTool(myTool, { namespace: 'custom' });
+   * // Tool will be registered as 'custom:myTool'
+   *
+   * @example
+   * // Overwrite existing tool
+   * toolRegistry.registerCustomTool(updatedTool, { overwrite: true });
+   */
+  registerCustomTool<T extends ToolPayload>(
+    tool: ToolDefinition<T>,
+    options?: {
+      overwrite?: boolean;
+      namespace?: string;
+    }
+  ): void {
+    const { metadata } = tool;
+    let toolName = metadata.name;
+
+    // Apply namespace if provided
+    if (options?.namespace) {
+      toolName = `${options.namespace}:${toolName}`;
+      // Create a new metadata object with namespaced name
+      tool = {
+        ...tool,
+        metadata: {
+          ...metadata,
+          name: toolName,
+        },
+      };
+    }
+
+    // Check if tool already exists
+    if (this.tools.has(toolName)) {
+      if (!options?.overwrite) {
+        throw new Error(
+          `Tool '${toolName}' is already registered. Use overwrite option to replace it.`
+        );
+      }
+      // Unregister existing tool first
+      this.unregister(toolName);
+    }
+
+    this.validateToolMetadata(tool.metadata);
+
+    this.tools.set(toolName, {
+      name: toolName,
+      definition: tool as ToolDefinition,
+      enabled: true,
+    });
+
+    this.categories.add(tool.metadata.category);
+  }
+
+  /**
+   * Register multiple custom tools at once
+   *
+   * @param tools - Array of tool definitions to register
+   * @param options - Optional configuration applied to all tools
+   * @returns Array of successfully registered tool names
+   *
+   * @example
+   * const tools = [tool1, tool2, tool3];
+   * const registered = toolRegistry.registerCustomTools(tools, { namespace: 'plugin' });
+   */
+  registerCustomTools<T extends ToolPayload>(
+    tools: ToolDefinition<T>[],
+    options?: {
+      overwrite?: boolean;
+      namespace?: string;
+      continueOnError?: boolean;
+    }
+  ): string[] {
+    const registered: string[] = [];
+    const errors: Array<{ toolName: string; error: string }> = [];
+
+    for (const tool of tools) {
+      try {
+        this.registerCustomTool(tool, options);
+        registered.push(
+          options?.namespace
+            ? `${options.namespace}:${tool.metadata.name}`
+            : tool.metadata.name
+        );
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+        errors.push({
+          toolName: tool.metadata.name,
+          error: errorMessage,
+        });
+
+        if (!options?.continueOnError) {
+          throw new Error(
+            `Failed to register tool '${tool.metadata.name}': ${errorMessage}`
+          );
+        }
+      }
+    }
+
+    if (errors.length > 0 && options?.continueOnError) {
+      console.warn(
+        `Some tools failed to register: ${JSON.stringify(errors, null, 2)}`
+      );
+    }
+
+    return registered;
+  }
+
+  /**
+   * Check if a tool is registered
+   *
+   * @param toolName - Name of the tool to check
+   * @returns True if the tool exists in the registry
+   */
+  hasCustomTool(toolName: string): boolean {
+    return this.tools.has(toolName);
   }
 
   /**
@@ -73,12 +208,13 @@ export class ToolRegistry {
   }
 
   /**
-   * Execute a tool with payload validation
+   * Execute a tool with payload validation and timeout
    */
   async executeTool(
     toolName: string,
     payload: ToolPayload,
-    userId: string
+    userId: string,
+    timeoutMs?: number
   ): Promise<ToolResult> {
     const tool = this.getTool(toolName);
 
@@ -98,8 +234,20 @@ export class ToolRegistry {
       }
     }
 
+    const timeout = timeoutMs || config.agent.timeouts.toolExecution;
+    logger.debug("Executing tool with timeout", { toolName, userId, timeout });
+
     try {
-      const result = await tool.execute(payload, userId);
+      const result = await withTimeout(
+        tool.execute(payload, userId),
+        {
+          timeoutMs: timeout,
+          operation: `Tool execution: ${toolName}`,
+          onTimeout: () => {
+            logger.error("Tool execution timeout", { toolName, userId, timeout });
+          },
+        }
+      );
 
       // Update last used timestamp
       const entry = this.tools.get(toolName);
@@ -109,6 +257,16 @@ export class ToolRegistry {
 
       return result;
     } catch (error) {
+      if (error instanceof TimeoutError) {
+        const toolError = new ToolExecutionError(
+          `Tool '${toolName}' execution timed out after ${timeout}ms`
+        );
+        toolError.toolName = toolName;
+        toolError.payload = payload;
+        toolError.userId = userId;
+        throw toolError;
+      }
+
       const toolError = new ToolExecutionError(
         `Tool execution failed: ${
           error instanceof Error ? error.message : "Unknown error"

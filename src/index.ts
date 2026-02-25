@@ -23,7 +23,9 @@ class Server {
           process.exit(0);
         });
       };
+      console.log("Attempting to connect to DB...");
       await AppDataSource.initialize();
+      console.log("DB connection established!");
       logger.info("Database connected successfully");
       process.on("SIGTERM", shutdown);
       process.on("SIGINT", shutdown);
@@ -31,12 +33,15 @@ class Server {
       this.server.on("error", (error: NodeJS.ErrnoException) => {
         if (error.code === "EADDRINUSE") {
           logger.warn(
-            `Port ${this.port} in use, retrying on ${this.port + 1}...`,
+            `Port ${this.port} in use, retrying on ${this.port + 1}...`
           );
           this.port += 1;
           this.start();
         } else {
-          logger.error("Server error", { error: error.message, stack: error.stack });
+          logger.error("Server error", {
+            error: error.message,
+            stack: error.stack,
+          });
           process.exit(1);
         }
       });
