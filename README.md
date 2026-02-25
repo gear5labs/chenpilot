@@ -145,6 +145,45 @@ The agent uses an intelligent workflow system that:
 
 ---
 
+## SDK Idempotency for BTC → Stellar Swaps
+
+Use the SDK idempotency helpers to guarantee retries do not create duplicate intents.
+
+```ts
+import {
+  AgentClient,
+  createBtcToStellarSwapIdempotencyKey,
+  ChainId,
+} from "@chen-pilot/sdk-core";
+
+const client = new AgentClient({ baseUrl: "https://your-chenpilot-api" });
+
+const swapRequest = {
+  fromChain: ChainId.BITCOIN,
+  toChain: ChainId.STELLAR,
+  fromToken: "BTC",
+  toToken: "XLM",
+  amount: "0.01",
+  destinationAddress: "G...",
+};
+
+// Generate once, persist in your app state, and reuse on retries
+const idempotencyKey = createBtcToStellarSwapIdempotencyKey(
+  swapRequest,
+  "wallet-action-123"
+);
+
+await client.executeBtcToStellarSwap(swapRequest, {
+  userId: "user-uuid",
+  idempotencyKey,
+  maxRetries: 3,
+});
+```
+
+If a timeout/network failure happens, call `executeBtcToStellarSwap` again with the same `idempotencyKey`.
+
+---
+
 ## Contributing
 
 - Fork the repository
