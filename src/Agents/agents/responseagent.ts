@@ -3,7 +3,7 @@ import { agentLLM } from "../agent";
 import { promptGenerator } from "../registry/PromptGenerator";
 
 class ResponseAgent {
-  async format(workflow: ToolResult[], userId: string, userInput: string) {
+  async format(workflow: ToolResult[], userId: string, userInput: string, traceId: string) {
     const responsePrompt = promptGenerator.generateResponsePrompt();
 
     const prompt = responsePrompt
@@ -11,7 +11,7 @@ class ResponseAgent {
       .replace("{{USER_INPUT}}", userInput)
       .replace("{{USER_ID}}", userId);
 
-    const response = await agentLLM.callLLM(userId, prompt, userInput);
+    const response = await agentLLM.callLLM(userId, prompt, userInput, true, traceId);
 
     return response;
   }

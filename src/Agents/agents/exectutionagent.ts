@@ -65,9 +65,10 @@ export class ExecutionAgent {
           userId,
           Math.min(remainingTime, config.agent.timeouts.toolExecution)
         );
+        logger.info("Tool execution completed", { traceId, action: step.action, status: result.status, userId });
         results.push(result);
       } catch (error) {
-        logger.error("Tool execution failed", { action: step.action, error, userId });
+        logger.error("Tool execution failed", { traceId, action: step.action, error, userId });
         const errorResult: ToolResult = {
           action: step.action,
           status: "error",
@@ -92,7 +93,8 @@ export class ExecutionAgent {
     const res: { response: string } = await responseAgent.format(
       results,
       userId,
-      input
+      input,
+      traceId
     );
     logger.info("Workflow execution completed", { userId, hasResponse: !!res?.response, duration: Date.now() - startTime });
     return { success: true, data: res?.response };
