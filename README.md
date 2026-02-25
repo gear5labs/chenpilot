@@ -184,6 +184,36 @@ If a timeout/network failure happens, call `executeBtcToStellarSwap` again with 
 
 ---
 
+## SDK API Docs (TypeDoc)
+
+The SDK package includes TypeDoc configuration for automated HTML API reference generation.
+
+### Generate docs locally
+
+```bash
+cd packages/sdk
+npm install
+npm run docs
+```
+
+Generated output is written to:
+
+```bash
+packages/sdk/docs
+```
+
+### Automated publishing on push to `main`
+
+GitHub Actions workflow: `.github/workflows/sdk-docs.yml`
+
+On each push to `main`, the workflow:
+
+1. Installs SDK dependencies
+2. Runs `npm run docs` in `packages/sdk`
+3. Deploys the generated HTML docs to GitHub Pages
+
+---
+
 ## Contributing
 
 - Fork the repository
