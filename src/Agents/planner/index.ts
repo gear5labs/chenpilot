@@ -7,6 +7,7 @@
 export { AgentPlanner, agentPlanner } from "./AgentPlanner";
 export { PlanExecutor, planExecutor } from "./PlanExecutor";
 export { parseSorobanIntent } from "./sorobanIntent";
+export { planHashService } from "./planHash";
 
 export type {
   PlannerContext,
@@ -21,3 +22,5 @@ export type {
   StepResult,
   ExecutionOptions,
 } from "./PlanExecutor";
+
+export type { HashedPlan, PlanHashMetadata } from "./planHash";

@@ -1,6 +1,7 @@
 import { toolRegistry } from "../registry/ToolRegistry";
 import { ToolResult } from "../registry/ToolMetadata";
 import { ExecutionPlan, PlanStep } from "./AgentPlanner";
+import { HashedPlan, planHashService } from "./planHash";
 import logger from "../../config/logger";
 
 export interface ExecutionResult {
@@ -29,6 +30,9 @@ export interface ExecutionOptions {
   timeout?: number;
   onStepComplete?: (result: StepResult) => void;
   onStepStart?: (step: PlanStep) => void;
+  verifyHash?: boolean;
+  publicKey?: string;
+  strictMode?: boolean;
 }
 
 export class PlanExecutor {
@@ -48,7 +52,21 @@ export class PlanExecutor {
       userId,
       totalSteps: plan.totalSteps,
       dryRun: options.dryRun || false,
+      hashVerification: options.verifyHash || false,
     });
+
+    // Verify plan hash before execution if enabled
+    if (options.verifyHash !== false) {
+      const verificationResult = this.verifyPlanIntegrity(
+        plan as HashedPlan,
+        options
+      );
+      if (!verificationResult.valid) {
+        throw new Error(
+          `Plan verification failed: ${verificationResult.errors.join(", ")}`
+        );
+      }
+    }
 
     try {
       for (const step of plan.steps) {
@@ -170,6 +188,79 @@ export class PlanExecutor {
     if (completedSteps === totalSteps) return "success";
     if (completedSteps > 0) return "partial";
     return "failed";
+  }
+
+  /**
+   * Verify plan integrity before execution
+   */
+  private verifyPlanIntegrity(
+    plan: HashedPlan,
+    options: ExecutionOptions
+  ): { valid: boolean; errors: string[]; warnings: string[] } {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    // Check if plan has hash
+    if (!plan.planHash) {
+      errors.push("Plan is missing required hash field");
+      return { valid: false, errors, warnings };
+    }
+
+    // Verify hash matches plan content
+    const hashValid = planHashService.verifyPlanHash(plan);
+    if (!hashValid) {
+      errors.push("Plan hash mismatch! Plan may have been tampered with.");
+      logger.error("Plan hash verification failed", {
+        planId: plan.planId,
+        expectedHash: plan.planHash,
+        computedHash: planHashService.generatePlanHash(plan),
+      });
+    }
+
+    // Verify signature if public key provided
+    if (options.publicKey && plan.signature) {
+      const signatureValid = planHashService.verifySignature(
+        plan.planHash,
+        plan.signature,
+        options.publicKey
+      );
+
+      if (!signatureValid) {
+        errors.push("Invalid plan signature");
+        logger.error("Plan signature verification failed", {
+          planId: plan.planId,
+          signedBy: plan.signedBy,
+        });
+      }
+    } else if (plan.signature && !options.publicKey) {
+      warnings.push(
+        "Plan has signature but no public key provided for verification"
+      );
+    }
+
+    // Strict mode validations
+    if (options.strictMode) {
+      if (plan.steps.length === 0) {
+        errors.push("Plan has no steps");
+      }
+
+      const stepNumbers = plan.steps.map((s) => s.stepNumber);
+      const duplicates = stepNumbers.filter(
+        (num, idx) => stepNumbers.indexOf(num) !== idx
+      );
+      if (duplicates.length > 0) {
+        errors.push(`Duplicate step numbers: ${duplicates.join(", ")}`);
+      }
+    }
+
+    if (warnings.length > 0) {
+      logger.warn("Plan verification warnings", {
+        planId: plan.planId,
+        warnings,
+      });
+    }
+
+    return { valid: errors.length === 0, errors, warnings };
   }
 
   async rollback(

@@ -9,6 +9,7 @@ declare module "express-serve-static-core" {
       userId: string;
       name: string;
       role: string;
+      username?: string;
     };
   }
 }

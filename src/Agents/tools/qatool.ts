@@ -69,12 +69,11 @@ export class QATool extends BaseTool {
     }
 
     const context = memoryStore.get(userId);
-    const answer = await this.qaService.answer(userId, data.query, context);
+    const contextObj: Record<string, unknown> = { memory: context };
+    const answer = await this.qaService.answer(userId, data.query, contextObj);
 
     return this.createSuccessResult("qa_answer", { answer });
   }
-
-
 }
 
 export const qaTool = new QATool();

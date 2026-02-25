@@ -111,3 +111,53 @@ export interface ExecutionLog {
   /** Human-readable error description for FAILED or NOT_FOUND transactions. */
   errorMessage: string | null;
 }
+
+// ─── Soroban event subscription types ────────────────────────────────────────
+
+/** Configuration for subscribing to Soroban contract events. */
+export interface EventSubscriptionConfig {
+  /** Network to subscribe to ("testnet" | "mainnet"). */
+  network: "testnet" | "mainnet";
+  /** Optional RPC URL override. */
+  rpcUrl?: string;
+  /** Contract ID(s) to subscribe to. */
+  contractIds: string[];
+  /** Optional topic filter (at least one topic must match). */
+  topicFilter?: string[];
+  /** Polling interval in milliseconds (default: 5000). Only used in polling mode. */
+  pollingIntervalMs?: number;
+  /** Start from a specific ledger sequence (default: latest). */
+  startLedger?: number;
+}
+
+/** A single Soroban contract event. */
+export interface SorobanEvent {
+  /** Transaction hash that emitted the event. */
+  transactionHash: string;
+  /** Contract ID that emitted the event. */
+  contractId: string;
+  /** Event topics (usually human-readable identifiers). */
+  topics: string[];
+  /** Event data (typically a serialized value). */
+  data: unknown;
+  /** Ledger sequence the event was included in. */
+  ledger: number;
+  /** Unix timestamp of ledger close. */
+  createdAt: number;
+}
+
+/** Callback handler for received events. */
+export type EventHandler = (event: SorobanEvent) => Promise<void> | void;
+
+/** Callback handler for subscription errors. */
+export type ErrorHandler = (error: Error) => Promise<void> | void;
+
+/** Event subscription lifecycle. */
+export interface EventSubscription {
+  /** Stop the subscription and clean up resources. */
+  unsubscribe(): Promise<void>;
+  /** Current subscription status. */
+  isActive(): boolean;
+  /** Last ledger that was checked. */
+  getLastLedger(): number | null;
+}

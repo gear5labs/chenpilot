@@ -24,7 +24,9 @@ function redactSensitiveData(obj: unknown): unknown {
         if (SENSITIVE_FIELDS.includes(key)) {
           redacted[key] = "[REDACTED]";
         } else {
-          redacted[key] = redactSensitiveData((obj as Record<string, unknown>)[key]);
+          redacted[key] = redactSensitiveData(
+            (obj as Record<string, unknown>)[key]
+          );
         }
       }
     }
@@ -35,46 +37,62 @@ function redactSensitiveData(obj: unknown): unknown {
 }
 
 // Custom format to redact sensitive data
-const redactFormat = winston.format((info) => {
+const redactFormat = winston.format((info: { message: unknown }) => {
   // Redact sensitive data from the main message if it's an object
   if (typeof info.message === "object") {
-    info.message = redactSensitiveData(info.message);
+    info.message = redactSensitiveData(info.message as Record<string, unknown>);
   }
 
   // Redact from metadata
-  const { level, message, timestamp, ...meta } = info;
-  const redactedMeta = redactSensitiveData(meta);
+  const { level, message, timestamp, ...meta } = info as Record<
+    string,
+    unknown
+  >;
+  const redactedMeta = redactSensitiveData(
+    meta as Record<string, unknown>
+  ) as Record<string, unknown>;
 
   return {
-    level,
-    message,
-    timestamp,
+    level: String(level),
+    message: String(message),
+    timestamp: String(timestamp),
     ...redactedMeta,
   };
 });
 
 // Log format configuration
-const logFormat = winston.format.combine(
-  winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
-  winston.format.errors({ stack: true }),
-  redactFormat(),
-  winston.format.printf((info) => {
-    const { timestamp, level, message, stack, ...meta } = info;
-    let log = `${timestamp} [${level.toUpperCase()}]: ${message}`;
+const logger = createLogger({
+  level: process.env.LOG_LEVEL || "info",
+  format: winston.format.combine(
+    winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
+    winston.format.errors({ stack: true }),
+    redactFormat(),
+    winston.format.printf(
+      (info: {
+        timestamp: string;
+        level: string;
+        message: string;
+        stack?: string;
+        [key: string]: unknown;
+      }) => {
+        const { timestamp, level, message, stack, ...meta } = info;
+        let log = `${timestamp} [${level.toUpperCase()}]: ${message}`;
 
-    // Add stack trace for errors
-    if (stack) {
-      log += `\n${stack}`;
-    }
+        // Add stack trace for errors
+        if (stack) {
+          log += `\n${stack}`;
+        }
 
-    // Add metadata if present
-    if (Object.keys(meta).length > 0) {
-      log += `\n${JSON.stringify(meta, null, 2)}`;
-    }
+        // Add metadata if present
+        if (Object.keys(meta).length > 0) {
+          log += `\n${JSON.stringify(meta, null, 2)}`;
+        }
 
-    return log;
-  })
-);
+        return log;
+      }
+    )
+  ),
+});
 
 // JSON format for file logs
 const jsonFormat = winston.format.combine(
@@ -164,8 +182,16 @@ const logger = winston.createLogger({
 });
 
 // Helper functions for common log patterns
-export const logError = (message: string, error?: Error | unknown, meta?: Record<string, unknown>) => {
-  logger.error(message, { error: error?.message || error, stack: error?.stack, ...meta });
+export const logError = (
+  message: string,
+  error?: Error | unknown,
+  meta?: Record<string, unknown>
+) => {
+  const errorInfo =
+    error instanceof Error
+      ? { message: error.message, stack: error.stack }
+      : { error: String(error) };
+  logger.error(message, { ...errorInfo, ...meta });
 };
 
 export const logInfo = (message: string, meta?: Record<string, unknown>) => {

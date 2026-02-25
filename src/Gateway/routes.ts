@@ -12,11 +12,11 @@ import {
 } from "./transaction.service";
 import logger from "../config/logger";
 import authRoutes from "../Auth/auth.routes";
+import dataExportRoutes from "../services/dataExport.routes";
 import { stellarLiquidityTool } from "../Agents/tools/stellarLiquidityTool";
 import { authenticateToken } from "../Auth/auth.middleware";
 import {
   requireAdmin,
-  requireModerator,
   requireOwnerOrElevated,
 } from "./middleware/rbac.middleware";
 
@@ -42,6 +42,9 @@ router.use(generalLimiter);
 
 // Mount auth routes
 router.use("/auth", authRoutes);
+
+// Mount data export routes
+router.use("/export", dataExportRoutes);
 
 // Public webhook endpoint for Stellar funding notifications
 router.post("/webhook/stellar/funding", async (req: Request, res: Response) => {
@@ -380,34 +383,39 @@ router.get(
 );
 
 // GET /admin/stats - Internal admin route for CPU and memory usage
-router.get("/admin/stats", authenticateToken, requireAdmin, (req: Request, res: Response) => {
-  const memUsage = process.memoryUsage();
-  const cpuUsage = process.cpuUsage();
+router.get(
+  "/admin/stats",
+  authenticateToken,
+  requireAdmin,
+  (req: Request, res: Response) => {
+    const memUsage = process.memoryUsage();
+    const cpuUsage = process.cpuUsage();
 
-  res.json({
-    success: true,
-    timestamp: new Date().toISOString(),
-    memory: {
-      rss: `${(memUsage.rss / 1024 / 1024).toFixed(2)} MB`,
-      heapTotal: `${(memUsage.heapTotal / 1024 / 1024).toFixed(2)} MB`,
-      heapUsed: `${(memUsage.heapUsed / 1024 / 1024).toFixed(2)} MB`,
-      external: `${(memUsage.external / 1024 / 1024).toFixed(2)} MB`,
-    },
-    cpu: {
-      user: `${(cpuUsage.user / 1000).toFixed(2)} ms`,
-      system: `${(cpuUsage.system / 1000).toFixed(2)} ms`,
-    },
-    system: {
-      totalMemory: `${(os.totalmem() / 1024 / 1024 / 1024).toFixed(2)} GB`,
-      freeMemory: `${(os.freemem() / 1024 / 1024 / 1024).toFixed(2)} GB`,
-      uptime: `${(os.uptime() / 3600).toFixed(2)} hours`,
-      loadAverage: os.loadavg(),
-    },
-    process: {
-      uptime: `${(process.uptime() / 60).toFixed(2)} minutes`,
-      pid: process.pid,
-    },
-  });
-});
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      memory: {
+        rss: `${(memUsage.rss / 1024 / 1024).toFixed(2)} MB`,
+        heapTotal: `${(memUsage.heapTotal / 1024 / 1024).toFixed(2)} MB`,
+        heapUsed: `${(memUsage.heapUsed / 1024 / 1024).toFixed(2)} MB`,
+        external: `${(memUsage.external / 1024 / 1024).toFixed(2)} MB`,
+      },
+      cpu: {
+        user: `${(cpuUsage.user / 1000).toFixed(2)} ms`,
+        system: `${(cpuUsage.system / 1000).toFixed(2)} ms`,
+      },
+      system: {
+        totalMemory: `${(os.totalmem() / 1024 / 1024 / 1024).toFixed(2)} GB`,
+        freeMemory: `${(os.freemem() / 1024 / 1024 / 1024).toFixed(2)} GB`,
+        uptime: `${(os.uptime() / 3600).toFixed(2)} hours`,
+        loadAverage: os.loadavg(),
+      },
+      process: {
+        uptime: `${(process.uptime() / 60).toFixed(2)} minutes`,
+        pid: process.pid,
+      },
+    });
+  }
+);
 
 export default router;

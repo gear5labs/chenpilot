@@ -2,6 +2,7 @@ import { agentLLM } from "../agent";
 import { toolRegistry } from "../registry/ToolRegistry";
 import { WorkflowPlan, WorkflowStep } from "../types";
 import { parseSorobanIntent } from "./sorobanIntent";
+import { HashedPlan, planHashService } from "./planHash";
 import logger from "../../config/logger";
 
 export interface PlannerContext {
@@ -47,7 +48,7 @@ export class AgentPlanner {
   private readonly MAX_STEPS = 10;
   private readonly HIGH_RISK_THRESHOLD = 5;
 
-  async createPlan(context: PlannerContext): Promise<ExecutionPlan> {
+  async createPlan(context: PlannerContext): Promise<HashedPlan> {
     logger.info("Creating execution plan", {
       userId: context.userId,
       input: context.userInput,
@@ -56,7 +57,9 @@ export class AgentPlanner {
     try {
       const sorobanPlan = parseSorobanIntent(context.userInput);
       if (sorobanPlan) {
-        return this.convertToExecutionPlan(sorobanPlan, context);
+        return this.createHashedPlan(
+          this.convertToExecutionPlan(sorobanPlan, context)
+        );
       }
 
       const workflowPlan = await this.analyzeWithLLM(context);
@@ -67,13 +70,16 @@ export class AgentPlanner {
         throw new Error(`Invalid plan: ${validation.errors.join(", ")}`);
       }
 
+      const hashedPlan = this.createHashedPlan(executionPlan);
+
       logger.info("Execution plan created successfully", {
-        planId: executionPlan.planId,
-        totalSteps: executionPlan.totalSteps,
-        riskLevel: executionPlan.riskLevel,
+        planId: hashedPlan.planId,
+        totalSteps: hashedPlan.totalSteps,
+        riskLevel: hashedPlan.riskLevel,
+        planHash: hashedPlan.planHash,
       });
 
-      return executionPlan;
+      return hashedPlan;
     } catch (error) {
       logger.error("Failed to create execution plan", {
         error,
@@ -93,7 +99,10 @@ export class AgentPlanner {
       true
     );
 
-    if (!response.workflow || !Array.isArray(response.workflow)) {
+    if (
+      !(response as Record<string, unknown>)?.workflow ||
+      !Array.isArray((response as Record<string, unknown>).workflow)
+    ) {
       throw new Error("Invalid LLM response: missing workflow array");
     }
 
@@ -164,6 +173,31 @@ Output JSON format:
     }
 
     return { valid: errors.length === 0, errors, warnings };
+  }
+
+  /**
+   * Create a hashed plan with integrity verification
+   */
+  private createHashedPlan(plan: ExecutionPlan): HashedPlan {
+    // Generate hash for the plan
+    const planHash = planHashService.generatePlanHash(plan);
+
+    // Create hashed plan
+    const hashedPlan: HashedPlan = {
+      ...plan,
+      planHash,
+    };
+
+    // Optionally sign the plan if private key is available
+    // This would be configured via environment variables in production
+    const privateKey = process.env.PLAN_SIGNING_KEY;
+    if (privateKey) {
+      hashedPlan.signature = planHashService.signPlanHash(planHash, privateKey);
+      hashedPlan.signedBy = "chenpilot-backend";
+      hashedPlan.signedAt = new Date().toISOString();
+    }
+
+    return hashedPlan;
   }
 
   optimizePlan(plan: ExecutionPlan): ExecutionPlan {
