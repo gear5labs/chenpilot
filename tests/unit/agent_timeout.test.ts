@@ -1,6 +1,4 @@
 import { agentLLM } from "../../src/Agents/agent";
-import { TimeoutError } from "../../src/utils/timeout";
-import config from "../../src/config/config";
 
 jest.mock("@anthropic-ai/sdk");
 jest.mock("../../src/config/logger");
@@ -12,7 +10,7 @@ describe("Agent Timeout Integration", () => {
         content: [{ type: "text", text: '{"result": "success"}' }],
       });
 
-      (agentLLM as any).client = {
+      (agentLLM as Record<string, unknown>).client = {
         messages: { create: mockCreate },
       };
 
@@ -29,10 +27,13 @@ describe("Agent Timeout Integration", () => {
 
     it("should timeout when LLM call exceeds timeout", async () => {
       const mockCreate = jest.fn().mockImplementation(
-        () => new Promise((resolve) => setTimeout(resolve, 5000))
+        () =>
+          new Promise(() => {
+            // Never resolves to trigger timeout
+          })
       );
 
-      (agentLLM as any).client = {
+      (agentLLM as Record<string, unknown>).client = {
         messages: { create: mockCreate },
       };
 
@@ -46,7 +47,7 @@ describe("Agent Timeout Integration", () => {
         content: [{ type: "text", text: '{"result": "success"}' }],
       });
 
-      (agentLLM as any).client = {
+      (agentLLM as Record<string, unknown>).client = {
         messages: { create: mockCreate },
       };
 
@@ -60,7 +61,7 @@ describe("Agent Timeout Integration", () => {
         content: [{ type: "text", text: "plain text response" }],
       });
 
-      (agentLLM as any).client = {
+      (agentLLM as Record<string, unknown>).client = {
         messages: { create: mockCreate },
       };
 
@@ -80,7 +81,7 @@ describe("Agent Timeout Integration", () => {
         content: [{ type: "text", text: "invalid json" }],
       });
 
-      (agentLLM as any).client = {
+      (agentLLM as Record<string, unknown>).client = {
         messages: { create: mockCreate },
       };
 

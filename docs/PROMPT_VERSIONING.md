@@ -12,6 +12,7 @@ A minimal system for versioning and A/B testing AI agent prompts to improve accu
 ## Database Schema
 
 ### PromptVersion
+
 - `id`: UUID
 - `name`: Prompt identifier
 - `type`: Prompt type (intent, validation, response)
@@ -21,6 +22,7 @@ A minimal system for versioning and A/B testing AI agent prompts to improve accu
 - `weight`: Weight for A/B testing (default: 50)
 
 ### PromptMetric
+
 - `id`: UUID
 - `promptVersionId`: Reference to prompt version
 - `userId`: User who triggered the prompt
@@ -31,6 +33,7 @@ A minimal system for versioning and A/B testing AI agent prompts to improve accu
 ## API Endpoints
 
 ### Create Prompt Version
+
 ```bash
 POST /api/prompts/versions
 {
@@ -43,16 +46,19 @@ POST /api/prompts/versions
 ```
 
 ### Activate Version
+
 ```bash
 PATCH /api/prompts/versions/:id/activate
 ```
 
 ### Deactivate Version
+
 ```bash
 PATCH /api/prompts/versions/:id/deactivate
 ```
 
 ### Update Weight
+
 ```bash
 PATCH /api/prompts/versions/:id/weight
 {
@@ -61,16 +67,19 @@ PATCH /api/prompts/versions/:id/weight
 ```
 
 ### List Versions
+
 ```bash
 GET /api/prompts/versions?type=intent
 ```
 
 ### Get Metrics
+
 ```bash
 GET /api/prompts/versions/:id/metrics
 ```
 
 ### Compare Versions
+
 ```bash
 GET /api/prompts/compare/:id1/:id2
 ```
@@ -78,11 +87,13 @@ GET /api/prompts/compare/:id1/:id2
 ## Usage
 
 ### 1. Run Migration
+
 ```bash
 npm run migration:run
 ```
 
 ### 2. Create Prompt Versions
+
 ```bash
 curl -X POST http://localhost:3000/api/prompts/versions \
   -H "Content-Type: application/json" \
@@ -96,11 +107,13 @@ curl -X POST http://localhost:3000/api/prompts/versions \
 ```
 
 ### 3. Activate for A/B Testing
+
 ```bash
 curl -X PATCH http://localhost:3000/api/prompts/versions/{id}/activate
 ```
 
 ### 4. Monitor Metrics
+
 ```bash
 curl http://localhost:3000/api/prompts/versions/{id}/metrics
 ```
@@ -142,6 +155,7 @@ console.log(comparison.winner); // "version1" or "version2"
 ## Metrics
 
 Each prompt version tracks:
+
 - **Total executions**: Number of times used
 - **Success rate**: Percentage of successful executions
 - **Average response time**: Mean execution time

@@ -8,11 +8,7 @@ const mockLogger = {
 
 jest.mock("../../../config/logger", () => mockLogger);
 
-import {
-  AgentRegistry,
-  AgentDefinition,
-  ParsedIntent,
-} from "../AgentRegistry";
+import { AgentRegistry, AgentDefinition, ParsedIntent } from "../AgentRegistry";
 
 describe("AgentRegistry", () => {
   let registry: AgentRegistry;

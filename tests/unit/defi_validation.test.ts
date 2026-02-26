@@ -1,4 +1,4 @@
-import { validateDeFiIntent, DeFiValidationResult } from "../../src/Agents/validationService";
+import { validateDeFiIntent } from "../../src/Agents/validationService";
 import { WorkflowStep } from "../../src/Agents/types";
 
 describe("validateDeFiIntent", () => {

@@ -43,11 +43,18 @@ export interface DeFiValidationResult {
 }
 
 const SUPPORTED_TOKENS = ["XLM", "USDC", "USDT", "STRK", "ETH", "DAI"];
-const DEFI_ACTIONS = ["swap", "swap_tool", "add_liquidity", "remove_liquidity", "lend", "borrow", "repay", "withdraw"];
+const DEFI_ACTIONS = [
+  "swap",
+  "swap_tool",
+  "add_liquidity",
+  "remove_liquidity",
+  "lend",
+  "borrow",
+  "repay",
+  "withdraw",
+];
 
-export function validateDeFiIntent(
-  intent: WorkflowStep
-): DeFiValidationResult {
+export function validateDeFiIntent(intent: WorkflowStep): DeFiValidationResult {
   const errors: DeFiValidationError[] = [];
   const warnings: string[] = [];
   const { action, payload } = intent;
@@ -89,8 +96,13 @@ export function validateDeFiIntent(
   }
 
   const isValid = errors.length === 0;
-  logger.info("DeFi intent validation result", { action, isValid, errorCount: errors.length, warningCount: warnings.length });
-  
+  logger.info("DeFi intent validation result", {
+    action,
+    isValid,
+    errorCount: errors.length,
+    warningCount: warnings.length,
+  });
+
   return { isValid, errors, warnings };
 }
 
@@ -133,7 +145,12 @@ function validateSwapIntent(
     }
   }
 
-  if (payload.from && payload.to && typeof payload.from === "string" && typeof payload.to === "string") {
+  if (
+    payload.from &&
+    payload.to &&
+    typeof payload.from === "string" &&
+    typeof payload.to === "string"
+  ) {
     if (payload.from.toUpperCase() === payload.to.toUpperCase()) {
       errors.push({
         field: "from,to",
@@ -170,7 +187,9 @@ function validateSwapIntent(
   }
 
   if (typeof payload.amount === "number" && payload.amount > 10000) {
-    warnings.push(`Large swap amount detected (${payload.amount}). Please verify this is correct.`);
+    warnings.push(
+      `Large swap amount detected (${payload.amount}). Please verify this is correct.`
+    );
   }
 
   if (payload.slippage !== undefined) {
@@ -187,7 +206,9 @@ function validateSwapIntent(
         code: "INVALID_SLIPPAGE_RANGE",
       });
     } else if (payload.slippage > 5) {
-      warnings.push(`High slippage tolerance (${payload.slippage}%) may result in unfavorable swap rates.`);
+      warnings.push(
+        `High slippage tolerance (${payload.slippage}%) may result in unfavorable swap rates.`
+      );
     }
   }
 }
@@ -196,7 +217,8 @@ function validateLiquidityIntent(
   payload: Record<string, unknown>,
   action: string,
   errors: DeFiValidationError[],
-  warnings: string[]
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _warnings: string[]
 ): void {
   if (!payload.tokenA || typeof payload.tokenA !== "string") {
     errors.push({
@@ -215,7 +237,11 @@ function validateLiquidityIntent(
   }
 
   if (action === "add_liquidity") {
-    if (!payload.amountA || typeof payload.amountA !== "number" || payload.amountA <= 0) {
+    if (
+      !payload.amountA ||
+      typeof payload.amountA !== "number" ||
+      payload.amountA <= 0
+    ) {
       errors.push({
         field: "amountA",
         message: "Valid amount for tokenA is required (must be > 0)",
@@ -223,7 +249,11 @@ function validateLiquidityIntent(
       });
     }
 
-    if (!payload.amountB || typeof payload.amountB !== "number" || payload.amountB <= 0) {
+    if (
+      !payload.amountB ||
+      typeof payload.amountB !== "number" ||
+      payload.amountB <= 0
+    ) {
       errors.push({
         field: "amountB",
         message: "Valid amount for tokenB is required (must be > 0)",
@@ -233,10 +263,15 @@ function validateLiquidityIntent(
   }
 
   if (action === "remove_liquidity") {
-    if (!payload.lpAmount || typeof payload.lpAmount !== "number" || payload.lpAmount <= 0) {
+    if (
+      !payload.lpAmount ||
+      typeof payload.lpAmount !== "number" ||
+      payload.lpAmount <= 0
+    ) {
       errors.push({
         field: "lpAmount",
-        message: "Valid LP token amount is required for removing liquidity (must be > 0)",
+        message:
+          "Valid LP token amount is required for removing liquidity (must be > 0)",
         code: "INVALID_LP_AMOUNT",
       });
     }
@@ -269,7 +304,11 @@ function validateLendingIntent(
     }
   }
 
-  if (!payload.amount || typeof payload.amount !== "number" || payload.amount <= 0) {
+  if (
+    !payload.amount ||
+    typeof payload.amount !== "number" ||
+    payload.amount <= 0
+  ) {
     errors.push({
       field: "amount",
       message: `Valid amount is required for ${action} operations (must be > 0)`,
@@ -279,10 +318,14 @@ function validateLendingIntent(
 
   if (action === "borrow") {
     if (!payload.collateral) {
-      warnings.push("No collateral specified. Ensure sufficient collateral is available.");
+      warnings.push(
+        "No collateral specified. Ensure sufficient collateral is available."
+      );
     }
     if (typeof payload.amount === "number" && payload.amount > 50000) {
-      warnings.push(`Large borrow amount (${payload.amount}). Verify collateral requirements.`);
+      warnings.push(
+        `Large borrow amount (${payload.amount}). Verify collateral requirements.`
+      );
     }
   }
 }
@@ -301,7 +344,11 @@ function validateRepayWithdrawIntent(
     });
   }
 
-  if (!payload.amount || typeof payload.amount !== "number" || payload.amount <= 0) {
+  if (
+    !payload.amount ||
+    typeof payload.amount !== "number" ||
+    payload.amount <= 0
+  ) {
     errors.push({
       field: "amount",
       message: `Valid amount is required for ${action} operations (must be > 0)`,
@@ -310,6 +357,8 @@ function validateRepayWithdrawIntent(
   }
 
   if (action === "repay" && !payload.debtId && !payload.positionId) {
-    warnings.push("No debt/position ID specified. Ensure the correct debt is being repaid.");
+    warnings.push(
+      "No debt/position ID specified. Ensure the correct debt is being repaid."
+    );
   }
 }

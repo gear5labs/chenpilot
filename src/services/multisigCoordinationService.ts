@@ -16,7 +16,10 @@ export class MultisigCoordinationService {
   /**
    * Requirement: Initialize a multi-sig coordination session
    */
-  async createPendingTransaction(xdr: string, threshold: number): Promise<string> {
+  async createPendingTransaction(
+    xdr: string,
+    threshold: number
+  ): Promise<string> {
     const tx = new StellarSdk.Transaction(xdr, StellarSdk.Networks.TESTNET);
     const hash = tx.hash().toString("hex");
 
@@ -26,7 +29,7 @@ export class MultisigCoordinationService {
       signatures: new Set(),
       requiredThreshold: threshold,
       currentWeight: 0,
-      status: "PENDING"
+      status: "PENDING",
     });
 
     return hash;
@@ -35,13 +38,17 @@ export class MultisigCoordinationService {
   /**
    * Requirement: Collect and validate signatures off-chain
    */
-  async addSignature(hash: string, signatureXdr: string, signerWeight: number = 1): Promise<PendingTransaction> {
+  async addSignature(
+    hash: string,
+    signatureXdr: string,
+    signerWeight: number = 1
+  ): Promise<PendingTransaction> {
     const pending = this.pendingTransactions.get(hash);
     if (!pending) throw new Error("Transaction not found");
 
     // Add signature to the set
     pending.signatures.add(signatureXdr);
-    
+
     // Update accumulated weight
     pending.currentWeight += signerWeight;
 
@@ -62,10 +69,13 @@ export class MultisigCoordinationService {
       throw new Error("Transaction is not ready for submission");
     }
 
-    const tx = new StellarSdk.Transaction(pending.xdr, StellarSdk.Networks.TESTNET);
-    
+    const tx = new StellarSdk.Transaction(
+      pending.xdr,
+      StellarSdk.Networks.TESTNET
+    );
+
     // Add all collected signatures to the transaction object
-    pending.signatures.forEach(sigXdr => {
+    pending.signatures.forEach(() => {
       // Logic to decode and append decorated signatures would go here
     });
 

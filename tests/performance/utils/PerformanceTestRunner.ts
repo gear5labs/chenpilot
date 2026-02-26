@@ -189,9 +189,7 @@ export class PerformanceTestRunner {
       return sortedValues[lower];
     }
 
-    return (
-      sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight
-    );
+    return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
   }
 
   /**
@@ -316,7 +314,9 @@ export class PerformanceTestRunner {
     lines.push(`  Total Tests:  ${totalTests}`);
     lines.push(`  Passed:       ${passedTests}`);
     lines.push(`  Failed:       ${failedTests}`);
-    lines.push(`  Pass Rate:    ${((passedTests / totalTests) * 100).toFixed(1)}%`);
+    lines.push(
+      `  Pass Rate:    ${((passedTests / totalTests) * 100).toFixed(1)}%`
+    );
     lines.push("");
     lines.push("=".repeat(80));
 

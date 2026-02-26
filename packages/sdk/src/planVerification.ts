@@ -86,7 +86,9 @@ export class PlanVerifier {
       if (!plan.signature) {
         errors.push("Signature required but not present in plan");
       } else if (!options.publicKey) {
-        warnings.push("Signature present but no public key provided for verification");
+        warnings.push(
+          "Signature present but no public key provided for verification"
+        );
       } else {
         signatureValid = this.verifySignature(
           plan.planHash,
@@ -198,7 +200,7 @@ export class PlanVerifier {
       verify.update(planHash);
       verify.end();
       return verify.verify(publicKey, signature, "base64");
-    } catch (error) {
+    } catch {
       return false;
     }
   }
@@ -293,7 +295,11 @@ export class PlanVerifier {
     }
 
     // Compare each step
-    for (let i = 0; i < Math.max(originalPlan.steps.length, currentPlan.steps.length); i++) {
+    for (
+      let i = 0;
+      i < Math.max(originalPlan.steps.length, currentPlan.steps.length);
+      i++
+    ) {
       const origStep = originalPlan.steps[i];
       const currStep = currentPlan.steps[i];
 
@@ -313,7 +319,9 @@ export class PlanVerifier {
         );
       }
 
-      if (JSON.stringify(origStep.payload) !== JSON.stringify(currStep.payload)) {
+      if (
+        JSON.stringify(origStep.payload) !== JSON.stringify(currStep.payload)
+      ) {
         differences.push(`Step ${i + 1} payload modified`);
       }
     }

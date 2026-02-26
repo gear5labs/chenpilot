@@ -19,14 +19,18 @@ describe("HorizonOperationStreamerService", () => {
     jest.useFakeTimers();
     closeFn = jest.fn();
 
-    streamMock = jest.fn().mockImplementation((options: {
-      onmessage: (record: Record<string, unknown>) => void;
-      onerror: (error: unknown) => void;
-    }) => {
-      onmessageHandler = options.onmessage;
-      onerrorHandler = options.onerror;
-      return closeFn;
-    });
+    streamMock = jest
+      .fn()
+      .mockImplementation(
+        (options: {
+          onmessage: (record: Record<string, unknown>) => void;
+          onerror: (error: unknown) => void;
+        }) => {
+          onmessageHandler = options.onmessage;
+          onerrorHandler = options.onerror;
+          return closeFn;
+        }
+      );
 
     operationsBuilder = {
       cursor: jest.fn().mockReturnThis(),

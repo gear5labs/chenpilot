@@ -1,12 +1,16 @@
 import { createRecoveryEngine } from "../../packages/sdk/src";
-import { RecoveryAction, RecoveryContext } from "../../packages/sdk/src/types";
+import {
+  RecoveryAction,
+  RecoveryContext,
+  ChainId,
+} from "../../packages/sdk/src/types";
 
 describe("RecoveryEngine (focused)", () => {
   const baseContext: RecoveryContext = {
     lockTxId: "lock123",
     amount: "0.1",
-    fromChain: "bitcoin",
-    toChain: "stellar",
+    fromChain: ChainId.BITCOIN,
+    toChain: ChainId.STELLAR,
     destinationAddress: "GDESTINATION",
   };
 

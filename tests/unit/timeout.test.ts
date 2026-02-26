@@ -1,4 +1,8 @@
-import { withTimeout, TimeoutError, TimeoutManager } from "../../src/utils/timeout";
+import {
+  withTimeout,
+  TimeoutError,
+  TimeoutManager,
+} from "../../src/utils/timeout";
 
 describe("Timeout Utility", () => {
   describe("withTimeout", () => {
@@ -33,7 +37,7 @@ describe("Timeout Utility", () => {
           operation: "test_operation",
           onTimeout,
         });
-      } catch (error) {
+      } catch {
         // Expected to throw
       }
 

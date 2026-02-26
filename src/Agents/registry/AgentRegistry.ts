@@ -130,7 +130,11 @@ export class AgentRegistry {
           score += 10;
         }
         // Partial keyword match
-        if (agentKeywords.some((ak) => ak.includes(keyword) || keyword.includes(ak))) {
+        if (
+          agentKeywords.some(
+            (ak) => ak.includes(keyword) || keyword.includes(ak)
+          )
+        ) {
           score += 5;
         }
       }

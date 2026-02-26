@@ -24,7 +24,9 @@ function redactSensitiveData(obj: unknown): unknown {
         if (SENSITIVE_FIELDS.includes(key)) {
           redacted[key] = "[REDACTED]";
         } else {
-          redacted[key] = redactSensitiveData((obj as Record<string, unknown>)[key]);
+          redacted[key] = redactSensitiveData(
+            (obj as Record<string, unknown>)[key]
+          );
         }
       }
     }
@@ -35,10 +37,10 @@ function redactSensitiveData(obj: unknown): unknown {
 }
 
 // Custom format to redact sensitive data
-const redactFormat = winston.format((info) => {
+const redactFormat = winston.format((info: Record<string, unknown>) => {
   // Redact sensitive data from the main message if it's an object
   if (typeof info.message === "object") {
-    info.message = redactSensitiveData(info.message);
+    info.message = redactSensitiveData(info.message as Record<string, unknown>);
   }
 
   // Redact from metadata
@@ -46,12 +48,10 @@ const redactFormat = winston.format((info) => {
   const redactedMeta = redactSensitiveData(meta) as Record<string, unknown>;
 
   return {
-    level,
-    message,
-    timestamp,
-    ...(typeof redactedMeta === "object" && redactedMeta !== null
-      ? redactedMeta
-      : {}),
+    level: String(level),
+    message: String(message),
+    timestamp: String(timestamp),
+    ...redactedMeta,
   };
 });
 
@@ -186,8 +186,16 @@ errorRotateFileTransport.on("logRemoved", (removedFilename: string) => {
 });
 
 // Helper functions for common log patterns
-export const logError = (message: string, error?: Error | unknown, meta?: Record<string, unknown>) => {
-  logger.error(message, { error: error?.message || error, stack: error?.stack, ...meta });
+export const logError = (
+  message: string,
+  error?: Error | unknown,
+  meta?: Record<string, unknown>
+) => {
+  const errorInfo =
+    error instanceof Error
+      ? { message: error.message, stack: error.stack }
+      : { error: String(error) };
+  logger.error(message, { ...errorInfo, ...meta });
 };
 
 export const logInfo = (message: string, meta?: Record<string, unknown>) => {

@@ -90,4 +90,3 @@ This sequence diagram focuses on the interactions between:
 - **Agents** (`AgentPlanner`, `PlanExecutor`, `AgentLLM`)
 - **Tools & ToolRegistry**
 - **External Services** (blockchains / DeFi protocols)
-
