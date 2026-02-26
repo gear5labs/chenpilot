@@ -68,9 +68,9 @@ export const mockStellarSdk: Record<string, any> = {
     contractId,
     call: jest.fn((method: string, ...args: any[]) => ({
       type: "invoke",
-      contractId,
-      method,
-      args,
+      contractId: args[0],
+      method: callArgs[0],
+      args: callArgs.slice(1),
     })),
   })),
   SorobanRpc: {
