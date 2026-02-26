@@ -520,4 +520,98 @@ router.get(
   }
 );
 
+// --- REAL-TIME UPDATES (Socket.io) ---
+
+/**
+ * @swagger
+ * /api/realtime/stats:
+ *   get:
+ *     summary: Get real-time connection statistics
+ *     description: Returns Socket.io connection statistics and connected clients info
+ *     tags: [Real-time]
+ *     responses:
+ *       200:
+ *         description: Socket.io statistics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 totalConnected:
+ *                   type: number
+ *                 connectedClients:
+ *                   type: array
+ */
+router.get("/realtime/stats", (req: Request, res: Response) => {
+  try {
+    const { getSocketManager } = require("./socketManager");
+    const socketManager = getSocketManager();
+
+    const stats = {
+      success: true,
+      totalConnected: socketManager.getConnectedClientsCount(),
+      connectedClients: socketManager
+        .getAllConnectedClients()
+        .map((client: any) => ({
+          socketId: client.socketId,
+          userId: client.userId || "anonymous",
+          connectedAt: client.connectedAt,
+        })),
+    };
+
+    res.json(stats);
+  } catch (error) {
+    logger.error("Error retrieving Socket.io stats:", { error });
+    res.status(500).json({
+      success: false,
+      error: "Failed to retrieve Socket.io statistics",
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/realtime/user/:userId/clients:
+ *   get:
+ *     summary: Get connected clients for a user
+ *     description: Returns all Socket.io clients connected for a specific user
+ *     tags: [Real-time]
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User's connected clients
+ */
+router.get("/realtime/user/:userId/clients", (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const { getSocketManager } = require("./socketManager");
+    const socketManager = getSocketManager();
+
+    const clients = socketManager.getUserClients(userId);
+
+    res.json({
+      success: true,
+      userId,
+      connectedClients: clients.map((client: any) => ({
+        socketId: client.socketId,
+        connectedAt: client.connectedAt,
+      })),
+      count: clients.length,
+    });
+  } catch (error) {
+    logger.error("Error retrieving user clients:", { error });
+    res.status(500).json({
+      success: false,
+      error: "Failed to retrieve user clients",
+    });
+  }
+});
+
 export default router;

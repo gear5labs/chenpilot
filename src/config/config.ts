@@ -104,4 +104,9 @@ export default {
       planExecution: parseInt(process.env.AGENT_PLAN_TIMEOUT || "180000", 10),
     },
   },
+  admin: {
+    allowedIps: process.env.ADMIN_ALLOWED_IPS
+      ? process.env.ADMIN_ALLOWED_IPS.split(",").map((ip) => ip.trim())
+      : [],
+  },
 };
