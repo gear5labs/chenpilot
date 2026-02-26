@@ -1,22 +1,81 @@
 {
   "name": "@chen-pilot/sdk-core",
   "version": "0.1.0",
-  "description": "Core SDK for Chen Pilot cross-chain operations",
+  "description": "Core SDK for Chen Pilot cross-chain signature provider operations with multi-chain support, hardware wallet integration, and multi-signature coordination",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist/**/*",
+    "examples/**/*",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build:watch": "tsc --watch",
+    "type-check": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "examples": "ts-node examples/index.ts",
+    "examples:basic": "ts-node examples/basic-usage.ts",
+    "examples:treasury": "ts-node examples/multi-signature-treasury.ts",
+    "examples:bridge": "ts-node examples/cross-chain-bridge.ts",
+    "examples:hardware": "ts-node examples/hardware-wallet-integration.ts",
+    "examples:advanced": "ts-node examples/index.ts advanced",
+    "examples:all": "ts-node examples/index.ts all",
+    "examples:list": "ts-node examples/index.ts list",
+    "clean": "rimraf dist",
+    "prepublishOnly": "npm run clean && npm run build",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix"
   },
   "keywords": [
     "defi",
     "cross-chain",
     "sdk",
-    "chen-pilot"
+    "chen-pilot",
+    "signature-provider",
+    "bitcoin",
+    "stellar",
+    "starknet",
+    "hardware-wallet",
+    "ledger",
+    "albedo",
+    "multi-signature",
+    "typescript"
   ],
-  "author": "",
+  "author": "Chen Pilot Team",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chen-pilot/sdk.git",
+    "directory": "packages/sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/chen-pilot/sdk/issues"
+  },
+  "homepage": "https://github.com/chen-pilot/sdk#readme",
   "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.19.33",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "jest": "^29.5.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.0",
     "typescript": "^5.7.3"
+  },
+  "peerDependencies": {
+    "typescript": ">=4.5.0"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
