@@ -23,10 +23,16 @@ const log = {
     console.log(`[INFO] ${message}`, data ? JSON.stringify(data, null, 2) : "");
   },
   error: (message: string, data?: unknown) => {
-    console.error(`[ERROR] ${message}`, data ? JSON.stringify(data, null, 2) : "");
+    console.error(
+      `[ERROR] ${message}`,
+      data ? JSON.stringify(data, null, 2) : ""
+    );
   },
   warn: (message: string, data?: unknown) => {
-    console.warn(`[WARN] ${message}`, data ? JSON.stringify(data, null, 2) : "");
+    console.warn(
+      `[WARN] ${message}`,
+      data ? JSON.stringify(data, null, 2) : ""
+    );
   },
 };
 
@@ -104,13 +110,17 @@ export function seedMemoryData(clearExisting = true): void {
     conversationTemplates.stellar.forEach((entry) => {
       memoryStore.add(agentIds.user1, entry);
     });
-    log.info(`Seeded ${conversationTemplates.stellar.length} entries for ${agentIds.user1}`);
+    log.info(
+      `Seeded ${conversationTemplates.stellar.length} entries for ${agentIds.user1}`
+    );
 
     // Seed User 2: DeFi-focused conversations
     conversationTemplates.defi.forEach((entry) => {
       memoryStore.add(agentIds.user2, entry);
     });
-    log.info(`Seeded ${conversationTemplates.defi.length} entries for ${agentIds.user2}`);
+    log.info(
+      `Seeded ${conversationTemplates.defi.length} entries for ${agentIds.user2}`
+    );
 
     // Seed User 3: Mixed conversations
     const mixedConversations = [
@@ -120,7 +130,9 @@ export function seedMemoryData(clearExisting = true): void {
     mixedConversations.forEach((entry) => {
       memoryStore.add(agentIds.user3, entry);
     });
-    log.info(`Seeded ${mixedConversations.length} entries for ${agentIds.user3}`);
+    log.info(
+      `Seeded ${mixedConversations.length} entries for ${agentIds.user3}`
+    );
 
     // Seed Test Agent: All conversation types
     const allTemplates = [

@@ -2,6 +2,7 @@ module.exports = {
   preset: "ts-jest",
   testEnvironment: "node",
 
+
   roots: ["<rootDir>/src"],
   testMatch: ["**/__tests__/**/*.test.ts"],
   transform: {
@@ -20,26 +21,31 @@ module.exports = {
   rootDir: "../../",
   roots: ["<rootDir>/packages/sdk/src"],
   testMatch: ["**/packages/sdk/src/__tests__/**/*.test.ts"],
+
+  rootDir: __dirname,
+  roots: ["<rootDir>/src"],
+  testMatch: ["<rootDir>/src/__tests__/**/*.test.ts"],
+
   moduleFileExtensions: ["ts", "js", "json"],
   collectCoverageFrom: [
-    "packages/sdk/src/**/*.ts",
-    "!packages/sdk/src/**/*.d.ts",
-    "!packages/sdk/src/__tests__/**",
-    "!packages/sdk/src/types/**",
+    "src/**/*.ts",
+    "!src/**/*.d.ts",
+    "!src/__tests__/**",
+    "!src/types/**",
   ],
-  coverageDirectory: "packages/sdk/coverage",
+  coverageDirectory: "coverage",
   coverageReporters: ["text", "lcov", "html"],
   transform: {
     "^.+\\.ts$": [
       "ts-jest",
       {
-        tsconfig: "<rootDir>/packages/sdk/tsconfig.json",
+        tsconfig: "<rootDir>/tsconfig.json",
       },
     ],
   },
   testTimeout: 10000,
   moduleNameMapper: {
-    "^@/(.*)$": "<rootDir>/packages/sdk/src/$1",
+    "^@/(.*)$": "<rootDir>/src/$1",
   },
 
 };

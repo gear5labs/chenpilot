@@ -21,7 +21,8 @@ router.get("/proxy", authenticateToken, async (req: Request, res: Response) => {
       data,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Proxy request failed";
+    const message =
+      error instanceof Error ? error.message : "Proxy request failed";
 
     logger.warn("Horizon proxy request failed", {
       error: message,

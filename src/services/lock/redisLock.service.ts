@@ -74,7 +74,13 @@ export class RedisLockService implements LockService {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         // Use Redis SET with NX (only if not exists) and EX (expire) options
-        const result = await this.redis.set(lockKey, lockValue, "EX", ttlSeconds, "NX");
+        const result = await this.redis.set(
+          lockKey,
+          lockValue,
+          "EX",
+          ttlSeconds,
+          "NX"
+        );
 
         if (result === "OK") {
           logger.info("Lock acquired successfully", {
@@ -220,7 +226,13 @@ export class RedisLockService implements LockService {
     `;
 
     try {
-      const result = await this.redis.eval(luaScript, 1, lockKey, identifier, ttlSeconds);
+      const result = await this.redis.eval(
+        luaScript,
+        1,
+        lockKey,
+        identifier,
+        ttlSeconds
+      );
 
       const extended = result === 1;
 
@@ -276,7 +288,8 @@ export class RedisLockService implements LockService {
     const lockKey = this.getLockKey(resourceKey);
 
     try {
-      const [value, ttl] = await this.redis.pipeline()
+      const [value, ttl] = await this.redis
+        .pipeline()
         .get(lockKey)
         .ttl(lockKey)
         .exec();

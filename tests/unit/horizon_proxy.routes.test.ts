@@ -82,7 +82,10 @@ describe("Horizon Proxy Routes", () => {
 
   it("maps HorizonProxyError status codes", async () => {
     mockProxyGet.mockRejectedValue(
-      new MockHorizonProxyError("Requested Horizon path is not allowlisted", 403)
+      new MockHorizonProxyError(
+        "Requested Horizon path is not allowlisted",
+        403
+      )
     );
 
     const response = await request(app)
@@ -92,6 +95,8 @@ describe("Horizon Proxy Routes", () => {
 
     expect(response.status).toBe(403);
     expect(response.body.success).toBe(false);
-    expect(response.body.message).toBe("Requested Horizon path is not allowlisted");
+    expect(response.body.message).toBe(
+      "Requested Horizon path is not allowlisted"
+    );
   });
 });

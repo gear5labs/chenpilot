@@ -6,3 +6,8 @@ export {
   requireAnyRole,
   requireOwnerOrElevated,
 } from "./rbac.middleware";
+
+export {
+  requireIpWhitelist,
+  requireAdminWithIpWhitelist,
+} from "./ipWhitelist.middleware";

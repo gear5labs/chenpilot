@@ -44,7 +44,6 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  * Applied to AI queries and wallet-related operations.
  * Limit: 20 requests per minute per IP.
  */
-
 const sensitiveLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
   limit: 20,

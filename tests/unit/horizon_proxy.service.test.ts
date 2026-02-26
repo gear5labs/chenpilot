@@ -1,4 +1,4 @@
-declare const global: any;
+declare const global: Record<string, unknown>;
 
 import {
   HorizonProxyError,
@@ -7,7 +7,7 @@ import {
 
 describe("HorizonProxyService", () => {
   let service: HorizonProxyService;
-  let originalFetch: any;
+  let originalFetch: unknown;
 
   beforeAll(() => {
     originalFetch = global.fetch;
@@ -65,7 +65,9 @@ describe("HorizonProxyService", () => {
     expect(result).toEqual(mockJson);
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const calledUrl = global.fetch.mock.calls[0][0] as string;
-    expect(calledUrl).toContain("/accounts/GABCDEFGHIJKLMNOPQRSTUVWX1234567890ABCDEF/operations");
+    expect(calledUrl).toContain(
+      "/accounts/GABCDEFGHIJKLMNOPQRSTUVWX1234567890ABCDEF/operations"
+    );
     expect(calledUrl).toContain("limit=10");
     expect(calledUrl).toContain("order=desc");
   });

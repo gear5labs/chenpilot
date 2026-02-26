@@ -1,5 +1,4 @@
 import { RedisLockService } from "../../src/services/lock/redisLock.service";
-import { LockOptions } from "../../src/services/lock/types";
 
 // Mock Redis for testing
 const mockRedis = {
@@ -191,7 +190,8 @@ describe("RedisLockService", () => {
 
   describe("getLockInfo", () => {
     it("should return lock info when lock exists", async () => {
-      const mockValue = "user1:550e8400-e29b-41d4-a716-446655440000:1640995200000";
+      const mockValue =
+        "user1:550e8400-e29b-41d4-a716-446655440000:1640995200000";
       mockRedis.pipeline = jest.fn().mockReturnValue({
         get: jest.fn().mockReturnThis(),
         ttl: jest.fn().mockReturnThis(),
@@ -272,7 +272,11 @@ describe("RedisLockService", () => {
 
       // Extend lock
       mockRedis.eval.mockResolvedValue(1);
-      const extended = await lockService.extendLock("resource1", "user1", 45000);
+      const extended = await lockService.extendLock(
+        "resource1",
+        "user1",
+        45000
+      );
       expect(extended).toBe(true);
 
       // Release lock
@@ -289,7 +293,7 @@ describe("RedisLockService", () => {
     it("should prevent concurrent access to same resource", async () => {
       // First user acquires lock
       mockRedis.set.mockResolvedValueOnce("OK").mockResolvedValueOnce(null);
-      
+
       const user1Result = await lockService.acquireLock("resource1", "user1", {
         maxRetries: 1,
         retryDelay: 10,

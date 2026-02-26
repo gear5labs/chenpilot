@@ -10,7 +10,7 @@ describe("Agent Timeout Integration", () => {
         content: [{ type: "text", text: '{"result": "success"}' }],
       });
 
-      (agentLLM as Record<string, unknown>).client = {
+      (agentLLM as unknown as Record<string, unknown>).client = {
         messages: { create: mockCreate },
       };
 
@@ -26,14 +26,13 @@ describe("Agent Timeout Integration", () => {
     });
 
     it("should timeout when LLM call exceeds timeout", async () => {
-      const mockCreate = jest.fn().mockImplementation(
-        () =>
-          new Promise(() => {
-            // Never resolves to trigger timeout
-          })
-      );
+      const mockCreate = jest
+        .fn()
+        .mockImplementation(
+          () => new Promise((resolve) => setTimeout(resolve, 5000))
+        );
 
-      (agentLLM as Record<string, unknown>).client = {
+      (agentLLM as unknown as Record<string, unknown>).client = {
         messages: { create: mockCreate },
       };
 
@@ -47,7 +46,7 @@ describe("Agent Timeout Integration", () => {
         content: [{ type: "text", text: '{"result": "success"}' }],
       });
 
-      (agentLLM as Record<string, unknown>).client = {
+      (agentLLM as unknown as Record<string, unknown>).client = {
         messages: { create: mockCreate },
       };
 
@@ -61,7 +60,7 @@ describe("Agent Timeout Integration", () => {
         content: [{ type: "text", text: "plain text response" }],
       });
 
-      (agentLLM as Record<string, unknown>).client = {
+      (agentLLM as unknown as Record<string, unknown>).client = {
         messages: { create: mockCreate },
       };
 
@@ -81,7 +80,7 @@ describe("Agent Timeout Integration", () => {
         content: [{ type: "text", text: "invalid json" }],
       });
 
-      (agentLLM as Record<string, unknown>).client = {
+      (agentLLM as unknown as Record<string, unknown>).client = {
         messages: { create: mockCreate },
       };
 

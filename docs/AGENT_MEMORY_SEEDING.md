@@ -26,7 +26,10 @@ ts-node src/scripts/seedAgentMemory.ts
 ### Use in Tests
 
 ```typescript
-import { seedMemoryData, getSeededAgentIds } from "../../src/scripts/seedAgentMemory";
+import {
+  seedMemoryData,
+  getSeededAgentIds,
+} from "../../src/scripts/seedAgentMemory";
 import { memoryStore } from "../../src/Agents/memory/memory";
 
 describe("My Test", () => {
@@ -38,7 +41,7 @@ describe("My Test", () => {
   it("should retrieve conversation history", () => {
     const agentIds = getSeededAgentIds();
     const memory = memoryStore.get(agentIds.user1);
-    
+
     expect(memory.length).toBeGreaterThan(0);
   });
 });
@@ -92,9 +95,11 @@ The script includes realistic conversation templates for:
 Seeds the memory store with default mock data for all predefined agents.
 
 **Parameters:**
+
 - `clearExisting` (optional, default: `true`): Whether to clear existing memory data before seeding
 
 **Example:**
+
 ```typescript
 // Clear and seed
 seedMemoryData();
@@ -108,11 +113,13 @@ seedMemoryData(false);
 Seeds memory for a specific agent with custom conversation entries.
 
 **Parameters:**
+
 - `agentId`: The agent identifier
 - `entries`: Array of conversation entries to add
 - `clearExisting` (optional, default: `false`): Whether to clear existing data for this agent
 
 **Example:**
+
 ```typescript
 const customEntries = [
   "User: What's the weather?",
@@ -127,6 +134,7 @@ seedAgentMemory("my-agent-id", customEntries);
 Returns an object containing all predefined agent IDs.
 
 **Returns:**
+
 ```typescript
 {
   user1: "agent-user-001",
@@ -138,6 +146,7 @@ Returns an object containing all predefined agent IDs.
 ```
 
 **Example:**
+
 ```typescript
 const agentIds = getSeededAgentIds();
 const memory = memoryStore.get(agentIds.user1);
@@ -148,6 +157,7 @@ const memory = memoryStore.get(agentIds.user1);
 Returns all conversation templates used for seeding.
 
 **Returns:**
+
 ```typescript
 {
   stellar: string[],
@@ -159,6 +169,7 @@ Returns all conversation templates used for seeding.
 ```
 
 **Example:**
+
 ```typescript
 const templates = getConversationTemplates();
 // Use templates for custom seeding
@@ -172,6 +183,7 @@ Verifies that the seeded data is properly loaded in memory.
 **Returns:** `true` if all expected data is present, `false` otherwise
 
 **Example:**
+
 ```typescript
 seedMemoryData();
 const isValid = verifySeededData();
@@ -186,7 +198,10 @@ if (!isValid) {
 ### Basic Memory Retrieval Test
 
 ```typescript
-import { seedMemoryData, getSeededAgentIds } from "../../src/scripts/seedAgentMemory";
+import {
+  seedMemoryData,
+  getSeededAgentIds,
+} from "../../src/scripts/seedAgentMemory";
 import { memoryStore } from "../../src/Agents/memory/memory";
 
 describe("Memory Retrieval", () => {
@@ -197,7 +212,7 @@ describe("Memory Retrieval", () => {
   it("should retrieve conversation history", () => {
     const agentIds = getSeededAgentIds();
     const memory = memoryStore.get(agentIds.user1);
-    
+
     expect(memory.length).toBeGreaterThan(0);
     expect(memory[0]).toContain("User:");
   });
@@ -239,7 +254,7 @@ describe("Custom Scenario", () => {
     ];
 
     seedAgentMemory("test-scenario", customFlow, true);
-    
+
     const memory = memoryStore.get("test-scenario");
     expect(memory).toEqual(customFlow);
   });
@@ -252,14 +267,14 @@ describe("Custom Scenario", () => {
 describe("Context Window", () => {
   it("should respect max context limit", () => {
     const agentId = "limit-test";
-    
+
     // Add more than the limit (default: 10)
     for (let i = 0; i < 15; i++) {
       memoryStore.add(agentId, `Entry ${i}`);
     }
 
     const memory = memoryStore.get(agentId);
-    
+
     // Should only keep last 10
     expect(memory.length).toBe(10);
     expect(memory[0]).toBe("Entry 5");
@@ -283,14 +298,14 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v2
         with:
-          node-version: '18'
-      
+          node-version: "18"
+
       - name: Install dependencies
         run: npm install
-      
+
       - name: Seed memory data
         run: npm run seed:memory
-      
+
       - name: Run memory tests
         run: npm test -- tests/unit/agentMemory.test.ts
 ```
@@ -298,6 +313,7 @@ jobs:
 ## Best Practices
 
 1. **Clear Before Seeding**: Always clear existing data in tests to ensure consistent state
+
    ```typescript
    beforeEach(() => {
      memoryStore.clearAll();
@@ -306,18 +322,21 @@ jobs:
    ```
 
 2. **Use Predefined Agent IDs**: Use `getSeededAgentIds()` instead of hardcoding IDs
+
    ```typescript
    const agentIds = getSeededAgentIds();
    const memory = memoryStore.get(agentIds.user1);
    ```
 
 3. **Verify After Seeding**: Use `verifySeededData()` to ensure data is properly loaded
+
    ```typescript
    seedMemoryData();
    expect(verifySeededData()).toBe(true);
    ```
 
 4. **Clean Up After Tests**: Clear memory in `afterEach` to prevent test pollution
+
    ```typescript
    afterEach(() => {
      memoryStore.clearAll();
@@ -338,6 +357,7 @@ The current implementation uses in-memory storage. Data is lost when the process
 ### Seeding Fails Silently
 
 Check the logs for error messages:
+
 ```typescript
 import logger from "../config/logger";
 logger.info("Check seeding status");
@@ -346,6 +366,7 @@ logger.info("Check seeding status");
 ### Tests Interfering with Each Other
 
 Ensure proper cleanup:
+
 ```typescript
 afterEach(() => {
   memoryStore.clearAll();

@@ -89,7 +89,7 @@ export class SwapTool extends BaseTool<SwapPayload> {
   async execute(payload: SwapPayload, userId: string): Promise<ToolResult> {
     // Create a unique lock key for this user's trading operations
     const lockKey = `trade:${userId}`;
-    
+
     try {
       // Acquire distributed lock to prevent concurrent trades for the same user
       const lockResult = await this.lockService.acquireLock(lockKey, userId, {
@@ -119,7 +119,7 @@ export class SwapTool extends BaseTool<SwapPayload> {
 
       // Ensure lock is released when function completes or throws
       const lockReleased = await this.executeWithLock(payload, userId, lockKey);
-      
+
       return lockReleased;
     } catch (error) {
       logger.error("Error during swap execution", {
@@ -140,12 +140,18 @@ export class SwapTool extends BaseTool<SwapPayload> {
 
       return this.createErrorResult(
         "swap",
-        error instanceof Error ? error.message : "Unknown error occurred during swap"
+        error instanceof Error
+          ? error.message
+          : "Unknown error occurred during swap"
       );
     }
   }
 
-  private async executeWithLock(payload: SwapPayload, userId: string, lockKey: string): Promise<ToolResult> {
+  private async executeWithLock(
+    payload: SwapPayload,
+    userId: string,
+    lockKey: string
+  ): Promise<ToolResult> {
     try {
       // Validate tokens
       if (payload.from === payload.to) {
@@ -269,13 +275,15 @@ export class SwapTool extends BaseTool<SwapPayload> {
 
       return this.createErrorResult(
         "swap",
-        error instanceof Error ? error.message : "Unknown error occurred during swap"
+        error instanceof Error
+          ? error.message
+          : "Unknown error occurred during swap"
       );
     } finally {
       // Always release the lock when done
       try {
         const released = await this.lockService.releaseLock(lockKey, userId);
-        
+
         if (released) {
           logger.info("Trade lock released successfully", {
             userId,

@@ -47,7 +47,10 @@ export class HorizonProxyService {
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      this.requestTimeoutMs
+    );
 
     try {
       const response = await fetch(url.toString(), {
@@ -92,16 +95,28 @@ export class HorizonProxyService {
     }
 
     if (!path.startsWith("/") || path.startsWith("//")) {
-      throw new HorizonProxyError("Path must be a valid relative Horizon path", 400);
+      throw new HorizonProxyError(
+        "Path must be a valid relative Horizon path",
+        400
+      );
     }
 
-    if (path.includes("..") || path.includes("\\") || /https?:\/\//i.test(path)) {
+    if (
+      path.includes("..") ||
+      path.includes("\\") ||
+      /https?:\/\//i.test(path)
+    ) {
       throw new HorizonProxyError("Path contains forbidden characters", 400);
     }
 
-    const isAllowed = ALLOWED_PATH_PATTERNS.some((pattern) => pattern.test(path));
+    const isAllowed = ALLOWED_PATH_PATTERNS.some((pattern) =>
+      pattern.test(path)
+    );
     if (!isAllowed) {
-      throw new HorizonProxyError("Requested Horizon path is not allowlisted", 403);
+      throw new HorizonProxyError(
+        "Requested Horizon path is not allowlisted",
+        403
+      );
     }
   }
 
@@ -144,7 +159,10 @@ export class HorizonProxyService {
 
       const normalizedValue = String(value);
       if (normalizedValue.length > 500) {
-        throw new HorizonProxyError(`Query value too long for key: ${key}`, 400);
+        throw new HorizonProxyError(
+          `Query value too long for key: ${key}`,
+          400
+        );
       }
 
       sanitized[key] = normalizedValue;

@@ -1,4 +1,7 @@
 import { DataExportService } from "../../src/services/DataExportService";
+import { User } from "../../src/Auth/user.entity";
+import { Contact } from "../../src/Contacts/contact.entity";
+import { RefreshToken } from "../../src/Auth/refreshToken.entity";
 import { memoryStore } from "../../src/Agents/memory/memory";
 import AppDataSource from "../../src/config/Datasource";
 

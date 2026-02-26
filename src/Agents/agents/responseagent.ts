@@ -9,26 +9,28 @@ class ResponseAgent {
     userInput: string,
     traceId: string
   ) {
-    const responsePrompt = promptGenerator.generateResponsePrompt();
+    const startTime = Date.now();
+    let promptVersionId: string | undefined;
 
     try {
       const promptVersion = await promptGenerator.generateResponsePrompt();
       promptVersionId = (promptVersion as Record<string, unknown>).id as string;
+
+      const prompt = (
+        typeof promptVersion === "string" ? promptVersion : promptVersion
+      )
+        .replace("{{WORKFLOW_RESULTS}}", JSON.stringify(workflow, null, 2))
+        .replace("{{USER_INPUT}}", userInput)
+        .replace("{{USER_ID}}", userId);
 
       const response = await agentLLM.callLLM(
         userId,
         prompt,
         userInput,
         true,
+        undefined,
         traceId
       );
-
-      const prompt = responsePrompt
-        .replace("{{WORKFLOW_RESULTS}}", JSON.stringify(workflow, null, 2))
-        .replace("{{USER_INPUT}}", userInput)
-        .replace("{{USER_ID}}", userId);
-
-      const response = await agentLLM.callLLM(userId, prompt, userInput);
 
       if (promptVersionId) {
         const { promptVersionService } =

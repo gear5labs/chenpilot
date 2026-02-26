@@ -212,12 +212,8 @@ describe("Agent Memory Seeding", () => {
       const memory = memoryStore.get(agentIds.user1);
 
       // Check for user-agent conversation pairs
-      const userEntries = memory.filter((entry) =>
-        entry.startsWith("User:")
-      );
-      const agentEntries = memory.filter((entry) =>
-        entry.startsWith("Agent:")
-      );
+      const userEntries = memory.filter((entry) => entry.startsWith("User:"));
+      const agentEntries = memory.filter((entry) => entry.startsWith("Agent:"));
 
       expect(userEntries.length).toBeGreaterThan(0);
       expect(agentEntries.length).toBeGreaterThan(0);
