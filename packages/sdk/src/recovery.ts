@@ -11,6 +11,10 @@ function delay(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Engine responsible for handling recovery and cleanup of cross-chain operations.
+ * It manages retrying steps or refunding locked assets upon failures.
+ */
 export class RecoveryEngine {
   private maxRetries: number;
   private retryDelayMs: number;
@@ -24,6 +28,13 @@ export class RecoveryEngine {
     this.refundHandler = options?.refundHandler;
   }
 
+  /**
+   * Attempts to clean up a failed operation by either retrying the mint
+   * or refunding the locked assets based on configured handlers.
+   *
+   * @param context - The context of the failed operation.
+   * @returns A promise resolving to the result of the recovery attempt.
+   */
   async cleanup(context: RecoveryContext): Promise<RecoveryResult> {
     // 1) Attempt retries of the mint step if a retry handler is provided
     if (this.retryHandler?.retryMint) {
@@ -84,6 +95,12 @@ export class RecoveryEngine {
   }
 }
 
+/**
+ * Factory function to create a new RecoveryEngine instance.
+ *
+ * @param options - Configuration options for the engine.
+ * @returns A new RecoveryEngine instance.
+ */
 export function createRecoveryEngine(options?: RecoveryEngineOptions) {
   return new RecoveryEngine(options);
 }

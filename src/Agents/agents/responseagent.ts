@@ -1,19 +1,62 @@
-import { ToolResult} from "../types";
+import { ToolResult } from "../types";
 import { agentLLM } from "../agent";
 import { promptGenerator } from "../registry/PromptGenerator";
 
 class ResponseAgent {
-  async format(workflow: ToolResult[], userId: string, userInput: string) {
-    const responsePrompt = promptGenerator.generateResponsePrompt();
+  async format(
+    workflow: ToolResult[],
+    userId: string,
+    userInput: string,
+    traceId: string
+  ) {
+    const startTime = Date.now();
+    let promptVersionId: string | undefined;
 
-    const prompt = responsePrompt
-      .replace("{{WORKFLOW_RESULTS}}", JSON.stringify(workflow, null, 2))
-      .replace("{{USER_INPUT}}", userInput)
-      .replace("{{USER_ID}}", userId);
+    try {
+      const promptVersion = await promptGenerator.generateResponsePrompt();
+      promptVersionId = (promptVersion as Record<string, unknown>).id as string;
 
-    const response = await agentLLM.callLLM(userId, prompt, userInput);
+      const prompt = (
+        typeof promptVersion === "string" ? promptVersion : promptVersion
+      )
+        .replace("{{WORKFLOW_RESULTS}}", JSON.stringify(workflow, null, 2))
+        .replace("{{USER_INPUT}}", userInput)
+        .replace("{{USER_ID}}", userId);
 
-    return response;
+      const response = await agentLLM.callLLM(
+        userId,
+        prompt,
+        userInput,
+        true,
+        undefined,
+        traceId
+      );
+
+      if (promptVersionId) {
+        const { promptVersionService } =
+          await import("../registry/PromptVersionService");
+        await promptVersionService.trackMetric(
+          promptVersionId,
+          !!response,
+          userId,
+          Date.now() - startTime
+        );
+      }
+
+      return response;
+    } catch (err) {
+      if (promptVersionId) {
+        const { promptVersionService } =
+          await import("../registry/PromptVersionService");
+        await promptVersionService.trackMetric(
+          promptVersionId,
+          false,
+          userId,
+          Date.now() - startTime
+        );
+      }
+      throw err;
+    }
   }
 }
 

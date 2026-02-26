@@ -5,6 +5,7 @@ import * as os from "os";
 import AppDataSource from "../config/Datasource";
 import { User } from "../Auth/user.entity";
 import { stellarWebhookService } from "./webhook.service";
+import { platformWebhookService } from "./platformWebhook.service";
 import {
   transactionHistoryService,
   type TransactionQueryParams,
@@ -12,13 +13,17 @@ import {
 } from "./transaction.service";
 import logger from "../config/logger";
 import authRoutes from "../Auth/auth.routes";
+import dataExportRoutes from "../services/dataExport.routes";
+import horizonProxyRoutes from "./horizonProxy.routes";
+import auditLogRoutes from "../AuditLog/auditLog.routes";
 import { stellarLiquidityTool } from "../Agents/tools/stellarLiquidityTool";
 import { authenticateToken } from "../Auth/auth.middleware";
 import {
   requireAdmin,
-  requireModerator,
   requireOwnerOrElevated,
 } from "./middleware/rbac.middleware";
+import { auditLogService } from "../AuditLog/auditLog.service";
+import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
 
 const router = Router();
 
@@ -43,6 +48,14 @@ router.use(generalLimiter);
 // Mount auth routes
 router.use("/auth", authRoutes);
 
+// Mount data export routes
+router.use("/export", dataExportRoutes);
+
+// Mount Horizon proxy routes (authenticated)
+router.use("/horizon", horizonProxyRoutes);
+// Mount audit log routes
+router.use("/audit", auditLogRoutes);
+
 // Public webhook endpoint for Stellar funding notifications
 router.post("/webhook/stellar/funding", async (req: Request, res: Response) => {
   try {
@@ -63,6 +76,84 @@ router.post("/webhook/stellar/funding", async (req: Request, res: Response) => {
     }
   } catch (error) {
     console.error("Webhook processing error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+});
+
+// Public webhook endpoint for Telegram
+router.post("/webhook/telegram", async (req: Request, res: Response) => {
+  try {
+    const result = await platformWebhookService.processTelegramWebhook(req);
+
+    if (result.isDuplicate) {
+      // Return 200 for duplicates to acknowledge receipt
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+      });
+    }
+
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result.data,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: result.message,
+      });
+    }
+  } catch (error) {
+    console.error("Telegram webhook processing error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+});
+
+// Public webhook endpoint for Discord
+router.post("/webhook/discord", async (req: Request, res: Response) => {
+  try {
+    const result = await platformWebhookService.processDiscordWebhook(req);
+
+    // Discord ping response (type 1)
+    if (
+      result.data &&
+      typeof result.data === "object" &&
+      "type" in result.data &&
+      result.data.type === 1
+    ) {
+      return res.status(200).json({ type: 1 });
+    }
+
+    if (result.isDuplicate) {
+      // Return 200 for duplicates to acknowledge receipt
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+      });
+    }
+
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result.data,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: result.message,
+      });
+    }
+  } catch (error) {
+    console.error("Discord webhook processing error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -165,6 +256,20 @@ router.post("/signup", async (req: Request, res: Response) => {
 
     // Save user
     const savedUser = await userRepository.save(user);
+
+    // Log user creation
+    await auditLogService.log({
+      userId: savedUser.id,
+      action: AuditAction.USER_CREATED,
+      severity: AuditSeverity.INFO,
+      ipAddress:
+        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        (req.headers["x-real-ip"] as string) ||
+        req.socket.remoteAddress ||
+        "unknown",
+      userAgent: req.headers["user-agent"],
+      metadata: { username: name, address },
+    });
 
     //  Return success
     return res.status(201).json({
@@ -380,34 +485,39 @@ router.get(
 );
 
 // GET /admin/stats - Internal admin route for CPU and memory usage
-router.get("/admin/stats", authenticateToken, requireAdmin, (req: Request, res: Response) => {
-  const memUsage = process.memoryUsage();
-  const cpuUsage = process.cpuUsage();
+router.get(
+  "/admin/stats",
+  authenticateToken,
+  requireAdmin,
+  (req: Request, res: Response) => {
+    const memUsage = process.memoryUsage();
+    const cpuUsage = process.cpuUsage();
 
-  res.json({
-    success: true,
-    timestamp: new Date().toISOString(),
-    memory: {
-      rss: `${(memUsage.rss / 1024 / 1024).toFixed(2)} MB`,
-      heapTotal: `${(memUsage.heapTotal / 1024 / 1024).toFixed(2)} MB`,
-      heapUsed: `${(memUsage.heapUsed / 1024 / 1024).toFixed(2)} MB`,
-      external: `${(memUsage.external / 1024 / 1024).toFixed(2)} MB`,
-    },
-    cpu: {
-      user: `${(cpuUsage.user / 1000).toFixed(2)} ms`,
-      system: `${(cpuUsage.system / 1000).toFixed(2)} ms`,
-    },
-    system: {
-      totalMemory: `${(os.totalmem() / 1024 / 1024 / 1024).toFixed(2)} GB`,
-      freeMemory: `${(os.freemem() / 1024 / 1024 / 1024).toFixed(2)} GB`,
-      uptime: `${(os.uptime() / 3600).toFixed(2)} hours`,
-      loadAverage: os.loadavg(),
-    },
-    process: {
-      uptime: `${(process.uptime() / 60).toFixed(2)} minutes`,
-      pid: process.pid,
-    },
-  });
-});
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      memory: {
+        rss: `${(memUsage.rss / 1024 / 1024).toFixed(2)} MB`,
+        heapTotal: `${(memUsage.heapTotal / 1024 / 1024).toFixed(2)} MB`,
+        heapUsed: `${(memUsage.heapUsed / 1024 / 1024).toFixed(2)} MB`,
+        external: `${(memUsage.external / 1024 / 1024).toFixed(2)} MB`,
+      },
+      cpu: {
+        user: `${(cpuUsage.user / 1000).toFixed(2)} ms`,
+        system: `${(cpuUsage.system / 1000).toFixed(2)} ms`,
+      },
+      system: {
+        totalMemory: `${(os.totalmem() / 1024 / 1024 / 1024).toFixed(2)} GB`,
+        freeMemory: `${(os.freemem() / 1024 / 1024 / 1024).toFixed(2)} GB`,
+        uptime: `${(os.uptime() / 3600).toFixed(2)} hours`,
+        loadAverage: os.loadavg(),
+      },
+      process: {
+        uptime: `${(process.uptime() / 60).toFixed(2)} minutes`,
+        pid: process.pid,
+      },
+    });
+  }
+);
 
 export default router;

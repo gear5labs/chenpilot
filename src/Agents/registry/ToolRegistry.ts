@@ -5,6 +5,9 @@ import {
   ToolPayload,
   ToolResult,
 } from "./ToolMetadata";
+import { withTimeout, TimeoutError } from "../../utils/timeout";
+import config from "../../config/config";
+import logger from "../../config/logger";
 
 export class ToolRegistry {
   private tools: Map<string, ToolRegistryEntry> = new Map();
@@ -205,12 +208,13 @@ export class ToolRegistry {
   }
 
   /**
-   * Execute a tool with payload validation
+   * Execute a tool with payload validation and timeout
    */
   async executeTool(
     toolName: string,
     payload: ToolPayload,
-    userId: string
+    userId: string,
+    timeoutMs?: number
   ): Promise<ToolResult> {
     const tool = this.getTool(toolName);
 
@@ -230,8 +234,17 @@ export class ToolRegistry {
       }
     }
 
+    const timeout = timeoutMs || config.agent.timeouts.toolExecution;
+    logger.debug("Executing tool with timeout", { toolName, userId, timeout });
+
     try {
-      const result = await tool.execute(payload, userId);
+      const result = await withTimeout(tool.execute(payload, userId), {
+        timeoutMs: timeout,
+        operation: `Tool execution: ${toolName}`,
+        onTimeout: () => {
+          logger.error("Tool execution timeout", { toolName, userId, timeout });
+        },
+      });
 
       // Update last used timestamp
       const entry = this.tools.get(toolName);
@@ -241,6 +254,16 @@ export class ToolRegistry {
 
       return result;
     } catch (error) {
+      if (error instanceof TimeoutError) {
+        const toolError = new ToolExecutionError(
+          `Tool '${toolName}' execution timed out after ${timeout}ms`
+        );
+        toolError.toolName = toolName;
+        toolError.payload = payload;
+        toolError.userId = userId;
+        throw toolError;
+      }
+
       const toolError = new ToolExecutionError(
         `Tool execution failed: ${
           error instanceof Error ? error.message : "Unknown error"

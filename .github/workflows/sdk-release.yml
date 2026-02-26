@@ -1,0 +1,23 @@
+name: SDK Release
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "packages/sdk/**"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          path: packages/sdk
+          release-type: node
+          package-name: "@chenpilot-experimental/sdk"
+          changelog-types: '[{"type":"feat","section":"Features","hidden":false},{"type":"fix","section":"Bug Fixes","hidden":false},{"type":"chore","section":"Miscellaneous","hidden":false},{"type":"docs","section":"Documentation","hidden":false}]'

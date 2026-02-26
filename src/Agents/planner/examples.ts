@@ -158,7 +158,7 @@ export async function errorHandlingExample(userId: string) {
     });
 
     // Attempt rollback
-    await planExecutor.rollback(plan, result, userId);
+    await planExecutor.rollback(plan, result);
 
     throw new Error(`Execution failed: ${result.error}`);
   }

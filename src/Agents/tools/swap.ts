@@ -4,7 +4,9 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 import config from "../../config/config";
 import accountsData from "../../Auth/accounts.json";
 import logger from "../../config/logger";
+import stellarPriceService from "../../services/stellarPrice.service";
 import { flashSwapRiskAnalyzer } from "../../services/flashSwapRiskAnalyzer";
+import { RedisLockService } from "../../services/lock";
 
 interface SwapPayload extends Record<string, unknown> {
   from: string;
@@ -65,16 +67,18 @@ export class SwapTool extends BaseTool<SwapPayload> {
   };
 
   private server: StellarSdk.Horizon.Server;
+  private lockService: RedisLockService;
 
   constructor() {
     super();
     this.server = new StellarSdk.Horizon.Server(config.stellar.horizonUrl);
+    this.lockService = new RedisLockService();
   }
 
   private getStellarAccount(userId: string): StellarSdk.Keypair {
     const accounts = accountsData as StellarAccountData[];
     const accountData = accounts.find((a) => a.userId === userId);
-    
+
     if (!accountData) {
       throw new Error(`Stellar account not found for user: ${userId}`);
     }
@@ -83,6 +87,71 @@ export class SwapTool extends BaseTool<SwapPayload> {
   }
 
   async execute(payload: SwapPayload, userId: string): Promise<ToolResult> {
+    // Create a unique lock key for this user's trading operations
+    const lockKey = `trade:${userId}`;
+
+    try {
+      // Acquire distributed lock to prevent concurrent trades for the same user
+      const lockResult = await this.lockService.acquireLock(lockKey, userId, {
+        ttl: 60000, // 60 second lock timeout
+        retryDelay: 200, // 200ms between retries
+        maxRetries: 15, // Maximum 3 seconds of retries
+      });
+
+      if (!lockResult.acquired) {
+        logger.warn("Failed to acquire trade lock", {
+          userId,
+          lockKey,
+          error: lockResult.error,
+        });
+
+        return this.createErrorResult(
+          "swap",
+          "Another trade is currently in progress for your account. Please wait a moment and try again."
+        );
+      }
+
+      logger.info("Trade lock acquired", {
+        userId,
+        lockKey,
+        lockValue: lockResult.lockValue,
+      });
+
+      // Ensure lock is released when function completes or throws
+      const lockReleased = await this.executeWithLock(payload, userId, lockKey);
+
+      return lockReleased;
+    } catch (error) {
+      logger.error("Error during swap execution", {
+        userId,
+        error,
+      });
+
+      // Try to release lock if something went wrong
+      try {
+        await this.lockService.releaseLock(lockKey, userId);
+      } catch (releaseError) {
+        logger.error("Failed to release lock after error", {
+          userId,
+          lockKey,
+          error: releaseError,
+        });
+      }
+
+      return this.createErrorResult(
+        "swap",
+        error instanceof Error
+          ? error.message
+          : "Unknown error occurred during swap"
+      );
+    }
+  }
+
+  private async executeWithLock(
+    payload: SwapPayload,
+    userId: string,
+    lockKey: string
+  ): Promise<ToolResult> {
     try {
       // Validate tokens
       if (payload.from === payload.to) {
@@ -101,6 +170,20 @@ export class SwapTool extends BaseTool<SwapPayload> {
           "Invalid token symbol. Supported: XLM, USDC, USDT"
         );
       }
+
+      // Get price quote (with caching)
+      const priceQuote = await stellarPriceService.getPrice(
+        payload.from,
+        payload.to,
+        payload.amount
+      );
+
+      logger.info("Price quote obtained", {
+        price: priceQuote.price,
+        estimatedOutput: priceQuote.estimatedOutput,
+        cached: priceQuote.cached,
+        path: priceQuote.path,
+      });
 
       // Analyze swap risk for sandwich attacks
       logger.info("Analyzing swap risk", { userId, amount: payload.amount });
@@ -141,7 +224,7 @@ export class SwapTool extends BaseTool<SwapPayload> {
       const sendAmount = payload.amount.toFixed(7);
 
       // Calculate minimum destination amount with 1% slippage tolerance
-      const minDestAmount = (payload.amount * 0.99).toFixed(7);
+      const minDestAmount = (priceQuote.estimatedOutput * 0.99).toFixed(7);
 
       // Build transaction with path payment strict send
       // This automatically finds the best path through Stellar's DEX
@@ -171,40 +254,54 @@ export class SwapTool extends BaseTool<SwapPayload> {
         from: payload.from,
         to: payload.to,
         amount: payload.amount,
+        estimatedOutput: priceQuote.estimatedOutput,
+        price: priceQuote.price,
         txHash: result.hash,
         timestamp: new Date().toISOString(),
         ledger: result.ledger,
         successful: result.successful,
         riskAnalysis: {
-          riskLevel: riskAnalysis.riskLevel,
+          level: riskAnalysis.riskLevel,
           sandwichAttackRisk: riskAnalysis.sandwichAttackRisk,
           warnings: riskAnalysis.warnings,
           recommendations: riskAnalysis.recommendations,
         },
       });
     } catch (error) {
-      let errorMessage = "Unknown error";
-      
-      if (error instanceof Error) {
-        errorMessage = error.message;
-      }
+      logger.error("Error during swap execution with lock", {
+        userId,
+        error,
+      });
 
-      // Handle specific Stellar errors
-      if (typeof error === "object" && error !== null) {
-        const stellarError = error as { response?: { data?: { extras?: { result_codes?: unknown } } } };
-        if (stellarError.response?.data?.extras?.result_codes) {
-          const codes = stellarError.response.data.extras.result_codes;
-          if (codes.operations?.includes("op_no_trust")) {
-            errorMessage = `No trustline exists for ${payload.to}. Please establish a trustline first.`;
-          } else if (codes.operations?.includes("op_underfunded")) {
-            errorMessage = `Insufficient ${payload.from} balance for swap`;
-          } else if (codes.operations?.includes("op_too_few_offers")) {
-            errorMessage = `No liquidity path found for ${payload.from} → ${payload.to} swap`;
-          }
+      return this.createErrorResult(
+        "swap",
+        error instanceof Error
+          ? error.message
+          : "Unknown error occurred during swap"
+      );
+    } finally {
+      // Always release the lock when done
+      try {
+        const released = await this.lockService.releaseLock(lockKey, userId);
+
+        if (released) {
+          logger.info("Trade lock released successfully", {
+            userId,
+            lockKey,
+          });
+        } else {
+          logger.warn("Failed to release trade lock", {
+            userId,
+            lockKey,
+          });
         }
+      } catch (releaseError) {
+        logger.error("Error releasing trade lock", {
+          userId,
+          lockKey,
+          error: releaseError,
+        });
       }
-
-      return this.createErrorResult("swap", `Swap failed: ${errorMessage}`);
     }
   }
 }
