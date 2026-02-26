@@ -15,30 +15,21 @@ The AgentPlanner module provides intelligent planning and execution for complex 
 
 ## Architecture
 
-```
-┌─────────────────┐
-│   User Input    │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  AgentPlanner   │ ◄── Analyzes request with LLM
-└────────┬────────┘     Uses specialized parsers
-         │              Generates ExecutionPlan
-         ▼
-┌─────────────────┐
-│ ExecutionPlan   │ ◄── Contains ordered steps
-└────────┬────────┘     Dependencies
-         │              Risk assessment
-         ▼
-┌─────────────────┐
-│  PlanExecutor   │ ◄── Executes steps sequentially
-└────────┬────────┘     Handles errors
-         │              Tracks progress
-         ▼
-┌─────────────────┐
-│ ExecutionResult │ ◄── Status, results, metrics
-└─────────────────┘
+```mermaid
+flowchart TD
+  U[User Input] --> AP[AgentPlanner]
+
+  AP -->|Analyze with LLM\n+ specialized parsers| LLM[AgentLLM / External LLM]
+  LLM -->|WorkflowPlan (JSON)| AP
+
+  AP -->|Generate| EP[ExecutionPlan\n(steps, deps, risk)]
+  EP --> PE[PlanExecutor]
+
+  PE -->|Execute steps via ToolRegistry| TR[ToolRegistry\n+ Registered Tools]
+  TR -->|ToolResult(s)| PE
+
+  PE --> ER[ExecutionResult\n(status, metrics, stepResults)]
+  ER --> U
 ```
 
 ## Usage Examples

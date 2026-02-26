@@ -8,6 +8,8 @@ import { type TokenService, tokenService } from "../services/token.service";
 import { type EmailService, emailService } from "../services/email.service";
 import { BadError, NotFoundError, UnauthorizedError } from "../utils/error";
 import logger from "../config/logger";
+import { auditLogService } from "../AuditLog/auditLog.service";
+import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
 
 export interface ForgotPasswordPayload {
   email: string;
@@ -54,8 +56,18 @@ export class AuthService {
       logger.info("Password reset requested for non-existent email", {
         email,
       });
+
+      // Log failed attempt
+      await auditLogService.log({
+        action: AuditAction.PASSWORD_RESET_REQUEST,
+        severity: AuditSeverity.WARNING,
+        metadata: { email, reason: "User not found" },
+        success: false,
+      });
+
       return {
-        message: "If an account with that email exists, a reset link has been sent",
+        message:
+          "If an account with that email exists, a reset link has been sent",
       };
     }
 
@@ -66,7 +78,7 @@ export class AuthService {
       type: "password_reset",
     });
 
-    // Hash token for storage 
+    // Hash token for storage
     const tokenHash = this.hashToken(resetToken);
 
     // Update user with reset token hash and expiry
@@ -87,10 +99,19 @@ export class AuthService {
       });
     }
 
+    // Log successful password reset request
+    await auditLogService.log({
+      userId: user.id,
+      action: AuditAction.PASSWORD_RESET_REQUEST,
+      severity: AuditSeverity.INFO,
+      metadata: { email },
+    });
+
     logger.info("Password reset initiated", { userId: user.id, email });
 
     return {
-      message: "If an account with that email exists, a reset link has been sent",
+      message:
+        "If an account with that email exists, a reset link has been sent",
     };
   }
 
@@ -145,6 +166,14 @@ export class AuthService {
     user.resetTokenExpiry = undefined;
     await this.userRepository.save(user);
 
+    // Log successful password reset
+    await auditLogService.log({
+      userId: user.id,
+      action: AuditAction.PASSWORD_RESET_SUCCESS,
+      severity: AuditSeverity.INFO,
+      metadata: { email: user.email },
+    });
+
     logger.info("Password reset completed", { userId: user.id });
 
     return { message: "Password has been reset successfully" };
@@ -153,9 +182,7 @@ export class AuthService {
   /**
    * Sends email verification to user.
    */
-  async sendEmailVerification(
-    userId: string
-  ): Promise<{ message: string }> {
+  async sendEmailVerification(userId: string): Promise<{ message: string }> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
 
     if (!user) {
@@ -171,12 +198,11 @@ export class AuthService {
     }
 
     // Generate verification token
-    const verificationToken =
-      this.tokenService.generateEmailVerificationToken({
-        userId: user.id,
-        email: user.email,
-        type: "email_verification",
-      });
+    const verificationToken = this.tokenService.generateEmailVerificationToken({
+      userId: user.id,
+      email: user.email,
+      type: "email_verification",
+    });
 
     // Send verification email
     const emailSent = await this.emailService.sendEmailVerification(
@@ -191,6 +217,14 @@ export class AuthService {
       throw new BadError("Failed to send verification email");
     }
 
+    // Log email verification sent
+    await auditLogService.log({
+      userId: user.id,
+      action: AuditAction.EMAIL_VERIFICATION_SENT,
+      severity: AuditSeverity.INFO,
+      metadata: { email: user.email },
+    });
+
     logger.info("Email verification sent", {
       userId: user.id,
       email: user.email,
@@ -202,9 +236,7 @@ export class AuthService {
   /**
    * Verifies user email using verification token.
    */
-  async verifyEmail(
-    payload: VerifyEmailPayload
-  ): Promise<{ message: string }> {
+  async verifyEmail(payload: VerifyEmailPayload): Promise<{ message: string }> {
     const { token } = payload;
 
     if (!token) {
@@ -234,6 +266,14 @@ export class AuthService {
     // Mark email as verified
     user.isEmailVerified = true;
     await this.userRepository.save(user);
+
+    // Log successful email verification
+    await auditLogService.log({
+      userId: user.id,
+      action: AuditAction.EMAIL_VERIFICATION_SUCCESS,
+      severity: AuditSeverity.INFO,
+      metadata: { email: user.email },
+    });
 
     logger.info("Email verified", { userId: user.id, email: user.email });
 

@@ -185,6 +185,7 @@ app.post("/query", sensitiveLimiter, async (req, res, next) => {
 });
 
 app.use("/api", routes);
+app.use("/api/prompts", promptRoutes);
 
 app.use(ErrorHandler);
 

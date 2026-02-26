@@ -5,6 +5,7 @@ import * as os from "os";
 import AppDataSource from "../config/Datasource";
 import { User } from "../Auth/user.entity";
 import { stellarWebhookService } from "./webhook.service";
+import { platformWebhookService } from "./platformWebhook.service";
 import {
   transactionHistoryService,
   type TransactionQueryParams,
@@ -13,13 +14,15 @@ import {
 import logger from "../config/logger";
 import authRoutes from "../Auth/auth.routes";
 import dataExportRoutes from "../services/dataExport.routes";
+import auditLogRoutes from "../AuditLog/auditLog.routes";
 import { stellarLiquidityTool } from "../Agents/tools/stellarLiquidityTool";
 import { authenticateToken } from "../Auth/auth.middleware";
 import {
   requireAdmin,
   requireOwnerOrElevated,
 } from "./middleware/rbac.middleware";
-import { requireAdminWithIpWhitelist } from "./middleware/ipWhitelist.middleware";
+import { auditLogService } from "../AuditLog/auditLog.service";
+import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
 
 const router = Router();
 
@@ -47,6 +50,9 @@ router.use("/auth", authRoutes);
 // Mount data export routes
 router.use("/export", dataExportRoutes);
 
+// Mount audit log routes
+router.use("/audit", auditLogRoutes);
+
 // Public webhook endpoint for Stellar funding notifications
 router.post("/webhook/stellar/funding", async (req: Request, res: Response) => {
   try {
@@ -67,6 +73,84 @@ router.post("/webhook/stellar/funding", async (req: Request, res: Response) => {
     }
   } catch (error) {
     console.error("Webhook processing error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+});
+
+// Public webhook endpoint for Telegram
+router.post("/webhook/telegram", async (req: Request, res: Response) => {
+  try {
+    const result = await platformWebhookService.processTelegramWebhook(req);
+
+    if (result.isDuplicate) {
+      // Return 200 for duplicates to acknowledge receipt
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+      });
+    }
+
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result.data,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: result.message,
+      });
+    }
+  } catch (error) {
+    console.error("Telegram webhook processing error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+});
+
+// Public webhook endpoint for Discord
+router.post("/webhook/discord", async (req: Request, res: Response) => {
+  try {
+    const result = await platformWebhookService.processDiscordWebhook(req);
+
+    // Discord ping response (type 1)
+    if (
+      result.data &&
+      typeof result.data === "object" &&
+      "type" in result.data &&
+      result.data.type === 1
+    ) {
+      return res.status(200).json({ type: 1 });
+    }
+
+    if (result.isDuplicate) {
+      // Return 200 for duplicates to acknowledge receipt
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+      });
+    }
+
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result.data,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: result.message,
+      });
+    }
+  } catch (error) {
+    console.error("Discord webhook processing error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -169,6 +253,20 @@ router.post("/signup", async (req: Request, res: Response) => {
 
     // Save user
     const savedUser = await userRepository.save(user);
+
+    // Log user creation
+    await auditLogService.log({
+      userId: savedUser.id,
+      action: AuditAction.USER_CREATED,
+      severity: AuditSeverity.INFO,
+      ipAddress:
+        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        (req.headers["x-real-ip"] as string) ||
+        req.socket.remoteAddress ||
+        "unknown",
+      userAgent: req.headers["user-agent"],
+      metadata: { username: name, address },
+    });
 
     //  Return success
     return res.status(201).json({
@@ -387,7 +485,6 @@ router.get(
 router.get(
   "/admin/stats",
   authenticateToken,
-  requireAdminWithIpWhitelist(),
   requireAdmin,
   (req: Request, res: Response) => {
     const memUsage = process.memoryUsage();
