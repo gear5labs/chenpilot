@@ -2,7 +2,10 @@ import { PlanExecutor } from "../../src/Agents/planner/PlanExecutor";
 import { ExecutionPlan } from "../../src/Agents/planner/AgentPlanner";
 import { toolRegistry } from "../../src/Agents/registry/ToolRegistry";
 import { performanceTestRunner } from "./utils/PerformanceTestRunner";
-import { PERFORMANCE_BASELINES, PERFORMANCE_TEST_CONFIG } from "./config/performanceBaselines";
+import {
+  PERFORMANCE_BASELINES,
+  PERFORMANCE_TEST_CONFIG,
+} from "./config/performanceBaselines";
 
 jest.mock("../../src/Agents/registry/ToolRegistry");
 jest.mock("../../src/config/logger");
@@ -66,7 +69,9 @@ describe("Agent Execution Performance Tests", () => {
     });
 
     it("should handle tool execution errors efficiently", async () => {
-      const mockExecuteTool = jest.fn().mockRejectedValue(new Error("Tool failed"));
+      const mockExecuteTool = jest
+        .fn()
+        .mockRejectedValue(new Error("Tool failed"));
 
       (toolRegistry.executeTool as jest.Mock) = mockExecuteTool;
 
@@ -177,9 +182,24 @@ describe("Agent Execution Performance Tests", () => {
       const plan: ExecutionPlan = {
         planId: "test-plan-partial",
         steps: [
-          { stepNumber: 1, action: "step1", payload: {}, description: "Step 1" },
-          { stepNumber: 2, action: "step2", payload: {}, description: "Step 2" },
-          { stepNumber: 3, action: "step3", payload: {}, description: "Step 3" },
+          {
+            stepNumber: 1,
+            action: "step1",
+            payload: {},
+            description: "Step 1",
+          },
+          {
+            stepNumber: 2,
+            action: "step2",
+            payload: {},
+            description: "Step 2",
+          },
+          {
+            stepNumber: 3,
+            action: "step3",
+            payload: {},
+            description: "Step 3",
+          },
         ],
         totalSteps: 3,
         estimatedDuration: 9000,
@@ -228,8 +248,18 @@ describe("Agent Execution Performance Tests", () => {
       const plan: ExecutionPlan = {
         planId: "test-plan-realistic",
         steps: [
-          { stepNumber: 1, action: "action1", payload: {}, description: "Action 1" },
-          { stepNumber: 2, action: "action2", payload: {}, description: "Action 2" },
+          {
+            stepNumber: 1,
+            action: "action1",
+            payload: {},
+            description: "Action 1",
+          },
+          {
+            stepNumber: 2,
+            action: "action2",
+            payload: {},
+            description: "Action 2",
+          },
         ],
         totalSteps: 2,
         estimatedDuration: 6000,

@@ -6,21 +6,46 @@ import { responseAgent } from "./responseagent";
 import logger from "../../config/logger";
 import { withTimeout, TimeoutError } from "../../utils/timeout";
 import config from "../../config/config";
+import { randomUUID } from "crypto";
 export class ExecutionAgent {
-  async run(plan: WorkflowPlan, userId: string, input: string, timeoutMs?: number) {
-    const timeout = timeoutMs || config.agent.timeouts.agentExecution;
+  async run(
+    plan: WorkflowPlan,
+    userId: string,
+    input: string,
+    traceId?: string | number,
+    timeoutMs?: number
+  ) {
+    const timeout =
+      (typeof traceId === "number" ? traceId : timeoutMs) ||
+      config.agent.timeouts.agentExecution;
+    const actualTraceId = typeof traceId === "string" ? traceId : randomUUID();
     const startTime = Date.now();
 
-    logger.info("Starting agent execution", { userId, timeout, stepCount: plan.workflow.length });
+    logger.info("Starting agent execution", {
+      userId,
+      timeout,
+      stepCount: plan.workflow.length,
+    });
 
     try {
       return await withTimeout(
-        this.executeWorkflow(plan, userId, input, startTime, timeout),
+        this.executeWorkflow(
+          plan,
+          userId,
+          input,
+          startTime,
+          timeout,
+          actualTraceId
+        ),
         {
           timeoutMs: timeout,
           operation: `Agent execution for user ${userId}`,
           onTimeout: () => {
-            logger.error("Agent execution timeout", { userId, timeout, elapsed: Date.now() - startTime });
+            logger.error("Agent execution timeout", {
+              userId,
+              timeout,
+              elapsed: Date.now() - startTime,
+            });
           },
         }
       );
@@ -41,7 +66,8 @@ export class ExecutionAgent {
     userId: string,
     input: string,
     startTime: number,
-    totalTimeout: number
+    totalTimeout: number,
+    traceId: string
   ) {
     const results: ToolResult[] = [];
 
@@ -58,17 +84,31 @@ export class ExecutionAgent {
       }
 
       try {
-        logger.info("Executing tool", { action: step.action, userId, remainingTime });
+        logger.info("Executing tool", {
+          action: step.action,
+          userId,
+          remainingTime,
+        });
         const result = await toolRegistry.executeTool(
           step.action,
           step.payload,
           userId,
           Math.min(remainingTime, config.agent.timeouts.toolExecution)
         );
-        logger.info("Tool execution completed", { traceId, action: step.action, status: result.status, userId });
+        logger.info("Tool execution completed", {
+          traceId,
+          action: step.action,
+          status: result.status,
+          userId,
+        });
         results.push(result);
       } catch (error) {
-        logger.error("Tool execution failed", { traceId, action: step.action, error, userId });
+        logger.error("Tool execution failed", {
+          traceId,
+          action: step.action,
+          error,
+          userId,
+        });
         const errorResult: ToolResult = {
           action: step.action,
           status: "error",
@@ -90,13 +130,17 @@ export class ExecutionAgent {
     }));
 
     memoryStore.add(userId, `LLM: ${JSON.stringify(summarizedResults)}`);
-    const res: { response: string } = await responseAgent.format(
+    const res = (await responseAgent.format(
       results,
       userId,
       input,
       traceId
-    );
-    logger.info("Workflow execution completed", { userId, hasResponse: !!res?.response, duration: Date.now() - startTime });
+    )) as { response: string };
+    logger.info("Workflow execution completed", {
+      userId,
+      hasResponse: !!res?.response,
+      duration: Date.now() - startTime,
+    });
     return { success: true, data: res?.response };
   }
 }

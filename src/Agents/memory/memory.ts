@@ -1,10 +1,8 @@
 import logger from "../../config/logger";
+import * as fs from "fs";
+import * as path from "path";
 
 declare const process: { cwd: () => string };
-declare function require(moduleName: string): any;
-
-const fs = require("fs");
-const path = require("path");
 
 type PersistedMemory = Record<string, string[]>;
 
@@ -97,7 +95,11 @@ export class MemoryStore {
         data[agentId] = context;
       }
 
-      fs.writeFileSync(this.storageFilePath, JSON.stringify(data, null, 2), "utf-8");
+      fs.writeFileSync(
+        this.storageFilePath,
+        JSON.stringify(data, null, 2),
+        "utf-8"
+      );
     } catch (error) {
       logger.error("Failed to persist agent memory store to disk", {
         error,

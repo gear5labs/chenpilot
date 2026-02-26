@@ -5,6 +5,7 @@ The `AgentRegistry` enables dynamic agent selection based on parsed user intent,
 ## Overview
 
 The AgentRegistry provides a centralized system for:
+
 - Registering specialized agents with metadata about their capabilities
 - Dynamically selecting the best agent based on user intent
 - Managing agent lifecycle (enable/disable, priority, categories)
@@ -33,13 +34,13 @@ The AgentRegistry provides a centralized system for:
 
 ```typescript
 interface AgentMetadata {
-  name: string;              // Unique agent identifier
-  description: string;       // Human-readable description
-  category: string;          // Agent category (defi, nft, general, etc.)
-  version: string;           // Agent version
-  capabilities: string[];    // List of capabilities
-  keywords: string[];        // Keywords for intent matching
-  priority: number;          // Priority (higher = preferred)
+  name: string; // Unique agent identifier
+  description: string; // Human-readable description
+  category: string; // Agent category (defi, nft, general, etc.)
+  version: string; // Agent version
+  capabilities: string[]; // List of capabilities
+  keywords: string[]; // Keywords for intent matching
+  priority: number; // Priority (higher = preferred)
 }
 ```
 
@@ -47,10 +48,10 @@ interface AgentMetadata {
 
 ```typescript
 interface ParsedIntent {
-  category?: string;         // Optional category hint
-  keywords: string[];        // Extracted keywords from user input
-  confidence?: number;       // Confidence score (0-1)
-  rawInput: string;          // Original user input
+  category?: string; // Optional category hint
+  keywords: string[]; // Extracted keywords from user input
+  confidence?: number; // Confidence score (0-1)
+  rawInput: string; // Original user input
 }
 ```
 
@@ -299,7 +300,7 @@ async function parseIntent(userInput: string): Promise<ParsedIntent> {
   // Use LLM or NLP to parse intent
   // This could integrate with existing intentAgent logic
   const parsed = await someLLMService.parse(userInput);
-  
+
   return {
     category: parsed.category,
     keywords: parsed.keywords,
@@ -312,11 +313,11 @@ async function parseIntent(userInput: string): Promise<ParsedIntent> {
 async function handleUserRequest(userInput: string, userId: string) {
   const intent = await parseIntent(userInput);
   const agent = agentRegistry.getAgentByIntent(intent);
-  
+
   if (!agent) {
     return { success: false, error: "No suitable agent found" };
   }
-  
+
   console.log(`Routing to agent: ${agent.metadata.name}`);
   return await agent.handle(userInput, userId);
 }
@@ -364,6 +365,7 @@ npm test -- src/Agents/registry/__tests__/AgentRegistry.test.ts
 ```
 
 Test coverage includes:
+
 - Agent registration and validation
 - Intent-based agent selection
 - Scoring algorithm

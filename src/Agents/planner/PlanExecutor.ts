@@ -57,7 +57,10 @@ export class PlanExecutor {
 
     // Verify plan hash before execution if enabled
     if (options.verifyHash !== false) {
-      const verificationResult = this.verifyPlanIntegrity(plan as HashedPlan, options);
+      const verificationResult = this.verifyPlanIntegrity(
+        plan as HashedPlan,
+        options
+      );
       if (!verificationResult.valid) {
         throw new Error(
           `Plan verification failed: ${verificationResult.errors.join(", ")}`
@@ -230,7 +233,9 @@ export class PlanExecutor {
         });
       }
     } else if (plan.signature && !options.publicKey) {
-      warnings.push("Plan has signature but no public key provided for verification");
+      warnings.push(
+        "Plan has signature but no public key provided for verification"
+      );
     }
 
     // Strict mode validations

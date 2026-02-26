@@ -8,6 +8,9 @@
     "build": "tsc",
     "docs": "typedoc --options typedoc.json",
     "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest --config jest.config.js",
+    "test:watch": "jest --config jest.config.js --watch",
+    "test:coverage": "jest --config jest.config.js --coverage"
   },
   "keywords": [
     "defi",

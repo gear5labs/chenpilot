@@ -1,15 +1,11 @@
 /**
  * AgentRegistry Example
- * 
+ *
  * Demonstrates how to use the AgentRegistry to dynamically route
  * requests to specialized agents based on user intent.
  */
 
-import {
-  agentRegistry,
-  AgentDefinition,
-  ParsedIntent,
-} from "../AgentRegistry";
+import { agentRegistry, AgentDefinition, ParsedIntent } from "../AgentRegistry";
 
 // Example 1: Define specialized agents
 
@@ -17,7 +13,8 @@ import {
 const defiAgent: AgentDefinition = {
   metadata: {
     name: "defi_agent",
-    description: "Specialized agent for DeFi operations like swaps, lending, and liquidity",
+    description:
+      "Specialized agent for DeFi operations like swaps, lending, and liquidity",
     category: "defi",
     version: "1.0.0",
     capabilities: [
@@ -55,7 +52,8 @@ const defiAgent: AgentDefinition = {
 const generalAgent: AgentDefinition = {
   metadata: {
     name: "general_agent",
-    description: "General purpose agent for information queries and basic operations",
+    description:
+      "General purpose agent for information queries and basic operations",
     category: "general",
     version: "1.0.0",
     capabilities: [
@@ -100,14 +98,7 @@ const nftAgent: AgentDefinition = {
       "nft_marketplace",
       "collection_management",
     ],
-    keywords: [
-      "nft",
-      "mint",
-      "collection",
-      "artwork",
-      "token",
-      "collectible",
-    ],
+    keywords: ["nft", "mint", "collection", "artwork", "token", "collectible"],
     priority: 8,
   },
   handle: async (input: string, userId: string) => {
@@ -189,7 +180,12 @@ function parseUserIntent(input: string): ParsedIntent {
   ) {
     return {
       category: "nft",
-      keywords: extractKeywords(input, ["nft", "mint", "collection", "artwork"]),
+      keywords: extractKeywords(input, [
+        "nft",
+        "mint",
+        "collection",
+        "artwork",
+      ]),
       confidence: 0.85,
       rawInput: input,
     };

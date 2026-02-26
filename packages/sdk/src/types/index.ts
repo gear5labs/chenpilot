@@ -70,6 +70,48 @@ export interface RecoveryEngineOptions {
   refundHandler?: RefundHandler;
 }
 
+// ─── Soroban execution logs ──────────────────────────────────────────────────
+
+export type SorobanNetwork = "testnet" | "mainnet";
+
+export interface GetExecutionLogsParams {
+  /** Transaction hash returned from a Soroban contract call. */
+  txHash: string;
+  network: SorobanNetwork;
+  /** Override the default RPC URL for the selected network. */
+  rpcUrl?: string;
+}
+
+/** A single contract event emitted during transaction execution. */
+export interface ExecutionLogEntry {
+  /** Position of the event within the transaction result. */
+  index: number;
+  /** Bech32m contract address, or null for system events. */
+  contractId: string | null;
+  /** "contract" | "system" | "diagnostic" */
+  type: string;
+  /** Decoded topic values. */
+  topics: unknown[];
+  /** Decoded data value. */
+  data: unknown;
+}
+
+/** Formatted execution log for a Soroban transaction. */
+export interface ExecutionLog {
+  txHash: string;
+  status: "SUCCESS" | "FAILED" | "NOT_FOUND";
+  /** Ledger sequence number the transaction was included in, if known. */
+  ledger: number | null;
+  /** Unix timestamp (seconds) of ledger close, if known. */
+  createdAt: number | null;
+  /** Decoded return value of the contract call, if available. */
+  returnValue: unknown | null;
+  /** Contract events emitted during execution. */
+  events: ExecutionLogEntry[];
+  /** Human-readable error description for FAILED or NOT_FOUND transactions. */
+  errorMessage: string | null;
+}
+
 // ─── Soroban event subscription types ────────────────────────────────────────
 
 /** Configuration for subscribing to Soroban contract events. */
@@ -118,4 +160,62 @@ export interface EventSubscription {
   isActive(): boolean;
   /** Last ledger that was checked. */
   getLastLedger(): number | null;
+}
+
+// ─── Network Status types ────────────────────────────────────────────────────
+
+/** Configuration for network status checks. */
+export interface NetworkStatusConfig {
+  /** Network to check ("testnet" | "mainnet"). */
+  network: "testnet" | "mainnet";
+  /** Optional RPC URL override. */
+  rpcUrl?: string;
+  /** Optional Horizon URL override. */
+  horizonUrl?: string;
+}
+
+/** Network health information. */
+export interface NetworkHealth {
+  /** Whether the network is reachable and responding. */
+  isHealthy: boolean;
+  /** Response time in milliseconds. */
+  responseTimeMs: number;
+  /** Latest ledger sequence. */
+  latestLedger: number;
+  /** Error message if unhealthy. */
+  error?: string;
+}
+
+/** Ledger latency information. */
+export interface LedgerLatency {
+  /** Current ledger sequence. */
+  currentLedger: number;
+  /** Time since last ledger close (seconds). */
+  timeSinceLastLedgerSec: number;
+  /** Average ledger close time (seconds). */
+  averageLedgerTimeSec: number;
+  /** Whether latency is within normal range. */
+  isNormal: boolean;
+}
+
+/** Protocol version information. */
+export interface ProtocolVersion {
+  /** Current protocol version. */
+  version: number;
+  /** Core version string. */
+  coreVersion: string;
+  /** Network passphrase. */
+  networkPassphrase: string;
+}
+
+/** Complete network status. */
+export interface NetworkStatus {
+  /** Network health information. */
+  health: NetworkHealth;
+  /** Ledger latency information. */
+  latency: LedgerLatency;
+  /** Protocol version information. */
+  protocol: ProtocolVersion;
+  /** Timestamp of the check. */
+  checkedAt: number;
 }

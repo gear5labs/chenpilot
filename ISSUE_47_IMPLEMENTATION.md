@@ -20,7 +20,7 @@ Implemented dynamic agent selection based on parsed user intent, enabling intell
    - Intent parsing demonstration
    - Usage patterns and best practices
 
-3. **src/Agents/registry/__tests__/AgentRegistry.test.ts** (441 lines)
+3. **src/Agents/registry/**tests**/AgentRegistry.test.ts** (441 lines)
    - Comprehensive test suite (37 tests, all passing)
    - Tests for registration, intent matching, scoring, search, etc.
    - 100% code coverage of core functionality
@@ -51,13 +51,14 @@ const agent = agentRegistry.getAgentByIntent({
   category: "defi",
   keywords: ["swap", "trade"],
   confidence: 0.9,
-  rawInput: "I want to swap 100 USDC for ETH"
+  rawInput: "I want to swap 100 USDC for ETH",
 });
 ```
 
 ### 2. Scoring Algorithm
 
 Agents are scored based on:
+
 - **Category match** (100 points) - Exact category match
 - **Keyword match** (10 points each) - Exact keyword matches
 - **Partial keyword match** (5 points each) - Substring matches
@@ -71,13 +72,13 @@ Each agent provides comprehensive metadata:
 
 ```typescript
 interface AgentMetadata {
-  name: string;              // Unique identifier
-  description: string;       // Human-readable description
-  category: string;          // Agent category
-  version: string;           // Version
-  capabilities: string[];    // List of capabilities
-  keywords: string[];        // Keywords for matching
-  priority: number;          // Priority (higher = preferred)
+  name: string; // Unique identifier
+  description: string; // Human-readable description
+  category: string; // Agent category
+  version: string; // Version
+  capabilities: string[]; // List of capabilities
+  keywords: string[]; // Keywords for matching
+  priority: number; // Priority (higher = preferred)
 }
 ```
 
@@ -91,20 +92,24 @@ interface AgentMetadata {
 ## API Overview
 
 ### Registration
+
 - `register(agent)` - Register new agent
 - `setDefaultAgent(name)` - Set default fallback
 
 ### Selection
+
 - `getAgentByIntent(intent)` - Get best matching agent ⭐ **Core Feature**
 - `getAgent(name)` - Get specific agent
 
 ### Discovery
+
 - `getAllAgents()` - Get all enabled agents
 - `getAgentsByCategory(category)` - Get agents by category
 - `searchAgents(query)` - Search by name/description/keywords
 - `getCategories()` - Get all categories
 
 ### Management
+
 - `setAgentEnabled(name, enabled)` - Enable/disable agent
 - `unregister(name)` - Remove agent
 - `getStats()` - Get registry statistics
@@ -156,6 +161,7 @@ npx jest --config src/Agents/registry/__tests__/jest.config.js
 ```
 
 Test coverage:
+
 - ✅ Agent registration and validation
 - ✅ Intent-based selection with scoring
 - ✅ Category and keyword matching
@@ -169,6 +175,7 @@ Test coverage:
 ## Integration Points
 
 ### Current System
+
 The AgentRegistry can integrate with existing components:
 
 1. **IntentAgent** - Can use AgentRegistry for routing
@@ -176,6 +183,7 @@ The AgentRegistry can integrate with existing components:
 3. **ToolRegistry** - Agents can use registered tools
 
 ### Future Integration
+
 ```typescript
 // In intentAgent.ts
 const intent = await parseIntent(userInput);
@@ -195,11 +203,13 @@ return await agent.handle(userInput, userId);
 ## Examples
 
 Run the example:
+
 ```bash
 npx ts-node src/Agents/registry/examples/agentRegistryExample.ts
 ```
 
 Output demonstrates:
+
 - Agent registration
 - Intent parsing
 - Dynamic routing
@@ -223,17 +233,20 @@ Output demonstrates:
 ## Technical Decisions
 
 ### Why Scoring Algorithm?
+
 - Flexible matching beyond exact category
 - Handles ambiguous intents
 - Considers multiple factors (keywords, capabilities, priority)
 - Extensible for future enhancements
 
 ### Why Priority System?
+
 - Allows preferring specialized agents
 - Handles overlapping capabilities
 - Configurable without code changes
 
 ### Why Default Agent?
+
 - Graceful fallback for unknown intents
 - Ensures system always responds
 - Can be general-purpose agent

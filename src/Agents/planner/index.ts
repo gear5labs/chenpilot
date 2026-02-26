@@ -23,7 +23,4 @@ export type {
   ExecutionOptions,
 } from "./PlanExecutor";
 
-export type {
-  HashedPlan,
-  PlanHashMetadata,
-} from "./planHash";
+export type { HashedPlan, PlanHashMetadata } from "./planHash";

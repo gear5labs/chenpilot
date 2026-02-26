@@ -238,16 +238,13 @@ export class ToolRegistry {
     logger.debug("Executing tool with timeout", { toolName, userId, timeout });
 
     try {
-      const result = await withTimeout(
-        tool.execute(payload, userId),
-        {
-          timeoutMs: timeout,
-          operation: `Tool execution: ${toolName}`,
-          onTimeout: () => {
-            logger.error("Tool execution timeout", { toolName, userId, timeout });
-          },
-        }
-      );
+      const result = await withTimeout(tool.execute(payload, userId), {
+        timeoutMs: timeout,
+        operation: `Tool execution: ${toolName}`,
+        onTimeout: () => {
+          logger.error("Tool execution timeout", { toolName, userId, timeout });
+        },
+      });
 
       // Update last used timestamp
       const entry = this.tools.get(toolName);
