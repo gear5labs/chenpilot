@@ -200,8 +200,12 @@ export class PlanVerifier {
       verify.update(planHash);
       verify.end();
       return verify.verify(publicKey, signature, "base64");
+
     } catch (_error) {
       void _error;
+
+    } catch {
+
       return false;
     }
   }

@@ -4,6 +4,8 @@ import JwtService from "./jwt.service";
 import UserService from "./user.service";
 import { authenticateToken } from "./auth.middleware";
 import logger from "../config/logger";
+import { auditLogService } from "../AuditLog/auditLog.service";
+import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
 
 const router = Router();
 
@@ -25,6 +27,13 @@ router.post("/login", async (req: Request, res: Response) => {
     const user = await userService.getUserByName(name);
 
     if (!user) {
+      // Log failed login attempt
+      await auditLogService.logFromRequest(req, AuditAction.LOGIN_FAILED, {
+        severity: AuditSeverity.WARNING,
+        success: false,
+        metadata: { username: name, reason: "User not found" },
+      });
+
       return res.status(404).json({
         success: false,
         message: "User not found",
@@ -32,9 +41,24 @@ router.post("/login", async (req: Request, res: Response) => {
     }
 
     const jwtService = container.resolve(JwtService);
-    const tokens = await jwtService.generateTokenPair(user.id, user.name, user.role);
+    const tokens = await jwtService.generateTokenPair(
+      user.id,
+      user.name,
+      user.role
+    );
 
-    logger.info("User logged in", { userId: user.id, name: user.name, role: user.role });
+    // Log successful login
+    await auditLogService.logFromRequest(req, AuditAction.LOGIN_SUCCESS, {
+      userId: user.id,
+      severity: AuditSeverity.INFO,
+      metadata: { username: name, role: user.role },
+    });
+
+    logger.info("User logged in", {
+      userId: user.id,
+      name: user.name,
+      role: user.role,
+    });
 
     return res.status(200).json({
       success: true,
@@ -73,6 +97,11 @@ router.post("/refresh", async (req: Request, res: Response) => {
     const jwtService = container.resolve(JwtService);
     const tokens = await jwtService.rotateRefreshToken(refreshToken);
 
+    // Log token refresh
+    await auditLogService.logFromRequest(req, AuditAction.TOKEN_REFRESH, {
+      severity: AuditSeverity.INFO,
+    });
+
     return res.status(200).json({
       success: true,
       data: tokens,
@@ -104,6 +133,11 @@ router.post("/logout", async (req: Request, res: Response) => {
 
     const jwtService = container.resolve(JwtService);
     await jwtService.revokeToken(refreshToken, "User logout");
+
+    // Log logout
+    await auditLogService.logFromRequest(req, AuditAction.LOGOUT, {
+      severity: AuditSeverity.INFO,
+    });
 
     logger.info("User logged out");
 

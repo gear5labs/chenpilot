@@ -1,7 +1,6 @@
 import { executionAgent } from "../../src/Agents/agents/exectutionagent";
 import { toolRegistry } from "../../src/Agents/registry/ToolRegistry";
 import { WorkflowPlan } from "../../src/Agents/types";
-import { TimeoutError } from "../../src/utils/timeout";
 
 jest.mock("../../src/Agents/registry/ToolRegistry");
 jest.mock("../../src/Agents/agents/responseagent");
@@ -31,16 +30,23 @@ describe("Execution Agent Timeout", () => {
         ],
       };
 
-      const result = await executionAgent.run(plan, "user123", "test input", 10000);
+      const result = await executionAgent.run(
+        plan,
+        "user123",
+        "test input",
+        10000
+      );
 
       expect(result.success).toBe(true);
       expect(mockExecuteTool).toHaveBeenCalled();
     });
 
     it("should timeout when execution exceeds timeout", async () => {
-      const mockExecuteTool = jest.fn().mockImplementation(
-        () => new Promise((resolve) => setTimeout(resolve, 5000))
-      );
+      const mockExecuteTool = jest
+        .fn()
+        .mockImplementation(
+          () => new Promise((resolve) => setTimeout(resolve, 5000))
+        );
 
       (toolRegistry.executeTool as jest.Mock) = mockExecuteTool;
 
@@ -53,7 +59,12 @@ describe("Execution Agent Timeout", () => {
         ],
       };
 
-      const result = await executionAgent.run(plan, "user123", "test input", 100);
+      const result = await executionAgent.run(
+        plan,
+        "user123",
+        "test input",
+        100
+      );
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("timed out");
@@ -117,7 +128,12 @@ describe("Execution Agent Timeout", () => {
         ],
       };
 
-      const result = await executionAgent.run(plan, "user123", "test input", 10000);
+      const result = await executionAgent.run(
+        plan,
+        "user123",
+        "test input",
+        10000
+      );
 
       expect(result.success).toBe(true);
       expect(mockExecuteTool).toHaveBeenCalledTimes(2);
@@ -125,11 +141,18 @@ describe("Execution Agent Timeout", () => {
 
     it("should stop execution when remaining time is exhausted", async () => {
       const mockExecuteTool = jest.fn().mockImplementation(
-        () => new Promise((resolve) => setTimeout(() => resolve({
-          action: "test",
-          status: "success",
-          data: {},
-        }), 200))
+        () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () =>
+                resolve({
+                  action: "test",
+                  status: "success",
+                  data: {},
+                }),
+              200
+            )
+          )
       );
 
       (toolRegistry.executeTool as jest.Mock) = mockExecuteTool;
@@ -142,7 +165,12 @@ describe("Execution Agent Timeout", () => {
         ],
       };
 
-      const result = await executionAgent.run(plan, "user123", "test input", 300);
+      const result = await executionAgent.run(
+        plan,
+        "user123",
+        "test input",
+        300
+      );
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("timed out");
