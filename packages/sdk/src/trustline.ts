@@ -1,5 +1,5 @@
 // @ts-ignore: dependency is provided at the workspace root
-import { Server } from "stellar-sdk";
+import { Server, Asset, Operation } from "stellar-sdk";
 
 export interface TrustlineCheckResult {
   exists: boolean;
@@ -62,6 +62,53 @@ export async function hasValidStellarTrustline(
     (match.authorized_to_maintain_liabilities as boolean) ?? true;
 
   return { exists: true, authorized, details: { balance: match } };
+}
+
+export interface TrustlineInfo {
+  assetCode: string;
+  assetIssuer: string;
+  balance: string;
+}
+
+/**
+ * Inspect an account for non-native trustlines whose balance is zero.
+ * Returns a list that can later be used to build changeTrust operations with
+ * limit 0 (i.e. remove the trustline).
+ *
+ * @param horizonUrl optional horizon server URL
+ * @param accountId account to inspect
+ */
+export async function findZeroBalanceTrustlines(
+  horizonUrl: string | undefined,
+  accountId: string
+): Promise<TrustlineInfo[]> {
+  const server = new Server(horizonUrl || "https://horizon.stellar.org");
+  const account = await server.accounts().accountId(accountId).call();
+  const balances: any[] = account.balances || [];
+
+  return balances
+    .filter((b) => b.asset_type !== "native" && parseFloat(b.balance) === 0)
+    .map((b) => ({
+      assetCode: b.asset_code,
+      assetIssuer: b.asset_issuer,
+      balance: b.balance,
+    }));
+}
+
+/**
+ * Build a collection of changeTrust operations that remove the provided
+ * trustlines (setting limit to "0").  The returned operations can be added
+ * to a transaction builder.
+ */
+export function buildTrustlineRemovalOps(
+  trustlines: TrustlineInfo[]
+): Operation[] {
+  return trustlines.map((t) =>
+    Operation.changeTrust({
+      asset: new Asset(t.assetCode, t.assetIssuer),
+      limit: "0",
+    })
+  );
 }
 
 export default hasValidStellarTrustline;
