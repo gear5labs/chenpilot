@@ -1,8 +1,10 @@
 import { AgentPlanner } from "../../src/Agents/planner/AgentPlanner";
-import { PlanExecutor } from "../../src/Agents/planner/PlanExecutor";
-import { toolRegistry } from "../../src/Agents/registry/ToolRegistry";
+import { agentLLM } from "../../src/Agents/agent";
 import { performanceTestRunner } from "./utils/PerformanceTestRunner";
-import { PERFORMANCE_BASELINES, PERFORMANCE_TEST_CONFIG } from "./config/performanceBaselines";
+import {
+  PERFORMANCE_BASELINES,
+  PERFORMANCE_TEST_CONFIG,
+} from "./config/performanceBaselines";
 
 jest.mock("../../src/Agents/agent");
 jest.mock("../../src/config/logger");
@@ -31,7 +33,6 @@ describe("Agent Planning Performance Tests", () => {
         ],
       };
 
-      const { agentLLM } = require("../../src/Agents/agent");
       agentLLM.callLLM = jest.fn().mockResolvedValue(mockLLMResponse);
 
       const result = await performanceTestRunner.runTest(
@@ -80,12 +81,17 @@ describe("Agent Planning Performance Tests", () => {
       const mockLLMResponse = {
         workflow: [
           { action: "get_balance", payload: { asset: "XLM" } },
-          { action: "swap_tool", payload: { from: "XLM", to: "USDC", amount: 100 } },
-          { action: "transfer", payload: { to: "recipient", amount: 50, asset: "USDC" } },
+          {
+            action: "swap_tool",
+            payload: { from: "XLM", to: "USDC", amount: 100 },
+          },
+          {
+            action: "transfer",
+            payload: { to: "recipient", amount: 50, asset: "USDC" },
+          },
         ],
       };
 
-      const { agentLLM } = require("../../src/Agents/agent");
       agentLLM.callLLM = jest.fn().mockResolvedValue(mockLLMResponse);
 
       const result = await performanceTestRunner.runTest(
@@ -149,17 +155,21 @@ describe("Agent Planning Performance Tests", () => {
       const mockLLMResponse = {
         workflow: [
           { action: "get_balance", payload: { asset: "XLM" } },
-          { action: "swap_tool", payload: { from: "XLM", to: "USDC", amount: 100 } },
+          {
+            action: "swap_tool",
+            payload: { from: "XLM", to: "USDC", amount: 100 },
+          },
         ],
       };
 
-      const { agentLLM } = require("../../src/Agents/agent");
-      agentLLM.callLLM = jest.fn().mockImplementation(
-        () =>
-          new Promise((resolve) =>
-            setTimeout(() => resolve(mockLLMResponse), 100)
-          )
-      );
+      agentLLM.callLLM = jest
+        .fn()
+        .mockImplementation(
+          () =>
+            new Promise((resolve) =>
+              setTimeout(() => resolve(mockLLMResponse), 100)
+            )
+        );
 
       const result = await performanceTestRunner.runTest(
         "LLM-Based Planning",
@@ -200,8 +210,10 @@ describe("Agent Planning Performance Tests", () => {
       const result = await performanceTestRunner.runTest(
         "Plan Validation",
         async () => {
-          // Access private method through any type assertion for testing
-          (agentPlanner as any).validatePlan(mockPlan);
+          // Access private method through type assertion for testing
+          (agentPlanner as unknown as Record<string, unknown>).validatePlan?.(
+            mockPlan
+          );
         },
         {
           iterations: 100,
@@ -221,12 +233,9 @@ describe("Agent Planning Performance Tests", () => {
   describe("Concurrent Planning Operations", () => {
     it("should handle concurrent plan creation efficiently", async () => {
       const mockLLMResponse = {
-        workflow: [
-          { action: "get_balance", payload: { asset: "XLM" } },
-        ],
+        workflow: [{ action: "get_balance", payload: { asset: "XLM" } }],
       };
 
-      const { agentLLM } = require("../../src/Agents/agent");
       agentLLM.callLLM = jest.fn().mockResolvedValue(mockLLMResponse);
 
       const result = await performanceTestRunner.runTest(
@@ -265,12 +274,9 @@ describe("Agent Planning Performance Tests", () => {
   describe("Memory Usage", () => {
     it("should not leak memory during repeated planning", async () => {
       const mockLLMResponse = {
-        workflow: [
-          { action: "get_balance", payload: { asset: "XLM" } },
-        ],
+        workflow: [{ action: "get_balance", payload: { asset: "XLM" } }],
       };
 
-      const { agentLLM } = require("../../src/Agents/agent");
       agentLLM.callLLM = jest.fn().mockResolvedValue(mockLLMResponse);
 
       const initialMemory = process.memoryUsage().heapUsed;

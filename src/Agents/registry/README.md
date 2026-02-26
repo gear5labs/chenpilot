@@ -1,6 +1,20 @@
+# Registry System
+
+This directory contains the dynamic registry systems for both tools and agents:
+
+- **Tool Registry** - Automatically discovers and integrates new tools without manual configuration
+- **Agent Registry** - Dynamically routes requests to specialized agents based on user intent
+
+## Quick Links
+
+- [Tool Registry Documentation](#tool-registry-system) (this file)
+- [Agent Registry Documentation](./AGENT_REGISTRY.md) - Dynamic agent selection
+
+---
+
 # Tool Registry System
 
-This directory contains the dynamic tool registry system that automatically discovers and integrates new tools without manual configuration.
+The tool registry system automatically discovers and integrates new tools without manual configuration.
 
 ## Architecture Overview
 

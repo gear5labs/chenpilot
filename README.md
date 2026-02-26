@@ -48,6 +48,46 @@ npm run dev
 
 ---
 
+## 📝 Logging System
+
+Chen Pilot includes an automated log rotation system with compression to efficiently manage log files.
+
+### Features
+
+- **Daily Rotation**: Logs automatically rotate at midnight
+- **Automatic Compression**: Old logs are compressed to `.gz` format (80-90% size reduction)
+- **Size-Based Rotation**: Logs also rotate when reaching 20MB
+- **Automatic Cleanup**: Old logs are deleted based on retention policies
+- **Sensitive Data Redaction**: Passwords, tokens, and private keys are automatically redacted
+
+### Log Files
+
+- `logs/application-YYYY-MM-DD.log` - All application logs (14 days retention)
+- `logs/error-YYYY-MM-DD.log` - Error logs only (30 days retention)
+- `logs/exceptions-YYYY-MM-DD.log` - Uncaught exceptions (30 days retention)
+- `logs/rejections-YYYY-MM-DD.log` - Unhandled promise rejections (30 days retention)
+
+### Configuration
+
+Set the log level in your `.env` file:
+
+```bash
+LOG_LEVEL=info  # Options: debug, info, warn, error
+```
+
+### Usage
+
+```typescript
+import { logInfo, logError, logWarn, logDebug } from "./config/logger";
+
+logInfo("User logged in", { userId: "123" });
+logError("Database error", error, { context: "user-service" });
+```
+
+For more details, see [src/config/LOGGING.md](src/config/LOGGING.md)
+
+---
+
 ## 🧹 Code Quality & Git Hooks
 
 This project uses **Husky**, **lint-staged**, and **commitlint** to enforce code quality and commit message standards.
@@ -142,6 +182,138 @@ The agent uses an intelligent workflow system that:
 - **Executes Tools:** Runs appropriate tools in sequence
 - **Manages State:** Tracks operation status and results
 - **Provides Feedback:** Returns structured responses
+
+For visual diagrams of how the **agents**, **tool registry**, and **external services** interact, see `ARCHITECTURE_DIAGRAMS.md` (Mermaid).
+
+---
+
+## SDK Idempotency for BTC → Stellar Swaps
+
+Use the SDK idempotency helpers to guarantee retries do not create duplicate intents.
+
+```ts
+import {
+  AgentClient,
+  createBtcToStellarSwapIdempotencyKey,
+  ChainId,
+} from "@chen-pilot/sdk-core";
+
+const client = new AgentClient({ baseUrl: "https://your-chenpilot-api" });
+
+const swapRequest = {
+  fromChain: ChainId.BITCOIN,
+  toChain: ChainId.STELLAR,
+  fromToken: "BTC",
+  toToken: "XLM",
+  amount: "0.01",
+  destinationAddress: "G...",
+};
+
+// Generate once, persist in your app state, and reuse on retries
+const idempotencyKey = createBtcToStellarSwapIdempotencyKey(
+  swapRequest,
+  "wallet-action-123"
+);
+
+await client.executeBtcToStellarSwap(swapRequest, {
+  userId: "user-uuid",
+  idempotencyKey,
+  maxRetries: 3,
+});
+```
+
+If a timeout/network failure happens, call `executeBtcToStellarSwap` again with the same `idempotencyKey`.
+
+---
+
+## SDK API Docs (TypeDoc)
+
+The SDK package includes TypeDoc configuration for automated HTML API reference generation.
+
+### Generate docs locally
+
+```bash
+cd packages/sdk
+npm install
+npm run docs
+```
+
+Generated output is written to:
+
+```bash
+packages/sdk/docs
+```
+
+### Automated publishing on push to `main`
+
+GitHub Actions workflow: `.github/workflows/sdk-docs.yml`
+
+On each push to `main`, the workflow:
+
+1. Installs SDK dependencies
+2. Runs `npm run docs` in `packages/sdk`
+3. Deploys the generated HTML docs to GitHub Pages
+
+---
+
+## Distributed Locking for Trade Execution
+
+The system uses Redis-based distributed locks to prevent race conditions when executing multiple trades for the same user concurrently.
+
+### How it works
+
+- **Lock Key Pattern**: `trade:{userId}` - Ensures one trade per user at a time
+- **Lock TTL**: 60 seconds with configurable retry strategy
+- **Atomic Operations**: Uses Redis SET with NX/EX and Lua scripts for safe lock/release
+- **Automatic Cleanup**: Locks auto-expire to prevent deadlocks
+
+### Lock Service Features
+
+- **Acquire Lock**: `acquireLock(resourceKey, identifier, options)`
+- **Release Lock**: `releaseLock(resourceKey, identifier)` - Only releases if owned by identifier
+- **Extend Lock**: `extendLock(resourceKey, identifier, ttl)` - For long-running operations
+- **Status Check**: `isLocked(resourceKey)` and `getLockInfo(resourceKey)`
+
+### Integration in Swap Tool
+
+The `SwapTool` automatically acquires a user-specific lock before executing trades:
+
+```typescript
+const lockKey = `trade:${userId}`;
+const lockResult = await lockService.acquireLock(lockKey, userId, {
+  ttl: 60000,
+  retryDelay: 200,
+  maxRetries: 15,
+});
+
+if (!lockResult.acquired) {
+  return this.createErrorResult(
+    "swap",
+    "Another trade is currently in progress for your account. Please wait a moment and try again."
+  );
+}
+
+// Execute trade with lock held...
+// Lock is automatically released in finally block
+```
+
+### Configuration
+
+Redis connection is configured via environment variables:
+
+```bash
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=optional
+REDIS_DB=0
+```
+
+### Error Handling
+
+- **Lock Acquisition Failure**: Returns user-friendly error message
+- **Redis Connection Issues**: Graceful fallback with error logging
+- **Lock Extension**: Supports long-running operations beyond initial TTL
+- **Automatic Release**: Locks auto-expire to prevent permanent locks
 
 ---
 

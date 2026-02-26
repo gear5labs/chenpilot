@@ -1,12 +1,15 @@
 {
-  "name": "@chen-pilot/sdk-core",
+  "name": "@chenpilot-experimental/sdk",
   "version": "0.1.0",
   "description": "Core SDK for Chen Pilot cross-chain operations",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "docs": "typedoc --options typedoc.json",
+    "test": "jest --config jest.config.js",
+    "test:watch": "jest --config jest.config.js --watch",
+    "test:coverage": "jest --config jest.config.js --coverage"
   },
   "keywords": [
     "defi",
@@ -14,9 +17,16 @@
     "sdk",
     "chen-pilot"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": "Chen Pilot",
+  "license": "MIT",
+  "dependencies": {
+    "@stellar/stellar-sdk": "^14.5.0",
+    "axios": "^1.6.0"
+  },
   "devDependencies": {
-    "typescript": "^5.7.3"
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "typescript": "^5.2.0"
   }
 }

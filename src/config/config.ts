@@ -65,6 +65,9 @@ export default {
     password: process.env.REDIS_PASSWORD || undefined,
     db: parseInt(process.env.REDIS_DB || "0"),
   },
+  kyc: {
+    defaultProvider: process.env.KYC_PROVIDER || "mock",
+  },
   jwt: {
     secret: process.env.JWT_SECRET || "secret-token",
     resetExpiry: process.env.JWT_RESET_EXPIRY || "1h",
@@ -100,5 +103,10 @@ export default {
       ),
       planExecution: parseInt(process.env.AGENT_PLAN_TIMEOUT || "180000", 10),
     },
+  },
+  admin: {
+    allowedIps: process.env.ADMIN_ALLOWED_IPS
+      ? process.env.ADMIN_ALLOWED_IPS.split(",").map((ip) => ip.trim())
+      : [],
   },
 };

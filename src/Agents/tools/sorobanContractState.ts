@@ -158,8 +158,7 @@ export class SorobanContractStateTool extends BaseTool<ContractStatePayload> {
               error,
             });
             methods[method] = {
-              error:
-                error instanceof Error ? error.message : "Query failed",
+              error: error instanceof Error ? error.message : "Query failed",
             };
           }
         }
@@ -184,8 +183,7 @@ export class SorobanContractStateTool extends BaseTool<ContractStatePayload> {
                 error,
               });
               state[key] = {
-                error:
-                  error instanceof Error ? error.message : "Query failed",
+                error: error instanceof Error ? error.message : "Query failed",
               };
             }
           }

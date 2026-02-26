@@ -6,9 +6,10 @@ jest.mock("../../src/config/logger");
 
 describe("SorobanContractStateTool", () => {
   let tool: SorobanContractStateTool;
-  const mockInvokeContract = sorobanService.invokeContract as jest.MockedFunction<
-    typeof sorobanService.invokeContract
-  >;
+  const mockInvokeContract =
+    sorobanService.invokeContract as jest.MockedFunction<
+      typeof sorobanService.invokeContract
+    >;
 
   beforeEach(() => {
     tool = new SorobanContractStateTool();
@@ -25,7 +26,9 @@ describe("SorobanContractStateTool", () => {
 
     it("should have DeFi-focused examples", () => {
       expect(tool.metadata.examples.length).toBeGreaterThan(0);
-      expect(tool.metadata.examples.some((ex) => ex.includes("reserves"))).toBe(true);
+      expect(tool.metadata.examples.some((ex) => ex.includes("reserves"))).toBe(
+        true
+      );
     });
   });
 
@@ -485,7 +488,9 @@ describe("SorobanContractStateTool", () => {
 
       expect(result.status).toBe("success");
       expect(result.data?.timestamp).toBeDefined();
-      expect(new Date(result.data?.timestamp as string).getTime()).toBeGreaterThan(0);
+      expect(
+        new Date(result.data?.timestamp as string).getTime()
+      ).toBeGreaterThan(0);
     });
 
     it("should include network in result", async () => {

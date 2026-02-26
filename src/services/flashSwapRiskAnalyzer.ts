@@ -82,9 +82,7 @@ export class FlashSwapRiskAnalyzer {
     };
   }
 
-  private async calculateLiquidityDepth(
-    params: SwapParams
-  ): Promise<number> {
+  private async calculateLiquidityDepth(params: SwapParams): Promise<number> {
     try {
       const orderbook = await this.server
         .orderbook(params.fromAsset, params.toAsset)
@@ -106,10 +104,7 @@ export class FlashSwapRiskAnalyzer {
     }
   }
 
-  private estimatePriceImpact(
-    amount: number,
-    liquidityDepth: number
-  ): number {
+  private estimatePriceImpact(amount: number, liquidityDepth: number): number {
     if (liquidityDepth === 0) return 100;
     return (amount / liquidityDepth) * 100;
   }
@@ -146,9 +141,22 @@ export class FlashSwapRiskAnalyzer {
 
       if (trades.records.length < 10) return 0.5;
 
-      const prices = trades.records.map((t) => parseFloat(t.price.n) / parseFloat(t.price.d));
+      const prices = trades.records
+        .filter(
+          (
+            t
+          ): t is (typeof trades.records)[0] & {
+            price: { n: string; d: string };
+          } => !!(t.price && t.price.n && t.price.d)
+        )
+        .map((t) => parseFloat(t.price!.n) / parseFloat(t.price!.d));
+
+      if (prices.length === 0) return 0.5;
+
       const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
-      const variance = prices.reduce((sum, p) => sum + Math.pow(p - avgPrice, 2), 0) / prices.length;
+      const variance =
+        prices.reduce((sum, p) => sum + Math.pow(p - avgPrice, 2), 0) /
+        prices.length;
       const stdDev = Math.sqrt(variance);
 
       return (stdDev / avgPrice) * 100;
@@ -165,14 +173,22 @@ export class FlashSwapRiskAnalyzer {
     volatility: number
   ): number {
     const impactScore = Math.min(priceImpact / 10, 1);
-    const liquidityScore = liquidityDepth < 1000 ? 0.8 : liquidityDepth < 10000 ? 0.4 : 0.1;
+    const liquidityScore =
+      liquidityDepth < 1000 ? 0.8 : liquidityDepth < 10000 ? 0.4 : 0.1;
     const spreadScore = Math.min(spread / 5, 1);
     const volatilityScore = Math.min(volatility / 10, 1);
 
-    return (impactScore * 0.4 + liquidityScore * 0.3 + spreadScore * 0.2 + volatilityScore * 0.1);
+    return (
+      impactScore * 0.4 +
+      liquidityScore * 0.3 +
+      spreadScore * 0.2 +
+      volatilityScore * 0.1
+    );
   }
 
-  private determineRiskLevel(sandwichRisk: number): "low" | "medium" | "high" | "critical" {
+  private determineRiskLevel(
+    sandwichRisk: number
+  ): "low" | "medium" | "high" | "critical" {
     if (sandwichRisk >= 0.7) return "critical";
     if (sandwichRisk >= 0.5) return "high";
     if (sandwichRisk >= 0.3) return "medium";

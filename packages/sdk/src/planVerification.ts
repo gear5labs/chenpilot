@@ -1,5 +1,6 @@
 import crypto from "crypto";
 
+/** Represents an execution plan returned by the AI agent */
 export interface ExecutionPlan {
   planId: string;
   steps: PlanStep[];
@@ -14,6 +15,7 @@ export interface ExecutionPlan {
   signedAt?: string;
 }
 
+/** A single step within an execution plan */
 export interface PlanStep {
   stepNumber: number;
   action: string;
@@ -23,6 +25,7 @@ export interface PlanStep {
   estimatedDuration?: number;
 }
 
+/** Result of the plan verification process */
 export interface VerificationResult {
   valid: boolean;
   errors: string[];
@@ -31,6 +34,7 @@ export interface VerificationResult {
   signatureValid: boolean;
 }
 
+/** Options for customizing plan verification */
 export interface VerificationOptions {
   requireSignature?: boolean;
   publicKey?: string;
@@ -38,16 +42,20 @@ export interface VerificationOptions {
 }
 
 /**
- * SDK-side plan verification to prevent backend tampering
- * This ensures the execution plan matches the original hash and signature
+ * SDK-side plan verification to prevent backend tampering.
+ * Ensures the execution plan matches the original hash and signature.
  */
 export class PlanVerifier {
   private readonly HASH_VERSION = "1.0.0";
   private readonly HASH_ALGORITHM = "sha256";
 
   /**
-   * Verify execution plan integrity before execution
-   * This is the main entry point for SDK verification
+   * Verifies the execution plan integrity before execution.
+   * Main entry point for SDK verification.
+   *
+   * @param plan - The execution plan to verify.
+   * @param options - Custom verification options.
+   * @returns Verification result including boolean validity and error messages.
    */
   verifyPlan(
     plan: ExecutionPlan,
@@ -86,7 +94,9 @@ export class PlanVerifier {
       if (!plan.signature) {
         errors.push("Signature required but not present in plan");
       } else if (!options.publicKey) {
-        warnings.push("Signature present but no public key provided for verification");
+        warnings.push(
+          "Signature present but no public key provided for verification"
+        );
       } else {
         signatureValid = this.verifySignature(
           plan.planHash,
@@ -198,7 +208,7 @@ export class PlanVerifier {
       verify.update(planHash);
       verify.end();
       return verify.verify(publicKey, signature, "base64");
-    } catch (error) {
+    } catch {
       return false;
     }
   }
@@ -265,7 +275,11 @@ export class PlanVerifier {
   }
 
   /**
-   * Compare two plans to detect modifications
+   * Compares two plans to detect any modifications.
+   *
+   * @param originalPlan - The originally created plan.
+   * @param currentPlan - The plan to verify against the original.
+   * @returns The difference report indicating if they are identical.
    */
   comparePlans(
     originalPlan: ExecutionPlan,
@@ -293,7 +307,11 @@ export class PlanVerifier {
     }
 
     // Compare each step
-    for (let i = 0; i < Math.max(originalPlan.steps.length, currentPlan.steps.length); i++) {
+    for (
+      let i = 0;
+      i < Math.max(originalPlan.steps.length, currentPlan.steps.length);
+      i++
+    ) {
       const origStep = originalPlan.steps[i];
       const currStep = currentPlan.steps[i];
 
@@ -313,7 +331,9 @@ export class PlanVerifier {
         );
       }
 
-      if (JSON.stringify(origStep.payload) !== JSON.stringify(currStep.payload)) {
+      if (
+        JSON.stringify(origStep.payload) !== JSON.stringify(currStep.payload)
+      ) {
         differences.push(`Step ${i + 1} payload modified`);
       }
     }
@@ -328,7 +348,11 @@ export class PlanVerifier {
 export const planVerifier = new PlanVerifier();
 
 /**
- * Convenience function for quick verification
+ * Convenience function for quick plan verification.
+ *
+ * @param plan - The execution plan to verify.
+ * @param options - Custom verification options.
+ * @returns Verification result including boolean validity and error messages.
  */
 export function verifyExecutionPlan(
   plan: ExecutionPlan,

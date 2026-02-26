@@ -1,4 +1,4 @@
-import { DataExportService, UserProfileExport } from "../../src/services/DataExportService";
+import { DataExportService } from "../../src/services/DataExportService";
 import { User } from "../../src/Auth/user.entity";
 import { Contact } from "../../src/Contacts/contact.entity";
 import { RefreshToken } from "../../src/Auth/refreshToken.entity";
@@ -11,9 +11,9 @@ jest.mock("../../src/config/logger");
 
 describe("DataExportService", () => {
   let dataExportService: DataExportService;
-  let mockUserRepository: any;
-  let mockContactRepository: any;
-  let mockRefreshTokenRepository: any;
+  let mockUserRepository: Record<string, unknown>;
+  let mockContactRepository: Record<string, unknown>;
+  let mockRefreshTokenRepository: Record<string, unknown>;
 
   beforeEach(() => {
     mockUserRepository = {
@@ -21,7 +21,7 @@ describe("DataExportService", () => {
     };
 
     mockContactRepository = {
-      find: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
     };
 
     mockRefreshTokenRepository = {
@@ -264,7 +264,8 @@ describe("DataExportService", () => {
       mockRefreshTokenRepository.find.mockResolvedValue([]);
       (memoryStore.get as jest.Mock).mockReturnValue([]);
 
-      const jsonString = await dataExportService.exportUserDataAsJSON("user-123");
+      const jsonString =
+        await dataExportService.exportUserDataAsJSON("user-123");
 
       expect(typeof jsonString).toBe("string");
       expect(() => JSON.parse(jsonString)).not.toThrow();
@@ -294,7 +295,8 @@ describe("DataExportService", () => {
       mockRefreshTokenRepository.find.mockResolvedValue([]);
       (memoryStore.get as jest.Mock).mockReturnValue([]);
 
-      const jsonString = await dataExportService.exportUserDataAsJSON("user-123");
+      const jsonString =
+        await dataExportService.exportUserDataAsJSON("user-123");
 
       expect(jsonString).toContain("\n");
       expect(jsonString).toContain("  ");

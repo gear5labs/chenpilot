@@ -18,7 +18,12 @@ This module implements a Redis-backed caching layer for Stellar asset prices, re
    - Path-finding for optimal swap routes
    - Orderbook depth analysis
 
-3. **PriceTool** (`../Agents/tools/price.ts`)
+3. **HorizonOperationStreamerService** (`horizonOperationStreamer.service.ts`)
+   - Streams Stellar Horizon operations in real time
+   - Detects large transfer/payment operations above a configured threshold
+   - Emits backend alert callbacks for downstream processing
+
+4. **PriceTool** (`../Agents/tools/price.ts`)
    - Agent-facing tool for price queries
    - Multiple operations: single price, batch prices, orderbook, stats
    - User-friendly interface for AI agents
@@ -26,18 +31,21 @@ This module implements a Redis-backed caching layer for Stellar asset prices, re
 ## Features
 
 ### Caching Strategy
+
 - **Default TTL**: 60 seconds (configurable)
 - **Cache Key Format**: `price:{FROM_ASSET}:{TO_ASSET}`
 - **Case-Insensitive**: Asset symbols normalized to uppercase
 - **Automatic Expiration**: Redis handles TTL automatically
 
 ### Performance Benefits
+
 - **Reduced Latency**: Cached prices return in <5ms vs 200-500ms for DEX queries
 - **Lower API Load**: Reduces calls to Stellar Horizon API
 - **Batch Operations**: Efficient multi-get for multiple price pairs
 - **Connection Pooling**: Persistent Redis connection with retry logic
 
 ### Supported Assets
+
 - XLM (Stellar Lumens)
 - USDC (Circle USD Coin)
 - USDT (Tether USD)
@@ -53,17 +61,45 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=
 REDIS_DB=0
+
+# Horizon operation alert streamer
+STELLAR_ALERT_STREAM_ENABLED=true
+STELLAR_ALERT_MIN_AMOUNT=1000
+STELLAR_ALERT_STREAM_RECONNECT_MS=5000
 ```
+
+## Horizon Operation Stream Alerts
+
+The backend starts a Horizon operation stream on server boot and emits alerts when
+large operations are detected.
+
+### Alert Trigger Rules
+
+- `payment`: compares `amount`
+- `create_account`: compares `starting_balance`
+- `path_payment_strict_send`: compares `source_amount`
+- `path_payment_strict_receive`: compares `destination_amount`
+
+If the amount is `>= STELLAR_ALERT_MIN_AMOUNT`, a large-operation alert is emitted.
+
+### Runtime Behavior
+
+- Stream starts with cursor `now` to avoid replaying historical operations
+- Uses automatic reconnect when stream errors occur
+- Logs each detected alert with operation metadata
 
 ### Redis Setup
 
 #### Local Development (Docker)
+
 ```bash
 docker run -d --name redis-cache -p 6379:6379 redis:7-alpine
 ```
 
 #### Production
+
 Use a managed Redis service:
+
 - AWS ElastiCache
 - Redis Cloud
 - Azure Cache for Redis
@@ -97,10 +133,10 @@ The PriceTool is automatically available to AI agents:
 
 ```typescript
 // Agent query examples:
-"What's the current price of XLM in USDC?"
-"Get price for 100 XLM to USDT"
-"Show me the orderbook for XLM/USDC"
-"Get cache statistics"
+"What's the current price of XLM in USDC?";
+"Get price for 100 XLM to USDT";
+"Show me the orderbook for XLM/USDC";
+"Get cache statistics";
 ```
 
 ### Integration with Swap Tool
@@ -111,11 +147,14 @@ The SwapTool automatically uses cached prices:
 import { swapTool } from "./Agents/tools/swap";
 
 // Swap operation will check cache first
-const result = await swapTool.execute({
-  from: "XLM",
-  to: "USDC",
-  amount: 100
-}, userId);
+const result = await swapTool.execute(
+  {
+    from: "XLM",
+    to: "USDC",
+    amount: 100,
+  },
+  userId
+);
 ```
 
 ## API Reference
@@ -123,38 +162,49 @@ const result = await swapTool.execute({
 ### PriceCacheService
 
 #### `getPrice(fromAsset: string, toAsset: string): Promise<PriceData | null>`
+
 Retrieve cached price for asset pair.
 
 #### `setPrice(fromAsset: string, toAsset: string, price: number, source: string, ttl?: number): Promise<void>`
+
 Cache a price with optional TTL.
 
 #### `getPrices(pairs: Array<{from: string, to: string}>): Promise<Map<string, PriceData | null>>`
+
 Batch retrieve multiple prices.
 
 #### `invalidatePrice(fromAsset: string, toAsset: string): Promise<void>`
+
 Remove cached price.
 
 #### `clearAll(): Promise<void>`
+
 Clear all cached prices.
 
 #### `getStats(): Promise<{totalKeys: number, memoryUsage: string}>`
+
 Get cache statistics.
 
 #### `healthCheck(): Promise<boolean>`
+
 Check Redis connection health.
 
 ### StellarPriceService
 
 #### `getPrice(fromAsset: string, toAsset: string, amount?: number): Promise<PriceQuote>`
+
 Get price quote with automatic caching.
 
 #### `getPrices(pairs: Array<{from: string, to: string, amount?: number}>): Promise<PriceQuote[]>`
+
 Get multiple price quotes.
 
 #### `getOrderbookDepth(fromAsset: string, toAsset: string, limit?: number): Promise<Orderbook>`
+
 Get orderbook bids and asks.
 
 #### `invalidatePrice(fromAsset: string, toAsset: string): Promise<void>`
+
 Invalidate cached price.
 
 ## Monitoring
@@ -175,6 +225,7 @@ console.log(`Redis status: ${healthy ? "connected" : "disconnected"}`);
 ### Logging
 
 The services use Winston logger for monitoring:
+
 - Cache hits/misses
 - Price fetches from DEX
 - Redis connection events
@@ -183,6 +234,7 @@ The services use Winston logger for monitoring:
 ## Testing
 
 Run tests:
+
 ```bash
 npm test tests/unit/price_cache.test.ts
 npm test tests/unit/stellar_price.test.ts
@@ -191,22 +243,26 @@ npm test tests/unit/stellar_price.test.ts
 ## Performance Metrics
 
 ### Latency Comparison
+
 - **Cached Price**: ~2-5ms
 - **DEX Query**: ~200-500ms
 - **Improvement**: 40-100x faster
 
 ### Cache Hit Rates
+
 - Expected: 70-90% for active trading pairs
 - Depends on TTL and query patterns
 
 ## Error Handling
 
 ### Redis Connection Failures
+
 - Automatic retry with exponential backoff
 - Graceful degradation (falls back to direct DEX queries)
 - Connection health monitoring
 
 ### Price Fetch Errors
+
 - Detailed error messages for liquidity issues
 - Trustline validation
 - Balance checks
@@ -236,6 +292,7 @@ npm test tests/unit/stellar_price.test.ts
 ## Troubleshooting
 
 ### Redis Connection Issues
+
 ```bash
 # Check Redis is running
 docker ps | grep redis
@@ -248,12 +305,14 @@ docker logs redis-cache
 ```
 
 ### Cache Not Working
+
 1. Verify Redis configuration in `.env.local`
 2. Check Redis connection in logs
 3. Test health check endpoint
 4. Verify TTL settings
 
 ### Price Fetch Failures
+
 1. Check Stellar network status
 2. Verify asset codes and issuers
 3. Check liquidity for asset pair

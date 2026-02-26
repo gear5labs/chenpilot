@@ -14,9 +14,16 @@ export class AgentLLM {
     prompt: string,
     userInput: string,
     asJson = true,
-    timeoutMs?: number
+    timeoutMs?: number | string,
+    traceId?: string
   ): Promise<unknown> {
-    const timeout = timeoutMs || config.agent.timeouts.llmCall;
+    // If timeoutMs is actually a traceId (string), swap the parameters
+    const actualTimeoutMs =
+      typeof timeoutMs === "string" ? undefined : timeoutMs;
+    const actualTraceId =
+      typeof timeoutMs === "string" ? timeoutMs : traceId || "";
+
+    const timeout = actualTimeoutMs || config.agent.timeouts.llmCall;
     const memoryContext = memoryStore.get(agentId).join("\n");
     const fullPrompt = `${
       memoryContext ? "Previous context:\n" + memoryContext + "\n\n" : ""
@@ -24,7 +31,12 @@ export class AgentLLM {
       asJson ? "\n\nPlease respond with valid JSON only." : ""
     }`;
 
-    logger.debug("Starting LLM call", { agentId, timeout, asJson });
+    logger.debug("Starting LLM call", {
+      agentId,
+      timeout,
+      asJson,
+      traceId: actualTraceId,
+    });
 
     try {
       const message = await withTimeout(

@@ -138,7 +138,7 @@ export class DataExportService {
     }
   }
 
-  private async getContactsByUserId(userId: string): Promise<Contact[]> {
+  private async getContactsByUserId(): Promise<Contact[]> {
     return this.contactRepository.find({
       order: { createdAt: "DESC" },
     });

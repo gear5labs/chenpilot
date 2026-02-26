@@ -46,7 +46,9 @@ router.get(
       return res.status(500).json({
         success: false,
         message:
-          error instanceof Error ? error.message : "Failed to export profile data",
+          error instanceof Error
+            ? error.message
+            : "Failed to export profile data",
       });
     }
   }
@@ -74,12 +76,16 @@ router.get(
 
       logger.info("User profile download requested", { userId });
 
-      const exportBuffer = await dataExportService.exportUserDataAsBuffer(userId);
+      const exportBuffer =
+        await dataExportService.exportUserDataAsBuffer(userId);
 
       const filename = `${userName}_profile_export_${new Date().toISOString().split("T")[0]}.json`;
 
       res.setHeader("Content-Type", "application/json");
-      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${filename}"`
+      );
       res.setHeader("Content-Length", exportBuffer.length.toString());
 
       logger.info("User profile download completed", {

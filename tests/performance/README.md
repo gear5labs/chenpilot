@@ -56,27 +56,27 @@ Performance thresholds are defined in `config/performanceBaselines.ts`:
 
 ### Agent Planning
 
-| Operation | Mean | P95 | P99 | Max |
-|-----------|------|-----|-----|-----|
-| Simple Plan | 500ms | 800ms | 1000ms | 1500ms |
+| Operation    | Mean   | P95    | P99    | Max    |
+| ------------ | ------ | ------ | ------ | ------ |
+| Simple Plan  | 500ms  | 800ms  | 1000ms | 1500ms |
 | Complex Plan | 1500ms | 2500ms | 3000ms | 4000ms |
-| With LLM | 3000ms | 5000ms | 6000ms | 8000ms |
+| With LLM     | 3000ms | 5000ms | 6000ms | 8000ms |
 
 ### Agent Execution
 
-| Operation | Mean | P95 | P99 | Max |
-|-----------|------|-----|-----|-----|
-| Single Step | 300ms | 500ms | 700ms | 1000ms |
-| Multi-Step | 1000ms | 1500ms | 2000ms | 3000ms |
-| With Tools | 2000ms | 3500ms | 4500ms | 6000ms |
+| Operation   | Mean   | P95    | P99    | Max    |
+| ----------- | ------ | ------ | ------ | ------ |
+| Single Step | 300ms  | 500ms  | 700ms  | 1000ms |
+| Multi-Step  | 1000ms | 1500ms | 2000ms | 3000ms |
+| With Tools  | 2000ms | 3500ms | 4500ms | 6000ms |
 
 ### Tool Execution
 
-| Operation | Mean | P95 | P99 | Max |
-|-----------|------|-----|-----|-----|
-| Lightweight | 100ms | 200ms | 300ms | 500ms |
-| Standard | 500ms | 800ms | 1000ms | 1500ms |
-| Heavy | 2000ms | 3000ms | 4000ms | 5000ms |
+| Operation   | Mean   | P95    | P99    | Max    |
+| ----------- | ------ | ------ | ------ | ------ |
+| Lightweight | 100ms  | 200ms  | 300ms  | 500ms  |
+| Standard    | 500ms  | 800ms  | 1000ms | 1500ms |
+| Heavy       | 2000ms | 3000ms | 4000ms | 5000ms |
 
 ## Test Configuration
 
@@ -285,7 +285,7 @@ const result = await performanceTestRunner.runTest(
 );
 
 // Access metrics
-result.metrics.forEach(m => {
+result.metrics.forEach((m) => {
   console.log(`Duration: ${m.duration}ms`);
   console.log(`Memory: ${m.memoryUsage?.heapUsed}bytes`);
 });
