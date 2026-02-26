@@ -1,10 +1,8 @@
-declare function require(moduleName: string): any;
 declare const process: { cwd: () => string };
 
 import { MemoryStore } from "../../src/Agents/memory/memory";
-
-const fs = require("fs");
-const path = require("path");
+import * as fs from "fs";
+import * as path from "path";
 
 describe("MemoryStore", () => {
   let storageDirectory: string;

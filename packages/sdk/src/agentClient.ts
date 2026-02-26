@@ -152,7 +152,10 @@ function toSwapQuery(request: CrossChainSwapRequest): string {
   ].join(" ");
 }
 
-function createTimedSignal(timeoutMs: number, externalSignal?: AbortSignalLike) {
+function createTimedSignal(
+  timeoutMs: number,
+  externalSignal?: AbortSignalLike
+) {
   const controller = new AbortController() as unknown as AbortControllerLike;
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -184,8 +187,7 @@ export class AgentClient {
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? 15_000;
     this.defaultMaxRetries = options.defaultMaxRetries ?? 3;
     this.defaultRetryDelayMs = options.defaultRetryDelayMs ?? 500;
-    const runtimeFetch =
-      (globalThis as unknown as { fetch?: FetchLike }).fetch;
+    const runtimeFetch = (globalThis as unknown as { fetch?: FetchLike }).fetch;
     const selectedFetch = options.fetchFn ?? runtimeFetch;
 
     if (!selectedFetch) {
@@ -227,7 +229,10 @@ export class AgentClient {
             "Content-Type": "application/json",
             "Idempotency-Key": idempotencyKey,
           },
-          body: JSON.stringify({ userId: request.userId, query: request.query }),
+          body: JSON.stringify({
+            userId: request.userId,
+            query: request.query,
+          }),
           signal: timedSignal.signal,
         });
 
@@ -236,7 +241,10 @@ export class AgentClient {
           const body = await response.text().catch(() => "");
           const message = body || `HTTP ${response.status}`;
 
-          if (!RETRIABLE_STATUS_CODES.has(response.status) || attempts >= maxRetries) {
+          if (
+            !RETRIABLE_STATUS_CODES.has(response.status) ||
+            attempts >= maxRetries
+          ) {
             throw new AgentRequestError(
               `Agent query failed: ${message}`,
               idempotencyKey,
@@ -262,13 +270,15 @@ export class AgentClient {
           (error.name === "AbortError" || error.message.includes("aborted"));
         const isNetwork =
           error instanceof TypeError ||
-          (error instanceof Error && error.message.toLowerCase().includes("network"));
+          (error instanceof Error &&
+            error.message.toLowerCase().includes("network"));
 
         if (error instanceof AgentRequestError) {
           throw error;
         }
 
-        lastErrorMessage = error instanceof Error ? error.message : String(error);
+        lastErrorMessage =
+          error instanceof Error ? error.message : String(error);
 
         if (!(isAbort || isNetwork) || attempts >= maxRetries) {
           throw new AgentRequestError(
@@ -307,7 +317,8 @@ export class AgentClient {
     }
 
     const idempotencyKey =
-      options.idempotencyKey ?? createBtcToStellarSwapIdempotencyKey(swapRequest);
+      options.idempotencyKey ??
+      createBtcToStellarSwapIdempotencyKey(swapRequest);
 
     return this.query<T>({
       userId: options.userId,

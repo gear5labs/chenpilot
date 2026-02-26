@@ -44,7 +44,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  * Applied to AI queries and wallet-related operations.
  * Limit: 20 requests per minute per IP.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+
 const sensitiveLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
   limit: 20,
@@ -118,53 +118,53 @@ app.post("/signup", async (req, res, next) => {
 app.use("/auth", authRoutes);
 
 app.post("/query", sensitiveLimiter, async (req, res, next) => {
-/**
- * @swagger
- * /query:
- *   post:
- *     summary: Send a natural-language query to the AI agent
- *     tags: [AI Agent]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - userId
- *               - query
- *             properties:
- *               userId:
- *                 type: string
- *                 format: uuid
- *                 description: ID of the authenticated user
- *               query:
- *                 type: string
- *                 description: Natural language command (e.g. "swap 100 XLM to USDC")
- *     responses:
- *       200:
- *         description: Query processed successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 result:
- *                   type: object
- *       401:
- *         description: Invalid credentials
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       422:
- *         description: Invalid query
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- */
-// app.post("/query", async (req, res, next) => {
+  /**
+   * @swagger
+   * /query:
+   *   post:
+   *     summary: Send a natural-language query to the AI agent
+   *     tags: [AI Agent]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - userId
+   *               - query
+   *             properties:
+   *               userId:
+   *                 type: string
+   *                 format: uuid
+   *                 description: ID of the authenticated user
+   *               query:
+   *                 type: string
+   *                 description: Natural language command (e.g. "swap 100 XLM to USDC")
+   *     responses:
+   *       200:
+   *         description: Query processed successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 result:
+   *                   type: object
+   *       401:
+   *         description: Invalid credentials
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ErrorResponse'
+   *       422:
+   *         description: Invalid query
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ErrorResponse'
+   */
+  // app.post("/query", async (req, res, next) => {
   try {
     const { userId, query } = req.body;
 
@@ -185,6 +185,7 @@ app.post("/query", sensitiveLimiter, async (req, res, next) => {
 });
 
 app.use("/api", routes);
+app.use("/api/prompts", promptRoutes);
 
 app.use(ErrorHandler);
 

@@ -97,7 +97,10 @@ export default {
     timeouts: {
       llmCall: parseInt(process.env.AGENT_LLM_TIMEOUT || "30000", 10),
       toolExecution: parseInt(process.env.AGENT_TOOL_TIMEOUT || "60000", 10),
-      agentExecution: parseInt(process.env.AGENT_EXECUTION_TIMEOUT || "120000", 10),
+      agentExecution: parseInt(
+        process.env.AGENT_EXECUTION_TIMEOUT || "120000",
+        10
+      ),
       planExecution: parseInt(process.env.AGENT_PLAN_TIMEOUT || "180000", 10),
     },
   },

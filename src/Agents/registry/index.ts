@@ -28,3 +28,11 @@ export type {
 
 // Prompt generator
 export { PromptGenerator } from "./PromptGenerator";
+
+// Agent registry
+export { AgentRegistry, agentRegistry } from "./AgentRegistry";
+export type {
+  AgentDefinition,
+  AgentMetadata,
+  ParsedIntent,
+} from "./AgentRegistry";

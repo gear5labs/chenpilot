@@ -74,17 +74,21 @@ export class HorizonOperationStreamerService {
   constructor(options: HorizonOperationStreamerOptions = {}) {
     this.server =
       options.server ??
-      ((new StellarSdk.Horizon.Server(
+      (new StellarSdk.Horizon.Server(
         config.stellar.horizonUrl
-      ) as unknown) as HorizonServerLike);
+      ) as unknown as HorizonServerLike);
 
-    this.enabled = options.enabled ?? process.env.STELLAR_ALERT_STREAM_ENABLED !== "false";
+    this.enabled =
+      options.enabled ?? process.env.STELLAR_ALERT_STREAM_ENABLED !== "false";
     this.minAmount =
       options.minAmount ??
       Number.parseFloat(process.env.STELLAR_ALERT_MIN_AMOUNT || "1000");
     this.reconnectDelayMs =
       options.reconnectDelayMs ??
-      Number.parseInt(process.env.STELLAR_ALERT_STREAM_RECONNECT_MS || "5000", 10);
+      Number.parseInt(
+        process.env.STELLAR_ALERT_STREAM_RECONNECT_MS || "5000",
+        10
+      );
   }
 
   start(): void {
@@ -252,4 +256,5 @@ export class HorizonOperationStreamerService {
   }
 }
 
-export const horizonOperationStreamerService = new HorizonOperationStreamerService();
+export const horizonOperationStreamerService =
+  new HorizonOperationStreamerService();
