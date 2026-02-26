@@ -23,7 +23,7 @@ const intent: ParsedIntent = {
   category: "defi",
   keywords: ["swap", "trade"],
   confidence: 0.9,
-  rawInput: "I want to swap 100 USDC for ETH"
+  rawInput: "I want to swap 100 USDC for ETH",
 };
 
 const agent = agentRegistry.getAgentByIntent(intent);
@@ -33,6 +33,7 @@ const result = await agent.handle(intent.rawInput, userId);
 ### 2. Sophisticated Scoring Algorithm
 
 Agents are scored based on:
+
 - **Category match** (100 points) - Exact category match
 - **Keyword match** (10 points each) - Exact keyword matches
 - **Partial keyword match** (5 points each) - Substring matches
@@ -44,13 +45,13 @@ Agents are scored based on:
 
 ```typescript
 interface AgentMetadata {
-  name: string;              // Unique identifier
-  description: string;       // Human-readable description
-  category: string;          // Agent category (defi, nft, general)
-  version: string;           // Version
-  capabilities: string[];    // List of capabilities
-  keywords: string[];        // Keywords for matching
-  priority: number;          // Priority (higher = preferred)
+  name: string; // Unique identifier
+  description: string; // Human-readable description
+  category: string; // Agent category (defi, nft, general)
+  version: string; // Version
+  capabilities: string[]; // List of capabilities
+  keywords: string[]; // Keywords for matching
+  priority: number; // Priority (higher = preferred)
 }
 ```
 
@@ -64,16 +65,20 @@ interface AgentMetadata {
 ## Files Added (6 files)
 
 ### Core Implementation
+
 - ✅ `src/Agents/registry/AgentRegistry.ts` (318 lines) - Core registry with intent-based routing
 
 ### Tests
+
 - ✅ `src/Agents/registry/__tests__/AgentRegistry.test.ts` (441 lines) - Comprehensive test suite
 - ✅ `src/Agents/registry/__tests__/jest.config.js` - Test configuration
 
 ### Examples
+
 - ✅ `src/Agents/registry/examples/agentRegistryExample.ts` (234 lines) - Working examples
 
 ### Documentation
+
 - ✅ `src/Agents/registry/AGENT_REGISTRY.md` (450+ lines) - Complete API reference
 - ✅ `src/Agents/registry/AGENT_REGISTRY_QUICK_REFERENCE.md` - Quick start guide
 
@@ -93,19 +98,23 @@ getAgentByIntent(intent: ParsedIntent): AgentDefinition | undefined
 ### Supporting Methods
 
 **Registration:**
+
 - `register(agent)` - Register new agent
 - `setDefaultAgent(name)` - Set default fallback
 
 **Selection:**
+
 - `getAgent(name)` - Get specific agent
 
 **Discovery:**
+
 - `getAllAgents()` - Get all enabled agents
 - `getAgentsByCategory(category)` - Get agents by category
 - `searchAgents(query)` - Search agents
 - `getCategories()` - Get all categories
 
 **Management:**
+
 - `setAgentEnabled(name, enabled)` - Enable/disable agent
 - `unregister(name)` - Remove agent
 - `getStats()` - Get registry statistics
@@ -271,6 +280,7 @@ None - This is a new feature addition that doesn't modify existing code.
 ## ✅ Ready for Review
 
 This implementation is production-ready and meets all requirements:
+
 - ✅ Core `getAgentByIntent` method implemented
 - ✅ All tests passing (37/37)
 - ✅ Comprehensive documentation

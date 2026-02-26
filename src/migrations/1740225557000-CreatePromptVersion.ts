@@ -16,7 +16,7 @@ export class CreatePromptVersion1740225557000 implements MigrationInterface {
         "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
         "updatedAt" TIMESTAMP NOT NULL DEFAULT now(),
         CONSTRAINT "PK_prompt_version" PRIMARY KEY ("id")
-      )`,
+      )`
     );
 
     await queryRunner.query(
@@ -29,12 +29,12 @@ export class CreatePromptVersion1740225557000 implements MigrationInterface {
         "metadata" jsonb,
         "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
         CONSTRAINT "PK_prompt_metric" PRIMARY KEY ("id")
-      )`,
+      )`
     );
 
     await queryRunner.query(
       `ALTER TABLE "prompt_metric" ADD CONSTRAINT "FK_prompt_metric_version" 
-       FOREIGN KEY ("promptVersionId") REFERENCES "prompt_version"("id") ON DELETE CASCADE`,
+       FOREIGN KEY ("promptVersionId") REFERENCES "prompt_version"("id") ON DELETE CASCADE`
     );
   }
 

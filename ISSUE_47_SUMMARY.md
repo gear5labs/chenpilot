@@ -11,6 +11,7 @@ Successfully implemented the `AgentRegistry` with dynamic agent selection based 
 **File**: `src/Agents/registry/AgentRegistry.ts` (318 lines)
 
 Key features:
+
 - ✅ `getAgentByIntent(intent)` - Core method for intent-based agent selection
 - ✅ Sophisticated scoring algorithm (category, keywords, capabilities, priority)
 - ✅ Agent registration and lifecycle management
@@ -24,6 +25,7 @@ Key features:
 **File**: `src/Agents/registry/__tests__/AgentRegistry.test.ts` (441 lines)
 
 Results:
+
 - ✅ 37 tests, all passing
 - ✅ 100% coverage of core functionality
 - ✅ Tests for registration, intent matching, scoring, search, management
@@ -38,6 +40,7 @@ Tests:       37 passed, 37 total
 **File**: `src/Agents/registry/examples/agentRegistryExample.ts` (234 lines)
 
 Includes:
+
 - ✅ Mock specialized agents (DeFi, NFT, General)
 - ✅ Intent parsing demonstration
 - ✅ Dynamic routing examples
@@ -49,6 +52,7 @@ Includes:
 **File**: `src/Agents/registry/AGENT_REGISTRY.md` (450+ lines)
 
 Contains:
+
 - ✅ Architecture overview
 - ✅ Complete API reference
 - ✅ Usage examples
@@ -61,6 +65,7 @@ Contains:
 **File**: `src/Agents/registry/index.ts`
 
 Added exports:
+
 - ✅ `AgentRegistry` class
 - ✅ `agentRegistry` singleton
 - ✅ `AgentDefinition` type
@@ -76,7 +81,7 @@ const intent: ParsedIntent = {
   category: "defi",
   keywords: ["swap", "trade"],
   confidence: 0.9,
-  rawInput: "I want to swap 100 USDC for ETH"
+  rawInput: "I want to swap 100 USDC for ETH",
 };
 
 const agent = agentRegistry.getAgentByIntent(intent);
@@ -86,6 +91,7 @@ const agent = agentRegistry.getAgentByIntent(intent);
 ### Scoring Algorithm
 
 Agents scored by:
+
 1. **Category match** (100 pts) - Exact category
 2. **Keyword match** (10 pts each) - Exact keywords
 3. **Partial match** (5 pts each) - Substring matches
@@ -97,13 +103,13 @@ Agents scored by:
 
 ```typescript
 interface AgentMetadata {
-  name: string;              // Unique identifier
-  description: string;       // Description
-  category: string;          // Category (defi, nft, general)
-  version: string;           // Version
-  capabilities: string[];    // List of capabilities
-  keywords: string[];        // Keywords for matching
-  priority: number;          // Priority (higher preferred)
+  name: string; // Unique identifier
+  description: string; // Description
+  category: string; // Category (defi, nft, general)
+  version: string; // Version
+  capabilities: string[]; // List of capabilities
+  keywords: string[]; // Keywords for matching
+  priority: number; // Priority (higher preferred)
 }
 ```
 
@@ -120,19 +126,23 @@ This is the main method requested in Issue #47, enabling dynamic agent selection
 ### Supporting Methods
 
 **Registration**:
+
 - `register(agent)` - Register new agent
 - `setDefaultAgent(name)` - Set default fallback
 
 **Selection**:
+
 - `getAgent(name)` - Get specific agent
 
 **Discovery**:
+
 - `getAllAgents()` - Get all enabled agents
 - `getAgentsByCategory(category)` - Get by category
 - `searchAgents(query)` - Search agents
 - `getCategories()` - Get all categories
 
 **Management**:
+
 - `setAgentEnabled(name, enabled)` - Enable/disable
 - `unregister(name)` - Remove agent
 - `getStats()` - Get statistics
@@ -178,11 +188,13 @@ const result = await agent.handle(intent.rawInput, "user123");
 ## Testing
 
 Run tests:
+
 ```bash
 npx jest --config src/Agents/registry/__tests__/jest.config.js
 ```
 
 All 37 tests pass:
+
 - ✅ Agent registration and validation
 - ✅ Intent-based selection (core feature)
 - ✅ Scoring algorithm
@@ -250,6 +262,7 @@ return await agent.handle(userInput, userId);
 ## Status
 
 ✅ **COMPLETE** - All requirements met:
+
 - ✅ Core `getAgentByIntent` method implemented
 - ✅ Dynamic agent selection based on intent
 - ✅ Support for specialized agents (DeFi, NFT, General)

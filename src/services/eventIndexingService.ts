@@ -4,7 +4,7 @@ export interface DecodedEvent {
   id: string;
   contractId: string;
   topic: string[];
-  value: any;
+  value: unknown;
   ledger: number;
   ledgerClosedAt: string;
 }
@@ -21,7 +21,7 @@ export class EventIndexingService {
    * Priority: High
    */
   async fetchContractEvents(
-    contractId: string, 
+    contractId: string,
     startLedger: number
   ): Promise<DecodedEvent[]> {
     try {

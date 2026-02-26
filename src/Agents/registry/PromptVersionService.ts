@@ -29,7 +29,7 @@ export class PromptVersionService {
     success: boolean,
     userId?: string,
     responseTime?: number,
-    metadata?: Record<string, any>
+    metadata?: Record<string, unknown>
   ): Promise<void> {
     await this.metricRepo.save({
       promptVersionId,

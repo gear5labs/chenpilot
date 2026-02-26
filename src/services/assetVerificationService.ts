@@ -18,7 +18,10 @@ export class AssetVerificationService {
    * Requirement: Verify asset against home_domain and TOML files.
    * Priority: High
    */
-  async verifyAsset(assetCode: string, issuerAddress: string): Promise<VerificationResult> {
+  async verifyAsset(
+    assetCode: string,
+    issuerAddress: string
+  ): Promise<VerificationResult> {
     try {
       // 1. Fetch Issuer Account to get home_domain
       const issuerAccount = await this.horizonServer.loadAccount(issuerAddress);
@@ -28,7 +31,7 @@ export class AssetVerificationService {
         return {
           isSafe: false,
           status: "UNVERIFIED",
-          details: "No home_domain set on issuer account."
+          details: "No home_domain set on issuer account.",
         };
       }
 
@@ -38,14 +41,15 @@ export class AssetVerificationService {
       // 3. Verify Asset is listed in TOML
       const verifiedAssets = toml.CURRENCIES || [];
       const isListed = verifiedAssets.some(
-        (curr: any) => curr.code === assetCode && curr.issuer === issuerAddress
+        (curr: Record<string, unknown>) =>
+          curr.code === assetCode && curr.issuer === issuerAddress
       );
 
       if (isListed) {
         return {
           isSafe: true,
           domain: homeDomain,
-          status: "VERIFIED"
+          status: "VERIFIED",
         };
       }
 
@@ -53,15 +57,15 @@ export class AssetVerificationService {
         isSafe: false,
         domain: homeDomain,
         status: "MALICIOUS",
-        details: "Asset issuer claims domain but asset is not listed in TOML file."
+        details:
+          "Asset issuer claims domain but asset is not listed in TOML file.",
       };
-
     } catch (error) {
       console.error("Asset verification error:", error);
       return {
         isSafe: false,
         status: "UNVERIFIED",
-        details: "Verification failed due to network or TOML resolution error."
+        details: "Verification failed due to network or TOML resolution error.",
       };
     }
   }

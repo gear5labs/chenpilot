@@ -10,7 +10,6 @@ export default class QaService {
     input: string,
     context: Record<string, unknown>
   ): Promise<string> {
-
     const contextString = JSON.stringify(context, null, 2);
 
     const prompt = `
@@ -30,6 +29,8 @@ ${contextString}
     `;
 
     const result = await agentLLM.callLLM(userId, prompt, input);
-    return result;
+    return (
+      (result as Record<string, unknown>)?.response || String(result) || ""
+    );
   }
 }
