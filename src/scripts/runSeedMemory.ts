@@ -9,10 +9,10 @@ import { seedMemoryData, verifySeededData } from "./seedAgentMemory";
 try {
   console.log("Starting agent memory seeding...");
   seedMemoryData();
-  
+
   console.log("\nVerifying seeded data...");
   const isValid = verifySeededData();
-  
+
   if (isValid) {
     console.log("\n✓ Memory seeding completed successfully!");
     process.exit(0);

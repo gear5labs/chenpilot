@@ -4,7 +4,6 @@ import { Contact } from "../Contacts/contact.entity";
 import { User } from "../Auth/user.entity";
 import { RefreshToken } from "../Auth/refreshToken.entity";
 import { AgentTool } from "../Agents/tools/agent-tool.entity";
-
 import { WebhookIdempotency } from "../Gateway/webhookIdempotency.entity";
 import { AuditLog } from "../AuditLog/auditLog.entity";
 

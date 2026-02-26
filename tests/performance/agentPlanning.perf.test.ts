@@ -1,4 +1,5 @@
 import { AgentPlanner } from "../../src/Agents/planner/AgentPlanner";
+import { agentLLM } from "../../src/Agents/agent";
 import { performanceTestRunner } from "./utils/PerformanceTestRunner";
 import {
   PERFORMANCE_BASELINES,
@@ -32,9 +33,6 @@ describe("Agent Planning Performance Tests", () => {
         ],
       };
 
-      const { agentLLM } = jest.requireActual("../../src/Agents/agent") as {
-        agentLLM: { callLLM: jest.Mock };
-      };
       agentLLM.callLLM = jest.fn().mockResolvedValue(mockLLMResponse);
 
       const result = await performanceTestRunner.runTest(
@@ -94,9 +92,6 @@ describe("Agent Planning Performance Tests", () => {
         ],
       };
 
-      const { agentLLM } = jest.requireActual("../../src/Agents/agent") as {
-        agentLLM: { callLLM: jest.Mock };
-      };
       agentLLM.callLLM = jest.fn().mockResolvedValue(mockLLMResponse);
 
       const result = await performanceTestRunner.runTest(
@@ -167,9 +162,6 @@ describe("Agent Planning Performance Tests", () => {
         ],
       };
 
-      const { agentLLM } = jest.requireActual("../../src/Agents/agent") as {
-        agentLLM: { callLLM: jest.Mock };
-      };
       agentLLM.callLLM = jest
         .fn()
         .mockImplementation(
@@ -219,7 +211,9 @@ describe("Agent Planning Performance Tests", () => {
         "Plan Validation",
         async () => {
           // Access private method through type assertion for testing
-          (agentPlanner as Record<string, unknown>).validatePlan(mockPlan);
+          (agentPlanner as unknown as Record<string, unknown>).validatePlan?.(
+            mockPlan
+          );
         },
         {
           iterations: 100,
@@ -242,9 +236,6 @@ describe("Agent Planning Performance Tests", () => {
         workflow: [{ action: "get_balance", payload: { asset: "XLM" } }],
       };
 
-      const { agentLLM } = jest.requireActual("../../src/Agents/agent") as {
-        agentLLM: { callLLM: jest.Mock };
-      };
       agentLLM.callLLM = jest.fn().mockResolvedValue(mockLLMResponse);
 
       const result = await performanceTestRunner.runTest(
@@ -286,9 +277,6 @@ describe("Agent Planning Performance Tests", () => {
         workflow: [{ action: "get_balance", payload: { asset: "XLM" } }],
       };
 
-      const { agentLLM } = jest.requireActual("../../src/Agents/agent") as {
-        agentLLM: { callLLM: jest.Mock };
-      };
       agentLLM.callLLM = jest.fn().mockResolvedValue(mockLLMResponse);
 
       const initialMemory = process.memoryUsage().heapUsed;

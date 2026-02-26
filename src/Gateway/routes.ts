@@ -14,6 +14,7 @@ import {
 import logger from "../config/logger";
 import authRoutes from "../Auth/auth.routes";
 import dataExportRoutes from "../services/dataExport.routes";
+import horizonProxyRoutes from "./horizonProxy.routes";
 import auditLogRoutes from "../AuditLog/auditLog.routes";
 import { stellarLiquidityTool } from "../Agents/tools/stellarLiquidityTool";
 import { authenticateToken } from "../Auth/auth.middleware";
@@ -50,6 +51,8 @@ router.use("/auth", authRoutes);
 // Mount data export routes
 router.use("/export", dataExportRoutes);
 
+// Mount Horizon proxy routes (authenticated)
+router.use("/horizon", horizonProxyRoutes);
 // Mount audit log routes
 router.use("/audit", auditLogRoutes);
 
