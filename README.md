@@ -226,6 +226,67 @@ If a timeout/network failure happens, call `executeBtcToStellarSwap` again with 
 
 ---
 
+## Distributed Locking for Trade Execution
+
+The system uses Redis-based distributed locks to prevent race conditions when executing multiple trades for the same user concurrently.
+
+### How it works
+
+- **Lock Key Pattern**: `trade:{userId}` - Ensures one trade per user at a time
+- **Lock TTL**: 60 seconds with configurable retry strategy
+- **Atomic Operations**: Uses Redis SET with NX/EX and Lua scripts for safe lock/release
+- **Automatic Cleanup**: Locks auto-expire to prevent deadlocks
+
+### Lock Service Features
+
+- **Acquire Lock**: `acquireLock(resourceKey, identifier, options)`
+- **Release Lock**: `releaseLock(resourceKey, identifier)` - Only releases if owned by identifier
+- **Extend Lock**: `extendLock(resourceKey, identifier, ttl)` - For long-running operations
+- **Status Check**: `isLocked(resourceKey)` and `getLockInfo(resourceKey)`
+
+### Integration in Swap Tool
+
+The `SwapTool` automatically acquires a user-specific lock before executing trades:
+
+```typescript
+const lockKey = `trade:${userId}`;
+const lockResult = await lockService.acquireLock(lockKey, userId, {
+  ttl: 60000,
+  retryDelay: 200,
+  maxRetries: 15,
+});
+
+if (!lockResult.acquired) {
+  return this.createErrorResult(
+    "swap",
+    "Another trade is currently in progress for your account. Please wait a moment and try again."
+  );
+}
+
+// Execute trade with lock held...
+// Lock is automatically released in finally block
+```
+
+### Configuration
+
+Redis connection is configured via environment variables:
+
+```bash
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=optional
+REDIS_DB=0
+```
+
+### Error Handling
+
+- **Lock Acquisition Failure**: Returns user-friendly error message
+- **Redis Connection Issues**: Graceful fallback with error logging
+- **Lock Extension**: Supports long-running operations beyond initial TTL
+- **Automatic Release**: Locks auto-expire to prevent permanent locks
+
+---
+
 ## Contributing
 
 - Fork the repository
