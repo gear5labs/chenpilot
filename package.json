@@ -17,11 +17,13 @@
     "migration:generate": "npm run typeorm migration:generate -- -d src/config/Datasource.ts -p src/migrations/",
     "cleanup:tokens": "ts-node src/scripts/cleanupTokens.ts",
     "build": "tsc",
-    "prepare": "husky"
+    "prepare": "husky",
+    "gen:docs": "node scripts/generateToolDocs.mjs"
   },
   "lint-staged": {
-    "*.{ts,js}": "eslint --fix",
-    "*.{ts,js,json,md}": "prettier --write"
+    "*.{ts,js,mjs}": "eslint --fix",
+    "src/Agents/tools/*.ts": "npm run gen:docs",
+    "*.{ts,js,mjs,json,md}": "prettier --write"
   },
   "keywords": [],
   "author": "",
