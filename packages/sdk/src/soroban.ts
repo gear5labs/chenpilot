@@ -33,6 +33,23 @@ interface JsonRpcResponse<T> {
   error?: { code: number; message: string };
 }
 
+interface JsonRpcRequest {
+  jsonrpc: "2.0";
+  id: number;
+  method: string;
+  params: unknown;
+}
+
+export interface BatchRequest {
+  method: string;
+  params: unknown;
+}
+
+export interface BatchResult<T> {
+  result?: T;
+  error?: { code: number; message: string };
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_RPC_URLS: Record<SorobanNetwork, string> = {
@@ -74,6 +91,53 @@ async function fetchRpc<T>(
   }
 
   return json.result;
+}
+
+/**
+ * Execute multiple RPC requests in a single batch HTTP request.
+ * Uses JSON-RPC 2.0 batch protocol to combine requests.
+ *
+ * @param rpcUrl - The RPC endpoint URL
+ * @param requests - Array of RPC requests to batch
+ * @param fetcher - Optional fetch implementation
+ * @returns Array of results corresponding to input requests
+ */
+async function fetchBatchRpc<T>(
+  rpcUrl: string,
+  requests: BatchRequest[],
+  fetcher: typeof fetch
+): Promise<BatchResult<T>[]> {
+  if (requests.length === 0) {
+    return [];
+  }
+
+  // Build batch request with unique IDs
+  const jsonRpcRequests: JsonRpcRequest[] = requests.map((req, index) => ({
+    jsonrpc: "2.0",
+    id: index + 1,
+    method: req.method,
+    params: req.params,
+  }));
+
+  const resp = await fetcher(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(jsonRpcRequests),
+  });
+
+  if (!resp.ok) {
+    throw new Error(`RPC HTTP ${resp.status}: ${resp.statusText}`);
+  }
+
+  const responses = (await resp.json()) as JsonRpcResponse<T>[];
+
+  // Return results in original request order
+  return responses
+    .sort((a, b) => a.id - b.id)
+    .map((response) => ({
+      result: response.result,
+      error: response.error,
+    }));
 }
 
 function formatEvents(raw: RpcEvent[]): ExecutionLogEntry[] {
@@ -142,4 +206,161 @@ export async function getExecutionLogs(
     errorMessage:
       status === "FAILED" ? `Transaction failed: ${params.txHash}` : null,
   };
+}
+
+/**
+ * Batch request builder for executing multiple execution log queries
+ * in a single HTTP request to optimize network usage.
+ *
+ * @example
+ * const batch = new SorobanBatchBuilder("testnet")
+ *   .addTransaction("tx-hash-1")
+ *   .addTransaction("tx-hash-2");
+ *
+ * const results = await batch.execute();
+ */
+export class SorobanBatchBuilder {
+  private txHashes: string[] = [];
+  private network: SorobanNetwork;
+  private rpcUrl?: string;
+
+  constructor(network: SorobanNetwork, rpcUrl?: string) {
+    this.network = network;
+    this.rpcUrl = rpcUrl;
+  }
+
+  /**
+   * Add a transaction hash to the batch
+   * @param txHash - Transaction hash to query
+   * @returns This builder for chaining
+   */
+  addTransaction(txHash: string): SorobanBatchBuilder {
+    if (!txHash || typeof txHash !== "string") {
+      throw new Error("Invalid transaction hash");
+    }
+    this.txHashes.push(txHash);
+    return this;
+  }
+
+  /**
+   * Add multiple transaction hashes to the batch
+   * @param txHashes - Array of transaction hashes
+   * @returns This builder for chaining
+   */
+  addTransactions(txHashes: string[]): SorobanBatchBuilder {
+    for (const hash of txHashes) {
+      this.addTransaction(hash);
+    }
+    return this;
+  }
+
+  /**
+   * Get the current number of transactions in the batch
+   */
+  size(): number {
+    return this.txHashes.length;
+  }
+
+  /**
+   * Clear all transactions from the batch
+   */
+  clear(): void {
+    this.txHashes = [];
+  }
+
+  /**
+   * Execute the batch request and retrieve all execution logs
+   * @param fetcher - Optional fetch implementation
+   * @returns Array of execution logs in the same order as added
+   */
+  async execute(
+    fetcher: typeof fetch = globalThis.fetch
+  ): Promise<ExecutionLog[]> {
+    if (this.txHashes.length === 0) {
+      return [];
+    }
+
+    const rpcUrl = resolveRpcUrl(this.network, this.rpcUrl);
+
+    // Build batch requests
+    const batchRequests: BatchRequest[] = this.txHashes.map((hash) => ({
+      method: "getTransaction",
+      params: { hash },
+    }));
+
+    try {
+      const results = await fetchBatchRpc<RpcGetTransactionResult>(
+        rpcUrl,
+        batchRequests,
+        fetcher
+      );
+
+      // Map results back to ExecutionLog format
+      return results.map((result, index) => {
+        const txHash = this.txHashes[index];
+
+        if (result.error) {
+          return {
+            txHash,
+            status: "NOT_FOUND",
+            ledger: null,
+            createdAt: null,
+            returnValue: null,
+            events: [],
+            errorMessage: `RPC error ${result.error.code}: ${result.error.message}`,
+          };
+        }
+
+        if (!result.result) {
+          return {
+            txHash,
+            status: "NOT_FOUND",
+            ledger: null,
+            createdAt: null,
+            returnValue: null,
+            events: [],
+            errorMessage: "RPC returned no result",
+          };
+        }
+
+        const raw = result.result;
+
+        if (raw.status === "NOT_FOUND") {
+          return {
+            txHash,
+            status: "NOT_FOUND",
+            ledger: null,
+            createdAt: null,
+            returnValue: null,
+            events: [],
+            errorMessage: `Transaction not found: ${txHash}`,
+          };
+        }
+
+        const status = raw.status === "SUCCESS" ? "SUCCESS" : "FAILED";
+
+        return {
+          txHash,
+          status,
+          ledger: raw.ledger ?? null,
+          createdAt: raw.createdAt ?? null,
+          returnValue: raw.returnValue ?? null,
+          events: formatEvents(raw.events ?? []),
+          errorMessage:
+            status === "FAILED" ? `Transaction failed: ${txHash}` : null,
+        };
+      });
+    } catch (error) {
+      // If batch fails, return error for all transactions
+      return this.txHashes.map((txHash) => ({
+        txHash,
+        status: "NOT_FOUND",
+        ledger: null,
+        createdAt: null,
+        returnValue: null,
+        events: [],
+        errorMessage: `Batch request failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+      }));
+    }
+  }
 }
