@@ -53,24 +53,31 @@ export class IntentAgent {
       }
 
       const promptVersion = await promptGenerator.generateIntentPrompt();
-      promptVersionId = (promptVersion as any).id;
+      promptVersionId = (promptVersion as Record<string, unknown>).id as string;
 
-      const prompt = (typeof promptVersion === "string"
-        ? promptVersion
-        : promptVersion
+      const prompt = (
+        typeof promptVersion === "string" ? promptVersion : promptVersion
       )
         .replace("{{USER_INPUT}}", input)
         .replace("{{USER_ID}}", userId);
 
-      const parsed = await agentLLM.callLLM(userId, prompt, "", true, traceId);
-      const steps: WorkflowStep[] = Array.isArray(parsed?.workflow)
-        ? parsed.workflow
+      const parsed = await agentLLM.callLLM(
+        userId,
+        prompt,
+        "",
+        true,
+        undefined,
+        traceId
+      );
+      const steps: WorkflowStep[] = Array.isArray(
+        (parsed as Record<string, unknown>)?.workflow
+      )
+        ? ((parsed as Record<string, unknown>).workflow as WorkflowStep[])
         : [];
 
       if (promptVersionId) {
-        const { promptVersionService } = await import(
-          "../registry/PromptVersionService"
-        );
+        const { promptVersionService } =
+          await import("../registry/PromptVersionService");
         await promptVersionService.trackMetric(
           promptVersionId,
           steps.length > 0,
@@ -82,7 +89,11 @@ export class IntentAgent {
       memoryStore.add(userId, `User: ${input}`);
       return { workflow: steps };
     } catch (err) {
-      logger.error("LLM workflow parsing failed", { traceId, error: err, userId });
+      logger.error("LLM workflow parsing failed", {
+        traceId,
+        error: err,
+        userId,
+      });
       return { workflow: [] };
     }
   }

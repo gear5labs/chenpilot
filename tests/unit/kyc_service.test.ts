@@ -83,7 +83,9 @@ describe("KycService", () => {
 
     const service = new KycService(factory);
     const created = await service.submitVerification(baseRequest);
-    const status = await service.getVerificationStatus(created.providerReferenceId);
+    const status = await service.getVerificationStatus(
+      created.providerReferenceId
+    );
 
     expect(status).not.toBeNull();
     expect(status?.providerReferenceId).toBe(created.providerReferenceId);

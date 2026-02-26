@@ -99,7 +99,10 @@ export class AgentPlanner {
       true
     );
 
-    if (!response.workflow || !Array.isArray(response.workflow)) {
+    if (
+      !(response as Record<string, unknown>)?.workflow ||
+      !Array.isArray((response as Record<string, unknown>).workflow)
+    ) {
       throw new Error("Invalid LLM response: missing workflow array");
     }
 

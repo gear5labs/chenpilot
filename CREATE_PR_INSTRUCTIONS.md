@@ -7,6 +7,7 @@ Your branch `feat/sdk-automated-tests` has been successfully pushed to GitHub.
 ## 🔗 Create PR on GitHub
 
 ### Option 1: Use the Direct Link (Easiest)
+
 GitHub provided a direct link to create the PR. Click this link:
 
 ```
@@ -14,11 +15,13 @@ https://github.com/Benalex8797/chenpilot/pull/new/feat/sdk-automated-tests
 ```
 
 ### Option 2: Through GitHub UI
+
 1. Go to: https://github.com/Benalex8797/chenpilot
 2. You should see a yellow banner saying "feat/sdk-automated-tests had recent pushes"
 3. Click the "Compare & pull request" button
 
 ### Option 3: Manual Navigation
+
 1. Go to: https://github.com/Benalex8797/chenpilot/pulls
 2. Click "New pull request"
 3. Select base: `master` (or `main`)
@@ -28,18 +31,22 @@ https://github.com/Benalex8797/chenpilot/pull/new/feat/sdk-automated-tests
 ## 📝 Fill in PR Details
 
 ### Title
+
 ```
 [SDK] Implement Automated Unit Tests for Soroban RPC Client
 ```
 
 ### Description
+
 Copy the entire content from `PR_DESCRIPTION.md` file (it's already prepared for you)
 
 Or use this shortened version:
-```markdown
+
+````markdown
 Closes #160
 
 ## Summary
+
 Implemented comprehensive automated unit tests for the SDK's internal Soroban RPC client with mock responses for ledger lookups.
 
 - 86 unit tests with 83.91% coverage
@@ -47,17 +54,21 @@ Implemented comprehensive automated unit tests for the SDK's internal Soroban RP
 - Extensive documentation and developer guides
 
 ## Test Results
+
 ✅ All 86 tests passing
 ✅ ESLint and Prettier compliant
 ✅ 100% coverage on recovery engine
 
 ## How to Test
+
 ```bash
 npx jest --config packages/sdk/jest.config.js --coverage
 ```
+````
 
 See `PR_DESCRIPTION.md` for full details.
-```
+
+````
 
 ### Labels (if available)
 - `enhancement`
@@ -120,7 +131,7 @@ Before clicking "Create pull request":
    git checkout feat/sdk-automated-tests
    git pull origin master
    git push
-   ```
+````
 
 4. **Merge When Approved**
    - Wait for required approvals
@@ -130,6 +141,7 @@ Before clicking "Create pull request":
 ## 📞 Need Help?
 
 If you encounter any issues:
+
 1. Check `PR_CHECKLIST.md` for troubleshooting
 2. Review `ISSUE_160_IMPLEMENTATION.md` for details
 3. Refer to `packages/sdk/TESTING_GUIDE.md` for test info
@@ -137,6 +149,7 @@ If you encounter any issues:
 ## 🎉 You're All Set!
 
 Your implementation is production-ready with:
+
 - ✅ 86 passing tests
 - ✅ 83.91% code coverage
 - ✅ Comprehensive documentation

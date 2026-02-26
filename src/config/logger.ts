@@ -9,23 +9,19 @@ const SENSITIVE_FIELDS = ["pk", "privateKey", "password", "token", "secret"];
  * Recursively redacts sensitive data from objects
  */
 function redactSensitiveData(obj: unknown): unknown {
-  if (obj === null || obj === undefined) {
-    return obj;
-  }
+  if (obj === null || obj === undefined) return obj;
 
   if (Array.isArray(obj)) {
-    return obj.map((item) => redactSensitiveData(item));
+    return obj.map(redactSensitiveData);
   }
 
   if (typeof obj === "object") {
     const redacted: Record<string, unknown> = {};
     for (const key in obj as Record<string, unknown>) {
       if (Object.prototype.hasOwnProperty.call(obj, key)) {
-        if (SENSITIVE_FIELDS.includes(key)) {
-          redacted[key] = "[REDACTED]";
-        } else {
-          redacted[key] = redactSensitiveData((obj as Record<string, unknown>)[key]);
-        }
+        redacted[key] = SENSITIVE_FIELDS.includes(key)
+          ? "[REDACTED]"
+          : redactSensitiveData((obj as Record<string, unknown>)[key]);
       }
     }
     return redacted;
@@ -35,15 +31,13 @@ function redactSensitiveData(obj: unknown): unknown {
 }
 
 // Custom format to redact sensitive data
-const redactFormat = winston.format((info) => {
-  // Redact sensitive data from the main message if it's an object
+const redactFormat = winston.format((info: Record<string, unknown>) => {
   if (typeof info.message === "object") {
     info.message = redactSensitiveData(info.message);
   }
 
-  // Redact from metadata
   const { level, message, timestamp, ...meta } = info;
-  const redactedMeta = redactSensitiveData(meta) as Record<string, unknown>;
+  const redactedMeta = redactSensitiveData(meta);
 
   return {
     level,
@@ -63,37 +57,37 @@ const jsonFormat = winston.format.combine(
   winston.format.json()
 );
 
-// Create logs directory path
+// Logs directory
 const logsDir = path.join(process.cwd(), "logs");
 
-// Daily rotate file transport for all logs
+// Application logs
 const dailyRotateFileTransport = new DailyRotateFile({
   filename: path.join(logsDir, "application-%DATE%.log"),
   datePattern: "YYYY-MM-DD",
-  zippedArchive: true, // Compress old logs
-  maxSize: "20m", // Rotate when file reaches 20MB
-  maxFiles: "14d", // Keep logs for 14 days
+  zippedArchive: true,
+  maxSize: "20m",
+  maxFiles: "14d",
   format: jsonFormat,
-  auditFile: path.join(logsDir, ".application-audit.json"), // Track rotated files
-  createSymlink: true, // Create symlink to current log file
+  auditFile: path.join(logsDir, ".application-audit.json"),
+  createSymlink: true,
   symlinkName: "application-current.log",
 });
 
-// Daily rotate file transport for error logs only
+// Error-only logs
 const errorRotateFileTransport = new DailyRotateFile({
   level: "error",
   filename: path.join(logsDir, "error-%DATE%.log"),
   datePattern: "YYYY-MM-DD",
-  zippedArchive: true, // Compress old logs
-  maxSize: "20m", // Rotate when file reaches 20MB
-  maxFiles: "30d", // Keep error logs for 30 days
+  zippedArchive: true,
+  maxSize: "20m",
+  maxFiles: "30d",
   format: jsonFormat,
-  auditFile: path.join(logsDir, ".error-audit.json"), // Track rotated files
-  createSymlink: true, // Create symlink to current log file
+  auditFile: path.join(logsDir, ".error-audit.json"),
+  createSymlink: true,
   symlinkName: "error-current.log",
 });
 
-// Console transport for development
+// Console logs (dev)
 const consoleTransport = new winston.transports.Console({
   format: winston.format.combine(
     winston.format.colorize(),
@@ -104,10 +98,7 @@ const consoleTransport = new winston.transports.Console({
       const { timestamp, level, message, stack, ...meta } = info;
       let log = `${timestamp} [${level}]: ${message}`;
 
-      if (stack) {
-        log += `\n${stack}`;
-      }
-
+      if (stack) log += `\n${stack}`;
       if (Object.keys(meta).length > 0) {
         log += `\n${JSON.stringify(meta, null, 2)}`;
       }
@@ -117,7 +108,7 @@ const consoleTransport = new winston.transports.Console({
   ),
 });
 
-// Create Winston logger instance
+// Logger instance
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || "info",
   transports: [
@@ -129,12 +120,12 @@ const logger = winston.createLogger({
     new DailyRotateFile({
       filename: path.join(logsDir, "exceptions-%DATE%.log"),
       datePattern: "YYYY-MM-DD",
-      zippedArchive: true, // Compress old logs
-      maxSize: "20m", // Rotate when file reaches 20MB
-      maxFiles: "30d", // Keep exception logs for 30 days
+      zippedArchive: true,
+      maxSize: "20m",
+      maxFiles: "30d",
       format: jsonFormat,
-      auditFile: path.join(logsDir, ".exceptions-audit.json"), // Track rotated files
-      createSymlink: true, // Create symlink to current log file
+      auditFile: path.join(logsDir, ".exceptions-audit.json"),
+      createSymlink: true,
       symlinkName: "exceptions-current.log",
     }),
   ],
@@ -142,64 +133,58 @@ const logger = winston.createLogger({
     new DailyRotateFile({
       filename: path.join(logsDir, "rejections-%DATE%.log"),
       datePattern: "YYYY-MM-DD",
-      zippedArchive: true, // Compress old logs
-      maxSize: "20m", // Rotate when file reaches 20MB
-      maxFiles: "30d", // Keep rejection logs for 30 days
+      zippedArchive: true,
+      maxSize: "20m",
+      maxFiles: "30d",
       format: jsonFormat,
-      auditFile: path.join(logsDir, ".rejections-audit.json"), // Track rotated files
-      createSymlink: true, // Create symlink to current log file
+      auditFile: path.join(logsDir, ".rejections-audit.json"),
+      createSymlink: true,
       symlinkName: "rejections-current.log",
     }),
   ],
   exitOnError: false,
 });
 
-// Log rotation events
-dailyRotateFileTransport.on(
-  "rotate",
-  (oldFilename: string, newFilename: string) => {
-    logger.info("Log file rotated", { oldFilename, newFilename });
-  }
-);
+// Rotation events
+dailyRotateFileTransport.on("rotate", (oldFilename, newFilename) => {
+  logger.info("Log file rotated", { oldFilename, newFilename });
+});
 
-dailyRotateFileTransport.on("archive", (zipFilename: string) => {
+dailyRotateFileTransport.on("archive", (zipFilename) => {
   logger.info("Log file archived", { zipFilename });
 });
 
-dailyRotateFileTransport.on("logRemoved", (removedFilename: string) => {
+dailyRotateFileTransport.on("logRemoved", (removedFilename) => {
   logger.info("Old log file removed", { removedFilename });
 });
 
-errorRotateFileTransport.on(
-  "rotate",
-  (oldFilename: string, newFilename: string) => {
-    logger.info("Error log file rotated", { oldFilename, newFilename });
-  }
-);
-
-errorRotateFileTransport.on("archive", (zipFilename: string) => {
-  logger.info("Error log file archived", { zipFilename });
+errorRotateFileTransport.on("rotate", (oldFilename, newFilename) => {
+  logger.info("Error log file rotated", { oldFilename, newFilename });
 });
 
-errorRotateFileTransport.on("logRemoved", (removedFilename: string) => {
-  logger.info("Old error log file removed", { removedFilename });
-});
+// Helper functions
+export const logError = (
+  message: string,
+  error?: unknown,
+  meta?: Record<string, unknown>
+) => {
+  const errorInfo =
+    error instanceof Error
+      ? { error: error.message, stack: error.stack }
+      : error
+      ? { error: String(error) }
+      : {};
 
-// Helper functions for common log patterns
-export const logError = (message: string, error?: Error | unknown, meta?: Record<string, unknown>) => {
-  logger.error(message, { error: error?.message || error, stack: error?.stack, ...meta });
+  logger.error(message, { ...errorInfo, ...meta });
 };
 
-export const logInfo = (message: string, meta?: Record<string, unknown>) => {
+export const logInfo = (message: string, meta?: Record<string, unknown>) =>
   logger.info(message, meta);
-};
 
-export const logWarn = (message: string, meta?: Record<string, unknown>) => {
+export const logWarn = (message: string, meta?: Record<string, unknown>) =>
   logger.warn(message, meta);
-};
 
-export const logDebug = (message: string, meta?: Record<string, unknown>) => {
+export const logDebug = (message: string, meta?: Record<string, unknown>) =>
   logger.debug(message, meta);
-};
 
 export default logger;

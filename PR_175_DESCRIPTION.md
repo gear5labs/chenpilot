@@ -74,6 +74,7 @@ console.log("Protocol version:", status.protocol.version);
 ## Files Changed
 
 ### New Files
+
 - `packages/sdk/src/networkStatus.ts` - Core implementation
 - `packages/sdk/src/__tests__/networkStatus.test.ts` - Test suite
 - `packages/sdk/NETWORK_STATUS.md` - API documentation
@@ -83,6 +84,7 @@ console.log("Protocol version:", status.protocol.version);
 - `ISSUE_175_IMPLEMENTATION.md` - Implementation summary
 
 ### Modified Files
+
 - `packages/sdk/src/index.ts` - Added exports
 - `packages/sdk/src/types/index.ts` - Added type definitions
 - `packages/sdk/jest.config.js` - Fixed tsconfig path

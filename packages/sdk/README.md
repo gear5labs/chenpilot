@@ -1,62 +1,67 @@
-# Chen Pilot SDK
+# Chen Pilot SDK Core
 
-Core SDK for Chen Pilot cross-chain operations and Stellar utilities.
+Core SDK for Chen Pilot cross-chain operations with Stellar/Soroban support.
 
 ## Features
 
-- Cross-chain swap operations
-- Recovery engine for failed transactions
-- Plan verification utilities
-- Agent client for AI-powered operations
-- **Stellar Claimable Balance utilities** (search and claim)
-- Event subscription for Soroban contracts
+- **Network Status Checks**: Monitor Stellar network health, latency, and protocol version
+- **Event Subscriptions**: Subscribe to Soroban contract events
+- **Recovery Engine**: Handle cross-chain transaction failures and retries
+- **Plan Verification**: Verify and validate transaction plans
+- **TypeScript Support**: Full type definitions included
 
 ## Installation
 
 ```bash
-npm install @chenpilot-experimental/sdk
+npm install @chen-pilot/sdk-core
 ```
 
 ## Quick Start
 
-### Claimable Balances
+### Network Status
 
-Search for and claim pending claimable balances on Stellar:
+Check Stellar network health and status:
 
 ```typescript
-import {
-  searchClaimableBalances,
-  claimBalance,
-} from "@chenpilot-experimental/sdk";
+import { getNetworkStatus } from "@chen-pilot/sdk-core";
 
-// Search for claimable balances
-const balances = await searchClaimableBalances({
-  accountId: "GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-  network: "testnet",
-});
+const status = await getNetworkStatus({ network: "testnet" });
 
-console.log(`Found ${balances.length} claimable balances`);
-
-// Claim a balance
-const result = await claimBalance({
-  balanceId: balances[0].id,
-  claimantSecret: "SXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-  network: "testnet",
-});
-
-if (result.success) {
-  console.log(`Claimed! TX: ${result.transactionHash}`);
-}
+console.log("Network healthy:", status.health.isHealthy);
+console.log("Latest ledger:", status.health.latestLedger);
+console.log("Protocol version:", status.protocol.version);
 ```
 
-See [Claimable Balance Documentation](./src/CLAIMABLE_BALANCE_README.md) for detailed usage.
+See [NETWORK_STATUS.md](./NETWORK_STATUS.md) for complete documentation.
+
+### Event Subscriptions
+
+Subscribe to Soroban contract events:
+
+```typescript
+import { subscribeToEvents } from "@chen-pilot/sdk-core";
+
+const subscription = await subscribeToEvents({
+  network: "testnet",
+  contractIds: ["CABC1234567890"],
+  topicFilter: ["transfer"],
+});
+
+subscription.on("event", (event) => {
+  console.log("Event received:", event);
+});
+
+subscription.on("error", (error) => {
+  console.error("Subscription error:", error);
+});
+```
 
 ### Recovery Engine
 
-Handle failed cross-chain transactions:
+Handle cross-chain transaction failures:
 
 ```typescript
-import { RecoveryEngine } from "@chenpilot-experimental/sdk";
+import { RecoveryEngine } from "@chen-pilot/sdk-core";
 
 const engine = new RecoveryEngine({
   maxRetries: 3,
@@ -66,53 +71,47 @@ const engine = new RecoveryEngine({
 const result = await engine.recover(context);
 ```
 
-### Agent Client
+## API Documentation
 
-Interact with the AI agent:
+### Network Status
 
-```typescript
-import { AgentClient } from "@chenpilot-experimental/sdk";
+- `checkNetworkHealth(config)` - Check if network is reachable
+- `checkLedgerLatency(config)` - Check ledger latency
+- `getProtocolVersion(config)` - Get protocol version
+- `getNetworkStatus(config)` - Get complete network status
 
-const client = new AgentClient({
-  baseUrl: "https://api.chenpilot.com",
-  apiKey: "your-api-key",
-});
+See [NETWORK_STATUS.md](./NETWORK_STATUS.md) for details.
 
-const response = await client.chat("Swap 100 USDC to XLM");
-```
+### Event Subscriptions
 
-## Documentation
+- `subscribeToEvents(config)` - Subscribe to contract events
+- `SorobanEventSubscription` - Event subscription class
 
-- [Claimable Balance Guide](./src/CLAIMABLE_BALANCE_README.md) - Search and claim Stellar claimable balances
-- [Recovery Engine](./src/recovery.ts) - Handle failed transactions
-- [Plan Verification](./src/planVerification.ts) - Verify execution plans
-- [Event Subscription](./src/events.ts) - Subscribe to Soroban events
+### Recovery
+
+- `RecoveryEngine` - Cross-chain recovery engine
+- `RecoveryAction` - Recovery action types
+- `RecoveryContext` - Recovery context interface
 
 ## Examples
 
-Check the [examples](./examples) directory for complete usage examples:
+Check the `examples/` directory for complete usage examples:
 
-- [Claimable Balance Example](./examples/claimableBalanceExample.ts)
+- `networkStatus.example.ts` - Network status monitoring
+- More examples coming soon
 
-## API Reference
+## Testing
 
-### Claimable Balance Functions
+Run the test suite:
 
-- `searchClaimableBalances(options)` - Search for claimable balances
-- `claimBalance(options)` - Claim a specific balance
-- `getTotalClaimableAmount(options)` - Get total claimable amounts by asset
+```bash
+npm test
+```
 
-### Types
+Run with coverage:
 
-All TypeScript types are exported from the main entry point:
-
-```typescript
-import type {
-  ClaimableBalance,
-  ClaimBalanceResult,
-  RecoveryContext,
-  AgentResponse,
-} from "@chenpilot-experimental/sdk";
+```bash
+npm run test:coverage
 ```
 
 ## Development
@@ -123,6 +122,27 @@ Build the SDK:
 npm run build
 ```
 
+## TypeScript
+
+Full TypeScript support with comprehensive type definitions:
+
+```typescript
+import type {
+  NetworkStatus,
+  NetworkHealth,
+  LedgerLatency,
+  ProtocolVersion,
+  SorobanEvent,
+  EventSubscription,
+  RecoveryContext,
+  RecoveryResult,
+} from "@chen-pilot/sdk-core";
+```
+
 ## License
 
 ISC
+
+## Contributing
+
+See [CONTRIBUTING.md](../../CONTRIBUTING.md) for contribution guidelines.
