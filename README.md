@@ -48,6 +48,46 @@ npm run dev
 
 ---
 
+## 📝 Logging System
+
+Chen Pilot includes an automated log rotation system with compression to efficiently manage log files.
+
+### Features
+
+- **Daily Rotation**: Logs automatically rotate at midnight
+- **Automatic Compression**: Old logs are compressed to `.gz` format (80-90% size reduction)
+- **Size-Based Rotation**: Logs also rotate when reaching 20MB
+- **Automatic Cleanup**: Old logs are deleted based on retention policies
+- **Sensitive Data Redaction**: Passwords, tokens, and private keys are automatically redacted
+
+### Log Files
+
+- `logs/application-YYYY-MM-DD.log` - All application logs (14 days retention)
+- `logs/error-YYYY-MM-DD.log` - Error logs only (30 days retention)
+- `logs/exceptions-YYYY-MM-DD.log` - Uncaught exceptions (30 days retention)
+- `logs/rejections-YYYY-MM-DD.log` - Unhandled promise rejections (30 days retention)
+
+### Configuration
+
+Set the log level in your `.env` file:
+
+```bash
+LOG_LEVEL=info  # Options: debug, info, warn, error
+```
+
+### Usage
+
+```typescript
+import { logInfo, logError, logWarn, logDebug } from "./config/logger";
+
+logInfo("User logged in", { userId: "123" });
+logError("Database error", error, { context: "user-service" });
+```
+
+For more details, see [src/config/LOGGING.md](src/config/LOGGING.md)
+
+---
+
 ## 🧹 Code Quality & Git Hooks
 
 This project uses **Husky**, **lint-staged**, and **commitlint** to enforce code quality and commit message standards.
@@ -142,6 +182,8 @@ The agent uses an intelligent workflow system that:
 - **Executes Tools:** Runs appropriate tools in sequence
 - **Manages State:** Tracks operation status and results
 - **Provides Feedback:** Returns structured responses
+
+For visual diagrams of how the **agents**, **tool registry**, and **external services** interact, see `ARCHITECTURE_DIAGRAMS.md` (Mermaid).
 
 ---
 
