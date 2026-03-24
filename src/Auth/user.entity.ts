@@ -4,9 +4,14 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from "typeorm";
 
 @Entity()
+@Index("IDX_user_email", ["email"])
+@Index("IDX_user_address", ["address"])
+@Index("IDX_user_is_email_verified", ["isEmailVerified"])
+@Index("IDX_user_role", ["role"])
 export class User {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
@@ -15,12 +20,14 @@ export class User {
   name!: string;
 
   @Column({ type: "varchar", nullable: true, unique: true })
+  @Index("IDX_user_email_column")
   email?: string;
 
   @Column({ type: "varchar", nullable: true })
   password?: string;
 
   @Column({ type: "varchar" })
+  @Index("IDX_user_address_column")
   address!: string;
 
   @Column({ type: "varchar" })

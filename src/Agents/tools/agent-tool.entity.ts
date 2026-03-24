@@ -5,9 +5,12 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   DeleteDateColumn,
+  Index,
 } from "typeorm";
 
 @Entity()
+@Index("IDX_agent_tool_is_active", ["isActive"])
+@Index("IDX_agent_tool_deleted_at", ["deletedAt"])
 export class AgentTool {
   @PrimaryGeneratedColumn("uuid")
   id!: string;

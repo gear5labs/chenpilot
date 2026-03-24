@@ -53,9 +53,10 @@ export enum AuditSeverity {
 }
 
 @Entity()
-@Index(["userId", "createdAt"])
-@Index(["action", "createdAt"])
-@Index(["severity", "createdAt"])
+@Index("IDX_audit_log_user_created", ["userId", "createdAt"])
+@Index("IDX_audit_log_action_created", ["action", "createdAt"])
+@Index("IDX_audit_log_severity_created", ["severity", "createdAt"])
+@Index("IDX_audit_log_success", ["success"])
 export class AuditLog {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
