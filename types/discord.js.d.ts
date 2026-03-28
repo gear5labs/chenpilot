@@ -1,3 +1,4 @@
+// chenpilot/types/discord.js.d.ts
 declare module "discord.js" {
   export class Client {
     constructor(options: Record<string, unknown>);

@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 import * as os from "os";
+import * as crypto from "crypto";
 import AppDataSource from "../config/Datasource";
 import { User } from "../Auth/user.entity";
 import { stellarWebhookService } from "./webhook.service";
@@ -28,6 +29,47 @@ import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
 const router = Router();
 
 router.use(helmet());
+
+// --- WEBHOOK HMAC VERIFICATION ---
+
+/**
+ * Verify HMAC-SHA256 signature on incoming webhook requests.
+ * Expects the signature in the `x-webhook-signature` header as `sha256=<hex>`.
+ * Set WEBHOOK_SECRET in your environment to enable enforcement.
+ */
+function verifyWebhookSignature(req: Request, res: Response, next: () => void): void {
+  const secret = process.env.WEBHOOK_SECRET;
+  if (!secret) {
+    // If no secret is configured, skip verification (dev/test environments).
+    // In production, WEBHOOK_SECRET must be set.
+    logger.warn("WEBHOOK_SECRET not configured — skipping webhook signature verification");
+    next();
+    return;
+  }
+
+  const signature = req.headers["x-webhook-signature"] as string | undefined;
+  if (!signature) {
+    res.status(401).json({ success: false, message: "Missing webhook signature" });
+    return;
+  }
+
+  const rawBody = JSON.stringify(req.body);
+  const expected = "sha256=" + crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+
+  const sigBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+
+  if (
+    sigBuffer.length !== expectedBuffer.length ||
+    !crypto.timingSafeEqual(sigBuffer, expectedBuffer)
+  ) {
+    logger.warn("Webhook signature mismatch", { receivedSignature: signature });
+    res.status(401).json({ success: false, message: "Invalid webhook signature" });
+    return;
+  }
+
+  next();
+}
 
 // --- RATE LIMITING STRATEGIES ---
 
@@ -57,7 +99,7 @@ router.use("/horizon", horizonProxyRoutes);
 router.use("/audit", auditLogRoutes);
 
 // Public webhook endpoint for Stellar funding notifications
-router.post("/webhook/stellar/funding", async (req: Request, res: Response) => {
+router.post("/webhook/stellar/funding", verifyWebhookSignature, async (req: Request, res: Response) => {
   try {
     const result = await stellarWebhookService.processFundingWebhook(req);
 
@@ -84,7 +126,7 @@ router.post("/webhook/stellar/funding", async (req: Request, res: Response) => {
 });
 
 // Public webhook endpoint for Telegram
-router.post("/webhook/telegram", async (req: Request, res: Response) => {
+router.post("/webhook/telegram", verifyWebhookSignature, async (req: Request, res: Response) => {
   try {
     const result = await platformWebhookService.processTelegramWebhook(req);
 
@@ -118,7 +160,7 @@ router.post("/webhook/telegram", async (req: Request, res: Response) => {
 });
 
 // Public webhook endpoint for Discord
-router.post("/webhook/discord", async (req: Request, res: Response) => {
+router.post("/webhook/discord", verifyWebhookSignature, async (req: Request, res: Response) => {
   try {
     const result = await platformWebhookService.processDiscordWebhook(req);
 

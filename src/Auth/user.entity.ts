@@ -17,6 +17,7 @@ export class User {
   id!: string;
 
   @Column({ unique: true, type: "varchar" })
+  @Index()
   name!: string;
 
   @Column({ type: "varchar", nullable: true, unique: true })
@@ -49,6 +50,7 @@ export class User {
   tokenType!: string;
 
   @Column({ type: "varchar", default: "user" })
+  @Index()
   role!: string;
 
   @Column({ type: "varchar", nullable: true })
@@ -58,6 +60,7 @@ export class User {
   resetTokenExpiry?: Date;
 
   @CreateDateColumn()
+  @Index()
   createdAt!: Date;
 
   @UpdateDateColumn()

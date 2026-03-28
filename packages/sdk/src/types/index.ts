@@ -262,3 +262,64 @@ export interface NetworkStatus {
   /** Timestamp of the check. */
   checkedAt: number;
 }
+// ─── Stellar Metadata types ──────────────────────────────────────────────────
+
+/** Configuration for the metadata manager */
+export interface MetadataManagerConfig {
+  /** Horizon URL (defaults to public network) */
+  horizonUrl?: string;
+  /** Network passphrase (defaults to public network) */
+  networkPassphrase?: string;
+  /** Base fee in stroops */
+  baseFee?: number;
+}
+
+/** Parameters for setting metadata on an account */
+export interface MetadataSetParams {
+  /** Stellar account address */
+  accountId: string;
+  /** Metadata key (alphanumeric, underscores, hyphens; max 128 chars) */
+  key: string;
+  /** Metadata value (max 4KB as string) */
+  value: string;
+  /** Optional metadata type/category */
+  type?: string;
+  /** Optional expiration timestamp (unix seconds) */
+  expiresAt?: number;
+}
+
+/** Parameters for retrieving metadata */
+export interface MetadataGetParams {
+  /** Stellar account address */
+  accountId: string;
+  /** Metadata key to retrieve */
+  key: string;
+}
+
+/** Retrieved metadata entry */
+export interface MetadataEntry {
+  /** Metadata key */
+  key: string;
+  /** Metadata value */
+  value: string;
+  /** Optional metadata type/category */
+  type?: string;
+  /** Creation timestamp (unix seconds) */
+  createdAt: number;
+  /** Last update timestamp (unix seconds) */
+  updatedAt: number;
+  /** Optional expiration timestamp (unix seconds) */
+  expiresAt?: number;
+}
+
+/** Response from listing metadata */
+export interface MetadataListResponse {
+  /** Stellar account address */
+  accountId: string;
+  /** Array of metadata entries */
+  metadata: MetadataEntry[];
+  /** Total metadata entries for account */
+  total: number;
+  /** Whether more results are available (for pagination) */
+  hasMore: boolean;
+}

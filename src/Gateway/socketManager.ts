@@ -211,8 +211,13 @@ export class SocketManager {
         }
       });
 
-      // Handle subscription to transaction updates
+      // Handle subscription to transaction updates — requires prior authentication
       socket.on("subscribe:transactions", (transactionId?: string) => {
+        if (!client.userId) {
+          socket.emit("error", { message: "Authentication required before subscribing." });
+          logger.warn(`Unauthenticated client ${socket.id} attempted to subscribe to transactions`);
+          return;
+        }
         if (transactionId) {
           socket.join(`transaction:${transactionId}`);
           logger.info(
@@ -221,8 +226,13 @@ export class SocketManager {
         }
       });
 
-      // Handle subscription to bot updates
+      // Handle subscription to bot updates — requires prior authentication
       socket.on("subscribe:bot-alerts", (botId?: string) => {
+        if (!client.userId) {
+          socket.emit("error", { message: "Authentication required before subscribing." });
+          logger.warn(`Unauthenticated client ${socket.id} attempted to subscribe to bot alerts`);
+          return;
+        }
         if (botId) {
           socket.join(`bot:${botId}`);
           logger.info(`Client ${socket.id} subscribed to bot ${botId}`);

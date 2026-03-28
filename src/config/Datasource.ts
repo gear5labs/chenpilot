@@ -3,6 +3,7 @@ import config from "./config";
 import { Contact } from "../Contacts/contact.entity";
 import { User } from "../Auth/user.entity";
 import { RefreshToken } from "../Auth/refreshToken.entity";
+import { UserPreferences } from "../Auth/userPreferences.entity";
 import { AgentTool } from "../Agents/tools/agent-tool.entity";
 import { WebhookIdempotency } from "../Gateway/webhookIdempotency.entity";
 import { AuditLog } from "../AuditLog/auditLog.entity";
@@ -21,6 +22,7 @@ const dbOptions: DataSourceOptions = {
     Contact,
     User,
     RefreshToken,
+    UserPreferences,
     AgentTool,
     WebhookIdempotency,
     AuditLog,

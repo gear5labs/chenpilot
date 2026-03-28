@@ -1,3 +1,4 @@
+// chenpilot/types/telegraf.d.ts
 declare module "telegraf" {
   export class Telegraf {
     constructor(token: string);

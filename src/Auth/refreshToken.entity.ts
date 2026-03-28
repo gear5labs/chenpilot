@@ -30,9 +30,11 @@ export class RefreshToken {
   user!: User;
 
   @Column({ type: "timestamp" })
+  @Index()
   expiresAt!: Date;
 
   @Column({ type: "boolean", default: false })
+  @Index()
   isRevoked!: boolean;
 
   @Column({ type: "varchar", nullable: true })

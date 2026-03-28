@@ -1,15 +1,24 @@
+// chenpilot/src/Agents/planner/AgentPlanner.ts
 import { agentLLM } from "../agent";
 import { toolRegistry } from "../registry/ToolRegistry";
 import { WorkflowPlan, WorkflowStep } from "../types";
 import { parseSorobanIntent } from "./sorobanIntent";
 import { HashedPlan, planHashService } from "./planHash";
 import logger from "../../config/logger";
+import { RiskLevel } from "../../Auth/userPreferences.entity";
 
 export interface PlannerContext {
   userId: string;
   userInput: string;
   availableBalance?: Record<string, number>;
   constraints?: PlannerConstraints;
+  userPreferences?: {
+    riskLevel: RiskLevel;
+    preferredAssets: string[];
+    autoApproveSmallTransactions: boolean;
+    smallTransactionThreshold: number;
+    defaultSlippage: number | null;
+  };
 }
 
 export interface PlannerConstraints {
@@ -91,7 +100,10 @@ export class AgentPlanner {
 
   private async analyzeWithLLM(context: PlannerContext): Promise<WorkflowPlan> {
     const availableTools = toolRegistry.getToolMetadata();
-    const prompt = this.buildPlannerPrompt(availableTools);
+    const prompt = this.buildPlannerPrompt(
+      availableTools,
+      context.userPreferences
+    );
     const response = await agentLLM.callLLM(
       context.userId,
       prompt,
@@ -110,16 +122,21 @@ export class AgentPlanner {
   }
 
   private buildPlannerPrompt(
-    availableTools: Array<{ name: string; description: string }>
+    availableTools: Array<{ name: string; description: string }>,
+    userPreferences?: PlannerContext["userPreferences"]
   ): string {
     const toolDescriptions = availableTools
       .map((tool) => `- ${tool.name}: ${tool.description}`)
       .join("\n");
 
+    const riskWarning = userPreferences
+      ? `\n\nIMPORTANT USER CONSTRAINTS:\n- User's risk tolerance: ${userPreferences.riskLevel}\n- Preferred assets: ${userPreferences.preferredAssets.join(", ")}\n- Auto-approve threshold: ${userPreferences.smallTransactionThreshold}\n- Default slippage: ${userPreferences.defaultSlippage ?? "0.5"}%\n\nThe agent MUST respect these constraints. Do not suggest operations that exceed the user's risk tolerance.`
+      : "";
+
     return `You are a DeFi operation planner. Break down the user's request into executable steps.
 
 Available Tools:
-${toolDescriptions}
+${toolDescriptions}${riskWarning}
 
 Output JSON format:
 {

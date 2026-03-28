@@ -8,6 +8,7 @@ import routes from "./routes";
 import authRoutes from "./auth.routes";
 import { swaggerSpec } from "./swagger";
 import requestLogger from "../middleware/requestLogger";
+import { ipBlacklistMiddleware, ipBlacklistRoutes } from "../Security";
 
 import { authenticate } from "../Auth/auth";
 import UserService from "../Auth/user.service";
@@ -33,6 +34,7 @@ app.use(
 
 app.use(express.json());
 app.use(requestLogger);
+app.use(ipBlacklistMiddleware);
 
 // --- SWAGGER API DOCS ---
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -184,6 +186,7 @@ app.post("/query", sensitiveLimiter, async (req, res, next) => {
 });
 
 app.use("/api", routes);
+app.use("/api/security/blacklist", ipBlacklistRoutes);
 app.use("/api/prompts", promptRoutes);
 
 app.use(ErrorHandler);

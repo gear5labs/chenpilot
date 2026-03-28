@@ -1,3 +1,4 @@
+// chenpilot/types/nodemailer.d.ts
 declare module "nodemailer" {
   export interface Transporter {
     sendMail(

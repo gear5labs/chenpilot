@@ -1,5 +1,27 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
+/**
+ * Migration to add optimized database indexes for critical query paths
+ *
+ * This migration adds indexes to improve performance for:
+ * - User search by address (wallet lookups)
+ * - User search by email (authentication)
+ * - User search by role (RBAC)
+ * - User queries by createdAt (sorting/pagination)
+ * - Contact lookups by address
+ * - AgentTool filtering by isActive
+ * - RefreshToken queries by userId, expiresAt, and isRevoked
+ *
+ * Priority indexes:
+ * - IDX_user_address: User wallet address lookups (critical for transaction routing)
+ * - IDX_user_email: User authentication and password reset
+ * - IDX_user_role: Role-based access control queries
+ * - IDX_contact_address: Contact lookups for transaction recipients
+ * - IDX_agent_tool_is_active: Active tool filtering
+ * - IDX_refresh_token_user_id: User token management
+ * - IDX_refresh_token_expires_at: Expired token cleanup
+ * - IDX_refresh_token_is_revoked: Active token queries
+ */
 export class AddDatabaseIndexes1772200000000 implements MigrationInterface {
   name = "AddDatabaseIndexes1772200000000";
 

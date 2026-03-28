@@ -16,6 +16,7 @@ export class AgentTool {
   id!: string;
 
   @Column({ unique: true, type: "varchar" })
+  @Index()
   name!: string; // Unique tool name
 
   @Column({ type: "varchar" })
@@ -26,6 +27,7 @@ export class AgentTool {
   // Optional JSON object to store input schema, e.g. { assetCode: "USDC", depthLimit: 10 }
 
   @Column({ type: "boolean", default: true })
+  @Index()
   isActive!: boolean; // Admin toggle for enabling/disabling the tool
 
   @CreateDateColumn()

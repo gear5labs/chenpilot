@@ -1,3 +1,4 @@
+// chenpilot/src/Agents/agents/intentagent.ts
 import { validateQuery } from "../validationService";
 import { executionAgent } from "./exectutionagent";
 import { agentLLM } from "../agent";
@@ -8,6 +9,8 @@ import { memoryStore } from "../memory/memory";
 import { parseSorobanIntent } from "../planner/sorobanIntent";
 import logger from "../../config/logger";
 import { randomUUID } from "crypto";
+import { userPreferencesService } from "../../Auth/userPreferences.service";
+import { RiskLevel } from "../../Auth/userPreferences.entity";
 
 export class IntentAgent {
   private initialized = false;
@@ -27,7 +30,28 @@ export class IntentAgent {
       return { success: false, error: "Invalid request format" };
     }
 
-    const workflow = await this.planWorkflow(input, userId, traceId);
+    // Fetch user preferences and include in context
+    let userPreferences;
+    try {
+      userPreferences =
+        await userPreferencesService.getPreferencesForAgent(userId);
+      logger.debug("User preferences loaded", {
+        userId,
+        riskLevel: userPreferences.riskLevel,
+      });
+    } catch (error) {
+      logger.warn("Failed to load user preferences, using defaults", {
+        userId,
+        error,
+      });
+    }
+
+    const workflow = await this.planWorkflow(
+      input,
+      userId,
+      traceId,
+      userPreferences
+    );
     logger.info("Workflow planned", { traceId, workflow, userId });
     if (!workflow.workflow.length) {
       logger.warn("Empty workflow", { traceId, userId });
@@ -39,7 +63,14 @@ export class IntentAgent {
   private async planWorkflow(
     input: string,
     userId: string,
-    traceId: string
+    traceId: string,
+    userPreferences?: {
+      riskLevel: RiskLevel;
+      preferredAssets: string[];
+      autoApproveSmallTransactions: boolean;
+      smallTransactionThreshold: number;
+      defaultSlippage: number | null;
+    }
   ): Promise<WorkflowPlan> {
     const startTime = Date.now();
     let promptVersionId: string | undefined;
@@ -55,11 +86,17 @@ export class IntentAgent {
       const promptVersion = await promptGenerator.generateIntentPrompt();
       promptVersionId = (promptVersion as Record<string, unknown>).id as string;
 
+      // Build user preferences context for the prompt
+      const userConstraints = userPreferences
+        ? `\n\nUSER_CONSTRAINTS:\n- Risk Level: ${userPreferences.riskLevel}\n- Preferred Assets: ${userPreferences.preferredAssets.join(", ")}\n- Auto-approve small transactions (< ${userPreferences.smallTransactionThreshold}): ${userPreferences.autoApproveSmallTransactions ? "enabled" : "disabled"}\n- Default Slippage: ${userPreferences.defaultSlippage ?? "0.5"}%\n\nIMPORTANT: You MUST respect these user constraints when generating the workflow.`
+        : "";
+
       const prompt = (
         typeof promptVersion === "string" ? promptVersion : promptVersion
       )
         .replace("{{USER_INPUT}}", input)
-        .replace("{{USER_ID}}", userId);
+        .replace("{{USER_ID}}", userId)
+        .replace("{{USER_CONSTRAINTS}}", userConstraints);
 
       const parsed = await agentLLM.callLLM(
         userId,

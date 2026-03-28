@@ -1,3 +1,4 @@
+// chenpilot/src/Agents/planner/planHashExample.ts
 /**
  * Example demonstrating plan hash verification to prevent tampering
  * This shows how the system prevents hidden step injection attacks

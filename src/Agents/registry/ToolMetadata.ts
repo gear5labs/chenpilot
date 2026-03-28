@@ -52,4 +52,3 @@ export interface ToolRegistryEntry {
   enabled: boolean;
   lastUsed?: Date;
 }
-

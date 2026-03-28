@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+// chenpilot/tests/stellar.mock.ts
 import { jest } from "@jest/globals";
 
 export const mockStellarSdk: Record<string, any> = {

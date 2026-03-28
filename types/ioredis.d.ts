@@ -1,3 +1,4 @@
+// chenpilot/types/ioredis.d.ts
 declare module "ioredis" {
   export default class Redis {
     constructor(options?: Record<string, unknown>);

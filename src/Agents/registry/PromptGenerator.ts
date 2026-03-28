@@ -52,7 +52,7 @@ Examples:
 ${examples}
 
 User input: "{{USER_INPUT}}"
-User id: {{USER_ID}}
+User id: {{USER_ID}}{{USER_CONSTRAINTS}}
 
 Respond with valid JSON only.
 `;
