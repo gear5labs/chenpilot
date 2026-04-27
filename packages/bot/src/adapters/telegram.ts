@@ -2,6 +2,8 @@ import { Telegraf } from 'telegraf';
 import { TransactionNotificationData } from './types';
 import { createTrustlineOperation } from '@chen-pilot/sdk-core';
 
+const BACKEND_URL = process.env.NODE_URL || 'http://localhost:3000';
+
 export class TelegramAdapter {
   private bot: Telegraf | undefined;
   private token: string;
@@ -23,28 +25,41 @@ export class TelegramAdapter {
     this.bot.help((ctx) => ctx.reply('Commands: /start, /balance, /swap, /trustline'));
 
     this.bot.command('trustline', async (ctx) => {
-      const args = ctx.message.text.split(' ').slice(1);
-      if (args.length < 1) {
-        return ctx.reply('Usage: /trustline <assetCode> [issuerDomain|issuerAddress]\nExample: /trustline USDC circle.com');
+      const text = ctx.message.text.split(' ').slice(1).join(' ');
+      if (!text) {
+        return ctx.reply('Usage: /trustline <assetCode> [issuerDomain|issuerAddress] OR /trustline <description>\nExample: /trustline USDC circle.com OR /trustline the dollar stablecoin');
       }
 
-      const assetCode = args[0];
-      const assetIssuer = args[1];
-
-      if (!assetIssuer) {
-        return ctx.reply(`Please provide an issuer domain or address for ${assetCode}.`);
-      }
+      const args = text.split(' ');
+      let assetCode = args[0];
+      let assetIssuer = args[1];
 
       try {
-        await ctx.reply(`🔍 Looking up asset ${assetCode} from ${assetIssuer}...`);
-        const op = await createTrustlineOperation(assetCode, assetIssuer);
+        // If we only have one arg or it doesn't look like a code + issuer, try AI recognition
+        if (!assetIssuer || assetCode.length > 12) {
+          await ctx.reply(`🔍 AI is identifying the asset: "${text}"...`);
+          const recognized = await this.recognizeAsset(text, ctx.from.id.toString());
+          
+          if (recognized) {
+            assetCode = recognized.assetCode;
+            assetIssuer = recognized.issuer;
+            await ctx.reply(`💡 AI recognized this as <b>${assetCode}</b>${assetIssuer ? ` from <code>${assetIssuer}</code>` : ''}.\n${recognized.description}`, { parse_mode: 'HTML' });
+          } else if (!assetIssuer) {
+            return ctx.reply(`❌ Could not recognize asset from "${text}". Please provide an asset code and issuer address/domain.`);
+          }
+        }
+
+        if (!assetIssuer && assetCode !== 'XLM') {
+          return ctx.reply(`Please provide an issuer domain or address for ${assetCode}.`);
+        }
+
+        await ctx.reply(`🔍 Looking up asset ${assetCode}${assetIssuer ? ` from ${assetIssuer}` : ''}...`);
+        const op = await createTrustlineOperation(assetCode, assetIssuer || 'native');
         
-        // In a real scenario, we would generate a signing link (e.g., Albedo or Stellar Laboratory)
-        // For now, we'll return the operation details
         let message = `✅ Found asset ${assetCode}!\n\n`;
         message += `To add this trustline, you can use the following details in your wallet:\n`;
         message += `<b>Asset:</b> ${assetCode}\n`;
-        message += `<b>Issuer:</b> <code>${(op as any).asset.issuer}</code>\n\n`;
+        message += `<b>Issuer:</b> <code>${(op as any).asset.issuer || 'native'}</code>\n\n`;
         message += `<i>Note: In a future update, I will provide a direct signing link.</i>`;
         
         await ctx.reply(message, { parse_mode: 'HTML' });
@@ -53,8 +68,59 @@ export class TelegramAdapter {
       }
     });
 
+    // Handle natural language asset recognition
+    this.bot.on('text', async (ctx, next) => {
+      const text = ctx.message.text;
+      if (text.startsWith('/') || text.toLowerCase().includes('trustline')) {
+        return next();
+      }
+
+      // Simple heuristic: if message mentions "add", "trustline", "asset", or "coin"
+      const keywords = ['add', 'trustline', 'asset', 'coin', 'stablecoin', 'token'];
+      const lowercaseText = text.toLowerCase();
+      
+      if (keywords.some(k => lowercaseText.includes(k))) {
+        try {
+          const recognized = await this.recognizeAsset(text, ctx.from.id.toString());
+          if (recognized && recognized.confidence > 0.8) {
+            let message = `🤖 It sounds like you're talking about <b>${recognized.assetCode}</b>!\n\n`;
+            message += `${recognized.description}\n\n`;
+            message += `Would you like to add a trustline for this asset? Use <code>/trustline ${recognized.assetCode} ${recognized.issuer || ''}</code>`;
+            
+            await ctx.reply(message, { parse_mode: 'HTML' });
+          }
+        } catch (error) {
+          // Silent error for passive recognition
+          console.error("Passive AI recognition error:", error);
+        }
+      }
+      return next();
+    });
+
     this.bot.launch();
     console.log("✅ Telegram bot initialized.");
+  }
+
+  /**
+   * Calls the backend AI asset recognition service
+   */
+  private async recognizeAsset(query: string, userId: string): Promise<any> {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/assets/recognize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, query })
+      });
+
+      const data = await response.json() as any;
+      if (data.success) {
+        return data.asset;
+      }
+      return null;
+    } catch (error) {
+      console.error("Error calling asset recognition API:", error);
+      return null;
+    }
   }
 
   /**

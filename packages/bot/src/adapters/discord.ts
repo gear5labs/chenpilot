@@ -2,6 +2,8 @@ import { Client, GatewayIntentBits, Message, TextChannel } from 'discord.js';
 import { TransactionNotificationData } from './types';
 import { createTrustlineOperation } from '@chen-pilot/sdk-core';
 
+const BACKEND_URL = process.env.NODE_URL || 'http://localhost:3000';
+
 export class DiscordAdapter {
   private client: Client;
   private userChannels: Map<string, string> = new Map(); // userId -> channelId
@@ -32,13 +34,16 @@ export class DiscordAdapter {
     this.client.on("messageCreate", async (message: Message) => {
       if (message.author.bot) return;
 
-      if (message.content === "!start") {
+      const content = message.content;
+
+      if (content === "!start") {
         await message.reply(
           "Welcome to Chen Pilot! I am your AI-powered Stellar DeFi assistant."
         );
+        return;
       }
 
-      if (message.content === "!sponsor") {
+      if (content === "!sponsor") {
         const userId = message.author.id;
         await message.reply("⏳ Requesting account sponsorship...");
 
@@ -69,40 +74,100 @@ export class DiscordAdapter {
             "❌ Could not reach the sponsorship service. Please try again later."
           );
         }
+        return;
       }
 
-      if (message.content.startsWith('!trustline')) {
-        const args = message.content.split(' ').slice(1);
-        if (args.length < 1) {
-          return message.reply('Usage: !trustline <assetCode> [issuerDomain|issuerAddress]\nExample: !trustline USDC circle.com');
+      if (content.startsWith('!trustline')) {
+        const text = content.split(' ').slice(1).join(' ');
+        if (!text) {
+          return message.reply('Usage: !trustline <assetCode> [issuerDomain|issuerAddress] OR !trustline <description>\nExample: !trustline USDC circle.com OR !trustline the dollar stablecoin');
         }
 
-        const assetCode = args[0];
-        const assetIssuer = args[1];
-
-        if (!assetIssuer) {
-          return message.reply(`Please provide an issuer domain or address for ${assetCode}.`);
-        }
+        const args = text.split(' ');
+        let assetCode = args[0];
+        let assetIssuer = args[1];
 
         try {
-          await message.reply(`🔍 Looking up asset ${assetCode} from ${assetIssuer}...`);
-          const op = await createTrustlineOperation(assetCode, assetIssuer);
+          // If we only have one arg or it doesn't look like a code + issuer, try AI recognition
+          if (!assetIssuer || assetCode.length > 12) {
+            await message.reply(`🔍 AI is identifying the asset: "${text}"...`);
+            const recognized = await this.recognizeAsset(text, message.author.id);
+            
+            if (recognized) {
+              assetCode = recognized.assetCode;
+              assetIssuer = recognized.issuer;
+              await message.reply(`💡 AI recognized this as **${assetCode}**${assetIssuer ? ` from \`${assetIssuer}\`` : ''}.\n${recognized.description}`);
+            } else if (!assetIssuer) {
+              return message.reply(`❌ Could not recognize asset from "${text}". Please provide an asset code and issuer address/domain.`);
+            }
+          }
+
+          if (!assetIssuer && assetCode !== 'XLM') {
+            return message.reply(`Please provide an issuer domain or address for ${assetCode}.`);
+          }
+
+          await message.reply(`🔍 Looking up asset ${assetCode}${assetIssuer ? ` from ${assetIssuer}` : ''}...`);
+          const op = await createTrustlineOperation(assetCode, assetIssuer || 'native');
           
           let response = `✅ Found asset ${assetCode}!\n\n`;
           response += `To add this trustline, you can use the following details in your wallet:\n`;
           response += `**Asset:** ${assetCode}\n`;
-          response += `**Issuer:** \`${(op as any).asset.issuer}\`\n\n`;
+          response += `**Issuer:** \`${(op as any).asset.issuer || 'native'}\`\n\n`;
           response += `*Note: In a future update, I will provide a direct signing link.*`;
           
           await message.reply(response);
         } catch (error) {
           await message.reply(`❌ Error: ${error instanceof Error ? error.message : String(error)}`);
         }
+        return;
+      }
+
+      // Handle natural language asset recognition
+      if (!content.startsWith('!')) {
+        const keywords = ['add', 'trustline', 'asset', 'coin', 'stablecoin', 'token'];
+        const lowercaseText = content.toLowerCase();
+        
+        if (keywords.some(k => lowercaseText.includes(k))) {
+          try {
+            const recognized = await this.recognizeAsset(content, message.author.id);
+            if (recognized && recognized.confidence > 0.8) {
+              let response = `🤖 It sounds like you're talking about **${recognized.assetCode}**!\n\n`;
+              response += `${recognized.description}\n\n`;
+              response += `Would you like to add a trustline for this asset? Use \`!trustline ${recognized.assetCode} ${recognized.issuer || ''}\``;
+              
+              await message.reply(response);
+            }
+          } catch (error) {
+            console.error("Passive AI recognition error:", error);
+          }
+        }
       }
     });
 
     await this.client.login(token);
     console.log("✅ Discord bot initialized.");
+  }
+
+  /**
+   * Calls the backend AI asset recognition service
+   */
+  private async recognizeAsset(query: string, userId: string): Promise<any> {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/assets/recognize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, query })
+      });
+
+      const data = await response.json() as any;
+      if (data.success) {
+        return data.asset;
+      }
+      return null;
+    } catch (error) {
+      console.error("Error calling asset recognition API:", error);
+      return null;
+    }
   }
 
   /**
