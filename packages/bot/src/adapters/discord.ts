@@ -1,6 +1,9 @@
 import { Client, GatewayIntentBits, Message, TextChannel } from 'discord.js';
 import { TransactionNotificationData } from './types';
 import { createTrustlineOperation } from '@chen-pilot/sdk-core';
+import { normalizeCommand } from '../commands';
+
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000';
 
 export class DiscordAdapter {
   private client: Client;
@@ -32,13 +35,33 @@ export class DiscordAdapter {
     this.client.on("messageCreate", async (message: Message) => {
       if (message.author.bot) return;
 
-      if (message.content === "!start") {
+      // Handle both !command and /command for consistency
+      if (!message.content.startsWith('!') && !message.content.startsWith('/')) return;
+
+      const command = normalizeCommand(message.content);
+
+      if (command === "start") {
         await message.reply(
           "Welcome to Chen Pilot! I am your AI-powered Stellar DeFi assistant."
         );
       }
 
-      if (message.content === "!sponsor") {
+      if (command === "help") {
+        await message.reply(
+          "**Commands:** !start, !balance, !swap, !trustline, !sponsor\n\n" +
+          "You can also use short aliases like !b for balance, !t for trustline, etc."
+        );
+      }
+
+      if (command === "balance") {
+        await message.reply("💰 Your balance: 100 XLM (Placeholder)\n*Real balance integration coming soon!*");
+      }
+
+      if (command === "swap") {
+        await message.reply("🔄 Swap functionality is coming soon!");
+      }
+
+      if (command === "sponsor") {
         const userId = message.author.id;
         await message.reply("⏳ Requesting account sponsorship...");
 
@@ -71,7 +94,7 @@ export class DiscordAdapter {
         }
       }
 
-      if (message.content.startsWith('!trustline')) {
+      if (command === "trustline") {
         const args = message.content.split(' ').slice(1);
         if (args.length < 1) {
           return message.reply('Usage: !trustline <assetCode> [issuerDomain|issuerAddress]\nExample: !trustline USDC circle.com');
