@@ -1,6 +1,7 @@
 import { Telegraf } from 'telegraf';
 import { TransactionNotificationData } from './types';
 import { createTrustlineOperation } from '@chen-pilot/sdk-core';
+import { getAliases } from '../commands';
 
 export class TelegramAdapter {
   private bot: Telegraf | undefined;
@@ -19,10 +20,15 @@ export class TelegramAdapter {
 
     this.bot = new Telegraf(this.token);
 
-    this.bot.start((ctx) => ctx.reply('Welcome to Chen Pilot! I am your AI-powered Stellar DeFi assistant.'));
-    this.bot.help((ctx) => ctx.reply('Commands: /start, /balance, /swap, /trustline'));
+    this.bot.command(getAliases('start'), (ctx) => ctx.reply('Welcome to Chen Pilot! I am your AI-powered Stellar DeFi assistant.'));
+    this.bot.command(getAliases('help'), (ctx) => ctx.reply('Commands: /start, /balance, /swap, /trustline\n\nYou can also use short aliases like /b for balance, /t for trustline, etc.'));
 
-    this.bot.command('trustline', async (ctx) => {
+    // Balance command alias support
+    this.bot.command(getAliases('balance'), async (ctx) => {
+      await ctx.reply('💰 Your balance: 100 XLM (Placeholder)\n<i>Real balance integration coming soon!</i>', { parse_mode: 'HTML' });
+    });
+
+    this.bot.command(getAliases('trustline'), async (ctx) => {
       const args = ctx.message.text.split(' ').slice(1);
       if (args.length < 1) {
         return ctx.reply('Usage: /trustline <assetCode> [issuerDomain|issuerAddress]\nExample: /trustline USDC circle.com');
@@ -51,6 +57,11 @@ export class TelegramAdapter {
       } catch (error) {
         await ctx.reply(`❌ Error: ${error instanceof Error ? error.message : String(error)}`);
       }
+    });
+
+    // Swap command alias support
+    this.bot.command(getAliases('swap'), async (ctx) => {
+      await ctx.reply('🔄 Swap functionality is coming soon!', { parse_mode: 'HTML' });
     });
 
     this.bot.launch();
