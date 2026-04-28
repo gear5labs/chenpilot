@@ -50,6 +50,9 @@ export class ToolAutoDiscovery {
       const { strategyRegistryTool } = await import("../tools/strategyRegistry");
       toolRegistry.register(strategyRegistryTool);
 
+      const { ammExplorerTool } = await import("../tools/ammExplorer");
+      toolRegistry.register(ammExplorerTool);
+
       // todo
       // await this.discoverToolsFromDirectory();
 
