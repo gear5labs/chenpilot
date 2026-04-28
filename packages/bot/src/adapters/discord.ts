@@ -1,11 +1,14 @@
-import { Client, GatewayIntentBits, Message, TextChannel } from 'discord.js';
+import { Client, GatewayIntentBits, Message, TextChannel, Collection, Invite, GuildMember } from 'discord.js';
 import { TransactionNotificationData } from './types';
 import { createTrustlineOperation } from '@chen-pilot/sdk-core';
+
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:2333';
 
 export class DiscordAdapter {
   private client: Client;
   private userChannels: Map<string, string> = new Map(); // userId -> channelId
   private token: string;
+  private invites: Map<string, Collection<string, Invite>> = new Map();
 
   constructor(token: string) {
     this.token = token;
@@ -14,6 +17,8 @@ export class DiscordAdapter {
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildInvites,
       ],
     });
   }
@@ -25,8 +30,57 @@ export class DiscordAdapter {
       return;
     }
 
-    this.client.once("ready", () => {
+    this.client.once("ready", async () => {
       console.log(`✅ Discord bot logged in as ${this.client.user?.tag}`);
+      await this.cacheInvites();
+      console.log("📥 Discord: Initialized invite cache.");
+    });
+
+    this.client.on("inviteCreate", async (invite: Invite) => {
+      const guildInvites = this.invites.get(invite.guild?.id || "");
+      if (guildInvites) {
+        guildInvites.set(invite.code, invite);
+      }
+    });
+
+    this.client.on("inviteDelete", async (invite: Invite) => {
+      const guildInvites = this.invites.get(invite.guild?.id || "");
+      if (guildInvites) {
+        guildInvites.delete(invite.code);
+      }
+    });
+
+    this.client.on("guildMemberAdd", async (member: GuildMember) => {
+      try {
+        const cachedInvites = this.invites.get(member.guild.id);
+        const newInvites = await member.guild.invites.fetch();
+        
+        // Find which invite's usage count increased
+        const usedInvite = newInvites.find(inv => {
+          const cached = cachedInvites?.get(inv.code);
+          return cached ? (inv.uses || 0) > (cached.uses || 0) : (inv.uses || 0) > 0;
+        });
+
+        // Update cache
+        this.invites.set(member.guild.id, newInvites);
+
+        if (usedInvite) {
+          const inviter = usedInvite.inviter;
+          console.log(`👤 Referral: ${member.user.tag} joined via ${usedInvite.code} (Inviter: ${inviter?.tag || 'Unknown'})`);
+          
+          await this.logReferral(member.id, inviter?.id || 'unknown', usedInvite.code);
+          
+          // Optionally send a welcome message or log to a channel
+          const systemChannel = member.guild.systemChannel;
+          if (systemChannel) {
+            await systemChannel.send(`Welcome ${member}! You were invited by ${inviter || 'an unknown hero'}.`);
+          }
+        } else {
+          console.log(`👤 Member ${member.user.tag} joined (No invite matched)`);
+        }
+      } catch (error) {
+        console.error("Error tracking referral:", error);
+      }
     });
 
     this.client.on("messageCreate", async (message: Message) => {
@@ -206,5 +260,51 @@ export class DiscordAdapter {
    */
   getClient(): Client {
     return this.client;
+  }
+
+  /**
+   * Initial cache of all invites for all guilds the bot is in
+   */
+  private async cacheInvites() {
+    if (!this.client.isReady()) return;
+    
+    for (const guild of this.client.guilds.cache.values()) {
+      try {
+        const guildInvites = await guild.invites.fetch();
+        this.invites.set(guild.id, guildInvites);
+      } catch (error) {
+        console.error(`⚠️ Discord: Failed to fetch invites for guild ${guild.id}:`, error);
+      }
+    }
+  }
+
+  /**
+   * Log referral data to the backend for future rewards
+   */
+  private async logReferral(newMemberId: string, inviterId: string, inviteCode: string) {
+    try {
+      console.log(`📡 Sending referral data to backend: ${newMemberId} invited by ${inviterId}`);
+      
+      const response = await fetch(`${BACKEND_URL}/api/referrals/log`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          newMemberId,
+          inviterId,
+          inviteCode,
+          platform: 'discord',
+          timestamp: new Date().toISOString()
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn(`⚠️ Backend referral log failed: ${response.status} ${errorText}`);
+      } else {
+        console.log(`✅ Referral logged successfully for ${newMemberId}`);
+      }
+    } catch (error) {
+      console.error("❌ Error logging referral to backend:", error);
+    }
   }
 }
