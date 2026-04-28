@@ -38,6 +38,25 @@ export abstract class BaseTool<T extends ToolPayload = ToolPayload>
             }, got ${typeof value}`
           );
         }
+
+        // enum validation
+        if (paramDef.enum && typeof value === "string" && !paramDef.enum.includes(value)) {
+          errors.push(
+            `Invalid value for parameter '${paramName}': must be one of ${paramDef.enum.join(
+              ", "
+            )}`
+          );
+        }
+
+        // pattern validation
+        if (paramDef.pattern && typeof value === "string") {
+          const regex = new RegExp(paramDef.pattern);
+          if (!regex.test(value)) {
+            errors.push(
+              `Invalid format for parameter '${paramName}': must match pattern ${paramDef.pattern}`
+            );
+          }
+        }
       }
     });
 

@@ -6,6 +6,7 @@ export class DiscordAdapter {
   private client: Client;
   private userChannels: Map<string, string> = new Map(); // userId -> channelId
   private token: string;
+  private backendUrl: string = process.env.BACKEND_URL || 'http://localhost:2333';
 
   constructor(token: string) {
     this.token = token;
@@ -38,13 +39,19 @@ export class DiscordAdapter {
         );
       }
 
+      if (message.content === "!help") {
+        await message.reply(
+          "**Commands:**\n`!start`, `!help`, `!sponsor`, `!trustline`, `!amm`"
+        );
+      }
+
       if (message.content === "!sponsor") {
         const userId = message.author.id;
         await message.reply("⏳ Requesting account sponsorship...");
 
         try {
           const response = await fetch(
-            `${BACKEND_URL}/api/account/${userId}/sponsor`,
+            `${this.backendUrl}/api/account/${userId}/sponsor`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -97,6 +104,130 @@ export class DiscordAdapter {
           await message.reply(response);
         } catch (error) {
           await message.reply(`❌ Error: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      if (message.content.startsWith('!amm')) {
+        const args = message.content.split(' ').slice(1);
+        if (args.length < 1) {
+          let helpMsg = '🔍 **AMM Explorer**\n\n';
+          helpMsg += 'Use this command to search for liquidity pools and view their metrics.\n\n';
+          helpMsg += '**Usage:**\n';
+          helpMsg += '• `!amm search <assetA> <assetB>`\n';
+          helpMsg += '• `!amm stats <poolId>`\n\n';
+          helpMsg += '**Examples:**\n';
+          helpMsg += '• `!amm search XLM USDC`\n';
+          helpMsg += '• `!amm search XLM yXLM:GBSH...`\n';
+          helpMsg += '• `!amm stats 65f...a1b`';
+          
+          return message.reply(helpMsg);
+        }
+
+        const subCommand = args[0].toLowerCase();
+        const horizonUrl = process.env.STELLAR_HORIZON_URL || 'https://horizon.stellar.org';
+
+        try {
+          if (subCommand === 'search') {
+            if (args.length < 3) {
+              return message.reply('❌ Usage: `!amm search <assetA> <assetB>`');
+            }
+            const assetA = args[1];
+            const assetB = args[2];
+            await message.reply(`🔍 Searching for **${assetA}/${assetB}** pools...`);
+
+            const formatAsset = (a: string) => {
+              const upper = a.toUpperCase();
+              if (upper === 'XLM' || upper === 'NATIVE') return 'native';
+              if (a.includes(':')) {
+                const [code, issuer] = a.split(':');
+                return `${code.toUpperCase()}:${issuer}`;
+              }
+              return a;
+            };
+
+            const response = await fetch(`${horizonUrl}/liquidity_pools?assets=${formatAsset(assetA)},${formatAsset(assetB)}`);
+            const data = await response.json() as any;
+            const pools = data._embedded?.records || [];
+
+            if (pools.length === 0) {
+              return message.reply(`❌ No liquidity pools found for **${assetA}/${assetB}**.`);
+            }
+
+            let responseMsg = `✅ **Found ${pools.length} pool(s) for ${assetA}/${assetB}:**\n\n`;
+            pools.slice(0, 5).forEach((p: any) => {
+              const resA = p.reserves[0];
+              const resB = p.reserves[1];
+              const shortId = `${p.id.slice(0, 8)}...${p.id.slice(-8)}`;
+              
+              // APR calculation
+              const reserveA = parseFloat(resA.amount);
+              const reserveB = parseFloat(resB.amount);
+              const volumeEntry = p.volume ? p.volume[Object.keys(p.volume)[0]] : null;
+              const volume24h = volumeEntry ? parseFloat(volumeEntry.base_volume) + parseFloat(volumeEntry.counter_volume) : 0;
+              const totalLiquidity = reserveA + reserveB;
+              const apr = totalLiquidity > 0 ? ((volume24h * 0.003 * 365) / totalLiquidity * 100).toFixed(2) : '0.00';
+
+              responseMsg += `🔹 **Pool** \`${shortId}\`\n`;
+              responseMsg += `💰 **Reserves:**\n`;
+              responseMsg += `  • ${reserveA.toLocaleString()} ${resA.asset.split(':')[0]}\n`;
+              responseMsg += `  • ${reserveB.toLocaleString()} ${resB.asset.split(':')[0]}\n`;
+              responseMsg += `📊 **Fee:** ${(p.fee_bp / 100).toFixed(2)}% | **APR:** ${apr}%\n`;
+              responseMsg += `🔗 \`!amm stats ${p.id}\`\n\n`;
+            });
+
+            if (pools.length > 5) {
+              responseMsg += `*...and ${pools.length - 5} more.*`;
+            }
+
+            await message.reply(responseMsg);
+          } else if (subCommand === 'stats') {
+            if (args.length < 2) {
+              return message.reply('❌ Usage: `!amm stats <poolId>`');
+            }
+            const poolId = args[1];
+            await message.reply(`📊 Fetching stats for pool \`${poolId.slice(0, 8)}...\``);
+
+            const response = await fetch(`${horizonUrl}/liquidity_pools/${poolId}`);
+            if (response.status === 404) {
+              return message.reply('❌ Liquidity pool not found.');
+            }
+            const p = await response.json() as any;
+
+            const resA = p.reserves[0];
+            const resB = p.reserves[1];
+            
+            // APR calculation
+            const reserveA = parseFloat(resA.amount);
+            const reserveB = parseFloat(resB.amount);
+            const volumeEntry = p.volume ? p.volume[Object.keys(p.volume)[0]] : null;
+            const volume24h = volumeEntry ? parseFloat(volumeEntry.base_volume) + parseFloat(volumeEntry.counter_volume) : 0;
+            const totalLiquidity = reserveA + reserveB;
+            const apr = totalLiquidity > 0 ? ((volume24h * 0.003 * 365) / totalLiquidity * 100).toFixed(2) : '0.00';
+
+            let responseMsg = `📊 **Liquidity Pool Metrics**\n\n`;
+            responseMsg += `🆔 **ID:** \`${p.id}\`\n\n`;
+            
+            responseMsg += `**Assets:**\n`;
+            responseMsg += `• ${resA.asset}\n`;
+            responseMsg += `• ${resB.asset}\n\n`;
+            
+            responseMsg += `**Reserves:**\n`;
+            responseMsg += `• **${reserveA.toLocaleString()}** ${resA.asset.split(':')[0]}\n`;
+            responseMsg += `• **${reserveB.toLocaleString()}** ${resB.asset.split(':')[0]}\n\n`;
+            
+            responseMsg += `**Statistics:**\n`;
+            responseMsg += `• **Shares:** ${parseFloat(p.total_shares).toLocaleString()}\n`;
+            responseMsg += `• **Trustlines:** ${p.total_trustlines}\n`;
+            responseMsg += `• **Fee:** ${(p.fee_bp / 100).toFixed(2)}%\n`;
+            responseMsg += `• **APR:** ${apr}%\n`;
+
+            await message.reply(responseMsg);
+          } else {
+            await message.reply('❓ Unknown subcommand. Use `search` or `stats`.');
+          }
+        } catch (error) {
+          console.error('AMM Explorer error:', error);
+          await message.reply(`❌ **Error:** ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
       }
     });
