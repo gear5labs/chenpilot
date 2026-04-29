@@ -29,6 +29,8 @@ import {
 import { auditLogService } from "../AuditLog/auditLog.service";
 import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
 import { getSocketManager } from "./socketManager";
+import { BotSessionService } from "../Bot/botSession.service";
+import { BotSessionType, BotPlatform } from "../Bot/botSession.entity";
 
 const router = Router();
 
@@ -186,6 +188,170 @@ router.post("/bot/metrics", async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: "Failed to log metrics"
+    });
+  }
+});
+
+// #126: Bot session management endpoints
+const botSessionService = new BotSessionService();
+
+// Create or update a bot session
+router.post("/bot/session", async (req: Request, res: Response) => {
+  try {
+    const { userId, platform, sessionType, step, sessionData, expiresAt } = req.body;
+
+    // Validate required fields
+    if (!userId || !platform || !sessionType || step === undefined || !sessionData) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: userId, platform, sessionType, step, sessionData"
+      });
+    }
+
+    // Validate platform
+    if (!Object.values(BotPlatform).includes(platform)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid platform. Must be one of: ${Object.values(BotPlatform).join(', ')}`
+      });
+    }
+
+    // Validate session type
+    if (!Object.values(BotSessionType).includes(sessionType)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid session type. Must be one of: ${Object.values(BotSessionType).join(', ')}`
+      });
+    }
+
+    // Set default expiration (24 hours from now) if not provided
+    const expiration = expiresAt ? new Date(expiresAt) : new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    const session = await botSessionService.create({
+      userId,
+      platform,
+      sessionType,
+      step,
+      sessionData,
+      expiresAt: expiration,
+    });
+
+    return res.status(200).json({
+      success: true,
+      session,
+    });
+  } catch (error) {
+    logger.error("Error creating bot session", { error, body: req.body });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create session"
+    });
+  }
+});
+
+// Get active session for a user
+router.get("/bot/session", async (req: Request, res: Response) => {
+  try {
+    const { userId, platform, sessionType } = req.query;
+
+    if (!userId || !platform || !sessionType) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required query parameters: userId, platform, sessionType"
+      });
+    }
+
+    const session = await botSessionService.findActiveSession(
+      userId as string,
+      platform as BotPlatform,
+      sessionType as BotSessionType
+    );
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "No active session found"
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      session,
+    });
+  } catch (error) {
+    logger.error("Error getting bot session", { error, query: req.query });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get session"
+    });
+  }
+});
+
+// Update a bot session
+router.put("/bot/session/:sessionId", async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const { step, sessionData, expiresAt, isActive } = req.body;
+
+    const session = await botSessionService.update(sessionId, {
+      step,
+      sessionData,
+      expiresAt: expiresAt ? new Date(expiresAt) : undefined,
+      isActive,
+    });
+
+    return res.status(200).json({
+      success: true,
+      session,
+    });
+  } catch (error) {
+    logger.error("Error updating bot session", { error, params: req.params, body: req.body });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update session"
+    });
+  }
+});
+
+// Deactivate a bot session
+router.delete("/bot/session/:sessionId", async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    await botSessionService.deactivateSession(sessionId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Session deactivated"
+    });
+  } catch (error) {
+    logger.error("Error deactivating bot session", { error, params: req.params });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to deactivate session"
+    });
+  }
+});
+
+// Deactivate all sessions for a user
+router.delete("/bot/sessions/user/:userId", async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const { platform } = req.query;
+
+    const count = await botSessionService.deactivateUserSessions(
+      userId,
+      platform as BotPlatform
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `${count} session(s) deactivated`
+    });
+  } catch (error) {
+    logger.error("Error deactivating user sessions", { error, params: req.params });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to deactivate sessions"
     });
   }
 });
