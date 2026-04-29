@@ -8,33 +8,36 @@ import {
   TextBasedChannel,
   ActivityType,
 } from "discord.js";
-import { TransactionNotificationData } from "../types";
+import { TransactionNotificationData, PriceAlert, TrendingAsset } from "../types";
 import {
   createTrustlineOperation,
   getNetworkStatus,
 } from "@chen-pilot/sdk-core";
 import { searchFeatures, formatHelpMessage } from "../services/helpProvider";
 import { AssetVerificationService } from '../assetVerification';
+import { RateLimiter, DEFAULT_RATE_LIMIT, STRICT_RATE_LIMIT } from '../rateLimiter';
 import { withPerformanceProfiling, extractCommandName } from '../performanceProfiler';
+import { MultisigWizard } from '../multisigWizard';
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:3000";
 const DASHBOARD_URL = process.env.DASHBOARD_URL || `${BACKEND_URL}/dashboard`;
 const HORIZON_URL = process.env.STELLAR_HORIZON_URL || 'https://horizon-testnet.stellar.org';
-const DEBOUNCE_MS = 1000; // 1 second debounce between commands
+const DEBOUNCE_MS = 2000;
+
+// Role names required for advanced commands (#120)
+const ADVANCED_ROLE_NAMES = (process.env.DISCORD_ADVANCED_ROLES || 'DeFi Pro,Whale,Admin').split(',').map(r => r.trim());
+
+// Supported currencies for reports (#118)
+const SUPPORTED_CURRENCIES = ['USD', 'XLM', 'BTC'] as const;
 
 // Commands that involve personal account data and must only be used in DMs
 const DM_ONLY_COMMANDS = ['!balance', '!sponsor'];
 
-function isDM(message: Message): boolean {
-  return message.channel.type === ChannelType.DM;
-}
+// Commands that start a wizard
+const WIZARD_COMMANDS = ['!multisig'];
 
-async function rejectPublicChannel(message: Message): Promise<void> {
-  await message.reply('🔒 This command contains sensitive account data and can only be used in a Direct Message (DM) with the bot.');
-}
-
-// Commands that involve personal account data and must only be used in DMs
-const DM_ONLY_COMMANDS = ['!balance', '!sponsor'];
+// Commands that require stricter rate limiting
+const SENSITIVE_COMMANDS = ['!sponsor', '!trustline', '!validate'];
 
 function isDM(message: Message): boolean {
   return message.channel.type === ChannelType.DM;
@@ -50,7 +53,17 @@ export class DiscordAdapter {
   private token: string;
   // #145: Track last command timestamp per user
   private lastCommandTime: Map<string, number> = new Map();
+  // #125: Multisig wizard instance
+  private multisigWizard: MultisigWizard;
+  // #123: Rate limiters for bot commands
+  private defaultRateLimiter: RateLimiter;
+  private strictRateLimiter: RateLimiter;
   private verificationService: AssetVerificationService;
+  // #118: User preferred currency (userId -> currency)
+  private userCurrency: Map<string, 'USD' | 'XLM' | 'BTC'> = new Map();
+  // #119: Active price alerts
+  private priceAlerts: Map<string, PriceAlert> = new Map();
+  private alertCheckInterval?: ReturnType<typeof setInterval>;
 
   constructor(token: string, auditLogChannelId?: string) {
     this.token = token;
@@ -63,6 +76,11 @@ export class DiscordAdapter {
       ],
     });
     this.verificationService = new AssetVerificationService(HORIZON_URL);
+    // #125: Initialize multisig wizard
+    this.multisigWizard = new MultisigWizard();
+    // #123: Initialize rate limiters
+    this.defaultRateLimiter = new RateLimiter(DEFAULT_RATE_LIMIT);
+    this.strictRateLimiter = new RateLimiter(STRICT_RATE_LIMIT);
   }
 
   // #145: Returns true if the user is flooding (within debounce window)
@@ -72,6 +90,25 @@ export class DiscordAdapter {
     if (now - last < DEBOUNCE_MS) return true;
     this.lastCommandTime.set(userId, now);
     return false;
+  }
+
+  // #123: Check rate limit for a user and command
+  private checkRateLimit(userId: string, command: string): { allowed: boolean; message?: string } {
+    // Determine which rate limiter to use based on command
+    const isSensitive = SENSITIVE_COMMANDS.some(cmd => command.startsWith(cmd));
+    const rateLimiter = isSensitive ? this.strictRateLimiter : this.defaultRateLimiter;
+    
+    const status = rateLimiter.check(userId);
+    
+    if (!status.allowed) {
+      const retryAfter = status.retryAfter || 60;
+      return {
+        allowed: false,
+        message: `⏳ Rate limit exceeded. Please wait ${retryAfter} seconds before trying again.`
+      };
+    }
+    
+    return { allowed: true };
   }
 
   async init() {
@@ -94,11 +131,19 @@ export class DiscordAdapter {
         if (message.author.bot) return;
 
         const userId = message.author.id;
+        const command = message.content.split(' ')[0];
         const commandName = extractCommandName(message.content, 'discord');
 
         // #145: Anti-flood check for all commands
         if (this.isFlooding(userId)) {
           await message.reply("⏳ Please wait a moment before sending another command.");
+          return;
+        }
+
+        // #123: Rate limit check
+        const rateLimitResult = this.checkRateLimit(userId, command);
+        if (!rateLimitResult.allowed) {
+          await message.reply(rateLimitResult.message);
           return;
         }
 
@@ -280,11 +325,160 @@ export class DiscordAdapter {
             }
           })();
         }
+
+        // #125: Multisig wizard command
+        if (message.content === '!multisig') {
+          if (!isDM(message)) {
+            await rejectPublicChannel(message);
+            return;
+          }
+
+          const response = this.multisigWizard.startWizard(userId, 'discord');
+          await message.reply(response.message);
+        }
+
+        // Handle wizard input (for active wizard sessions)
+        const wizardState = this.multisigWizard.getWizardState(userId, 'discord');
+        if (wizardState && !WIZARD_COMMANDS.includes(message.content.split(' ')[0])) {
+          const response = this.multisigWizard.processInput(userId, 'discord', message.content);
+          await message.reply(response.message);
+        }
       }
-    ));
+
+      // #118: !currency command — set preferred report currency
+      if (message.content.startsWith('!currency')) {
+        const arg = message.content.split(' ')[1]?.toUpperCase() as 'USD' | 'XLM' | 'BTC' | undefined;
+        if (!arg || !SUPPORTED_CURRENCIES.includes(arg as any)) {
+          return message.reply(`Usage: !currency <USD|XLM|BTC>\nCurrent: **${this.userCurrency.get(userId) ?? 'USD'}**`);
+        }
+        this.userCurrency.set(userId, arg);
+        return message.reply(`✅ Report currency set to **${arg}**`);
+      }
+
+      // #118: !report command — portfolio report in preferred currency
+      if (message.content.startsWith('!report')) {
+        const currency = this.userCurrency.get(userId) ?? 'USD';
+        await message.reply(`⏳ Fetching portfolio report in **${currency}**...`);
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/portfolio/${userId}?currency=${currency}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json() as { totalValue: number; assets: { code: string; balance: number; value: number }[] };
+          let reply = `📊 **Portfolio Report (${currency})**\n\n`;
+          reply += `**Total Value:** ${data.totalValue.toFixed(4)} ${currency}\n\n`;
+          for (const a of data.assets) {
+            reply += `• **${a.code}**: ${a.balance} ≈ ${a.value.toFixed(4)} ${currency}\n`;
+          }
+          return message.reply(reply);
+        } catch {
+          return message.reply(`❌ Could not fetch portfolio. Make sure your account is registered.`);
+        }
+      }
+
+      // #119: !alert command — set a price alert
+      if (message.content.startsWith('!alert')) {
+        const args = message.content.split(' ').slice(1);
+        if (args.length < 3) {
+          return message.reply('Usage: !alert <assetCode> <above|below> <price> [USD|XLM|BTC]\nExample: !alert XLM above 0.15 USD');
+        }
+        const [assetCode, conditionRaw, priceRaw, currencyRaw] = args;
+        const condition = conditionRaw.toLowerCase() as 'above' | 'below';
+        if (condition !== 'above' && condition !== 'below') {
+          return message.reply('❌ Condition must be `above` or `below`.');
+        }
+        const targetPrice = parseFloat(priceRaw);
+        if (isNaN(targetPrice) || targetPrice <= 0) {
+          return message.reply('❌ Price must be a positive number.');
+        }
+        const currency = (currencyRaw?.toUpperCase() ?? this.userCurrency.get(userId) ?? 'USD') as 'USD' | 'XLM' | 'BTC';
+        if (!SUPPORTED_CURRENCIES.includes(currency as any)) {
+          return message.reply(`❌ Currency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`);
+        }
+        const alertId = `${userId}-${assetCode}-${Date.now()}`;
+        const alert: PriceAlert = { id: alertId, userId, assetCode: assetCode.toUpperCase(), targetPrice, currency, condition, createdAt: new Date().toISOString(), triggered: false };
+        this.priceAlerts.set(alertId, alert);
+        // Register channel for DM delivery
+        if (!this.userChannels.has(userId)) this.userChannels.set(userId, message.channelId);
+        return message.reply(`🔔 Alert set: notify me when **${assetCode.toUpperCase()}** is ${condition} **${targetPrice} ${currency}**`);
+      }
+
+      // #119: !alerts — list active alerts
+      if (message.content === '!alerts') {
+        const userAlerts = [...this.priceAlerts.values()].filter(a => a.userId === userId && !a.triggered);
+        if (userAlerts.length === 0) return message.reply('📭 You have no active price alerts. Use `!alert` to set one.');
+        let reply = `🔔 **Your Active Alerts**\n\n`;
+        for (const a of userAlerts) {
+          reply += `• **${a.assetCode}** ${a.condition} ${a.targetPrice} ${a.currency} (ID: \`${a.id.slice(-6)}\`)\n`;
+        }
+        return message.reply(reply);
+      }
+
+      // #120: !advanced — role-gated command example
+      if (message.content.startsWith('!advanced')) {
+        if (!this.hasAdvancedRole(message)) {
+          return message.reply(`🔒 This command requires one of the following roles: **${ADVANCED_ROLE_NAMES.join(', ')}**`);
+        }
+        return message.reply('✅ Advanced command executed. (Role check passed)');
+      }
+
+      // #121: !discover — suggest trending Stellar assets
+      if (message.content === '!discover') {
+        if (!this.hasAdvancedRole(message)) {
+          return message.reply(`🔒 \`!discover\` requires one of the following roles: **${ADVANCED_ROLE_NAMES.join(', ')}**`);
+        }
+        await message.reply('🔍 Discovering trending Stellar assets...');
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/assets/trending`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const assets = await res.json() as TrendingAsset[];
+          if (!assets.length) return message.reply('📭 No trending assets found at this time.');
+          let reply = `🌟 **Trending Stellar Assets**\n\n`;
+          for (const a of assets.slice(0, 5)) {
+            const change = a.priceChange24h >= 0 ? `+${a.priceChange24h.toFixed(2)}%` : `${a.priceChange24h.toFixed(2)}%`;
+            const emoji = a.priceChange24h >= 0 ? '📈' : '📉';
+            reply += `${emoji} **${a.assetCode}**${a.domain ? ` (${a.domain})` : ''}\n`;
+            reply += `  24h Change: ${change} | Volume: ${a.volume24h.toLocaleString()} | Holders: ${a.holders.toLocaleString()}\n\n`;
+          }
+          return message.reply(reply);
+        } catch {
+          return message.reply('❌ Could not fetch trending assets. Please try again later.');
+        }
+      }
+    });
 
     await this.client.login(token);
+    this.startAlertPolling();
     console.log("✅ Discord bot initialized.");
+  }
+
+  // #120: Check if message author has an advanced role
+  private hasAdvancedRole(message: Message): boolean {
+    if (!message.member) return false;
+    return message.member.roles.cache.some((r: { name: string }) => ADVANCED_ROLE_NAMES.includes(r.name));
+  }
+
+  // #119: Poll prices and fire triggered alerts via DM
+  private startAlertPolling() {
+    this.alertCheckInterval = setInterval(async () => {
+      const pending = [...this.priceAlerts.values()].filter(a => !a.triggered);
+      if (!pending.length) return;
+      for (const alert of pending) {
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/price/${alert.assetCode}?currency=${alert.currency}`);
+          if (!res.ok) continue;
+          const { price } = await res.json() as { price: number };
+          const triggered = alert.condition === 'above' ? price >= alert.targetPrice : price <= alert.targetPrice;
+          if (!triggered) continue;
+          alert.triggered = true;
+          const channelId = this.userChannels.get(alert.userId);
+          if (!channelId) continue;
+          const channel = this.client.channels.cache.get(channelId) as TextBasedChannel | undefined;
+          if (!channel) continue;
+          await channel.send(
+            `🔔 **Price Alert Triggered!**\n**${alert.assetCode}** is now ${alert.condition} **${alert.targetPrice} ${alert.currency}** (current: ${price} ${alert.currency})`
+          );
+        } catch { /* ignore per-alert errors */ }
+      }
+    }, 60_000); // check every minute
   }
 
   // #147: Announce a new GitHub release to all registered announcement channels

@@ -13,10 +13,8 @@ exports.TelegramAdapter = void 0;
 const telegraf_1 = require("telegraf");
 const sdk_core_1 = require("@chen-pilot/sdk-core");
 const assetVerification_1 = require("../assetVerification");
-const performanceProfiler_1 = require("../performanceProfiler");
 const DASHBOARD_URL = process.env.DASHBOARD_URL || `${process.env.API_BASE_URL || 'http://localhost:2333'}/dashboard`;
 const HORIZON_URL = process.env.STELLAR_HORIZON_URL || 'https://horizon-testnet.stellar.org';
-const DEBOUNCE_MS = 1000; // 1 second debounce between commands
 // Commands that involve personal account data and must only be used in DMs
 const DM_ONLY_COMMANDS = ['/balance'];
 function isDM(ctx) {
@@ -60,6 +58,35 @@ class TelegramAdapter {
                 if (userId && this.isFlooding(userId)) {
                     yield ctx.reply("⏳ Please wait a moment before sending another command.");
                     return;
+                }
+                return next();
+            }));
+            this.bot.start((ctx) => ctx.reply('Welcome to Chen Pilot! I am your AI-powered Stellar DeFi assistant.'));
+            this.bot.help((ctx) => ctx.reply('Commands: /start, /balance, /swap, /trustline, /dashboard, /validate'));
+            this.bot.command('trustline', (ctx) => __awaiter(this, void 0, void 0, function* () {
+                const args = ctx.message.text.split(' ').slice(1);
+                if (args.length < 1) {
+                    return ctx.reply("Usage: /trustline <assetCode> [issuerDomain|issuerAddress]\nExample: /trustline USDC circle.com");
+                }
+                const assetCode = args[0];
+                const assetIssuer = args[1];
+                if (!assetIssuer) {
+                    return ctx.reply(`Please provide an issuer domain or address for ${assetCode}.`);
+                }
+                try {
+                    yield ctx.reply(`🔍 Looking up asset ${assetCode} from ${assetIssuer}...`);
+                    const op = yield (0, sdk_core_1.createTrustlineOperation)(assetCode, assetIssuer);
+                    // In a real scenario, we would generate a signing link (e.g., Albedo or Stellar Laboratory)
+                    // For now, we'll return the operation details
+                    let message = `✅ Found asset ${assetCode}!\n\n`;
+                    message += `To add this trustline, you can use the following details in your wallet:\n`;
+                    message += `<b>Asset:</b> ${assetCode}\n`;
+                    message += `<b>Issuer:</b> <code>${op.asset.issuer}</code>\n\n`;
+                    message += `<i>Note: In a future update, I will provide a direct signing link.</i>`;
+                    yield ctx.reply(message, { parse_mode: "HTML" });
+                }
+                catch (error) {
+                    yield ctx.reply(`❌ Error: ${error instanceof Error ? error.message : String(error)}`);
                 }
                 return next();
             }));
@@ -112,35 +139,35 @@ class TelegramAdapter {
                     yield ctx.reply(`📊 <b>Chen Pilot Dashboard</b>\n\nAccess your admin dashboard here:\n🔗 <a href="${DASHBOARD_URL}">Open Dashboard</a>\n\n<i>Note: You must be logged in to view the dashboard.</i>`, { parse_mode: 'HTML' });
                 }))();
             }));
+            // #146: Dashboard command
+            this.bot.command('dashboard', (ctx) => __awaiter(this, void 0, void 0, function* () {
+                yield ctx.reply(`📊 <b>Chen Pilot Dashboard</b>\n\nAccess your admin dashboard here:\n🔗 <a href="${DASHBOARD_URL}">Open Dashboard</a>\n\n<i>Note: You must be logged in to view the dashboard.</i>`, { parse_mode: 'HTML' });
+            }));
             // #148: /validate command for Stellar asset verification
             this.bot.command('validate', (ctx) => __awaiter(this, void 0, void 0, function* () {
-                var _a;
-                const userId = String(((_a = ctx.from) === null || _a === void 0 ? void 0 : _a.id) || 'unknown');
-                const commandName = (0, performanceProfiler_1.extractCommandName)(ctx.message.text, 'telegram');
-                yield (0, performanceProfiler_1.withPerformanceProfiling)(commandName, 'telegram', userId, () => __awaiter(this, void 0, void 0, function* () {
-                    const args = ctx.message.text.split(' ').slice(1);
-                    if (args.length < 2) {
-                        return ctx.reply('Usage: /validate <assetCode> <issuerAddress>\nExample: /validate USDC GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5');
-                    }
-                    const [assetCode, issuerAddress] = args;
-                    yield ctx.reply(`🔍 Verifying asset <b>${assetCode}</b> from issuer <code>${issuerAddress.slice(0, 8)}...</code>`, { parse_mode: 'HTML' });
-                    try {
-                        const result = yield this.verificationService.verifyAsset(assetCode, issuerAddress);
-                        const statusEmoji = result.status === 'VERIFIED' ? '✅' : result.status === 'MALICIOUS' ? '🚨' : '⚠️';
-                        let reply = `${statusEmoji} <b>Asset Verification: ${result.status}</b>\n\n`;
-                        reply += `<b>Asset:</b> ${assetCode}\n`;
-                        reply += `<b>Issuer:</b> <code>${issuerAddress}</code>\n`;
-                        if (result.domain)
-                            reply += `<b>Domain:</b> ${result.domain}\n`;
-                        if (result.details)
-                            reply += `<b>Details:</b> ${result.details}\n`;
-                        reply += `\n<b>Safe to use:</b> ${result.isSafe ? 'Yes ✅' : 'No ❌'}`;
-                        yield ctx.reply(reply, { parse_mode: 'HTML' });
-                    }
-                    catch (error) {
-                        yield ctx.reply(`❌ Verification error: ${error instanceof Error ? error.message : String(error)}`);
-                    }
-                }))();
+                const args = ctx.message.text.split(' ').slice(1);
+                if (args.length < 2) {
+                    return ctx.reply('Usage: /validate <assetCode> <issuerAddress>\nExample: /validate USDC GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5');
+                }
+                const [assetCode, issuerAddress] = args;
+                yield ctx.reply(`🔍 Verifying asset <b>${assetCode}</b> from issuer <code>${issuerAddress.slice(0, 8)}...</code>`, { parse_mode: 'HTML' });
+                try {
+                    const result = yield this.verificationService.verifyAsset(assetCode, issuerAddress);
+                    const statusEmoji = result.status === 'VERIFIED' ? '✅' : result.status === 'MALICIOUS' ? '🚨' : '⚠️';
+                    let reply = `${statusEmoji} <b>Asset Verification: ${result.status}</b>\n\n`;
+                    reply += `<b>Asset:</b> ${assetCode}\n`;
+                    reply += `<b>Issuer:</b> <code>${issuerAddress}</code>\n`;
+                    if (result.domain)
+                        reply += `<b>Domain:</b> ${result.domain}\n`;
+                    if (result.details)
+                        reply += `<b>Details:</b> ${result.details}\n`;
+                    reply += `\n<b>Safe to use:</b> ${result.isSafe ? 'Yes ✅' : 'No ❌'}`;
+                    yield ctx.reply(reply, { parse_mode: 'HTML' });
+                }
+                catch (error) {
+                    yield ctx.reply(`❌ Verification error: ${error instanceof Error ? error.message : String(error)}`);
+                }
+                return next();
             }));
             // Set bot commands for mobile menu
             yield this.bot.telegram.setMyCommands([
