@@ -153,4 +153,45 @@ export interface UserNotificationPreferences {
    * Minimum transaction value to notify (in USD)
    */
   minTransactionValue?: number;
+  
+  /**
+   * Preferred currency for reports (USD, XLM, BTC)
+   */
+  preferredCurrency?: 'USD' | 'XLM' | 'BTC';
+}
+
+/**
+ * Price alert configuration
+ */
+export interface PriceAlert {
+  id: string;
+  userId: string;
+  assetCode: string;
+  targetPrice: number;
+  currency: 'USD' | 'XLM' | 'BTC';
+  condition: 'above' | 'below';
+  createdAt: string;
+  triggered: boolean;
+}
+
+/**
+ * Currency conversion rates
+ */
+export interface CurrencyRates {
+  USD: number;
+  XLM: number;
+  BTC: number;
+}
+
+/**
+ * Trending asset data
+ */
+export interface TrendingAsset {
+  assetCode: string;
+  issuer: string;
+  domain?: string;
+  volume24h: number;
+  priceChange24h: number;
+  holders: number;
+  trustlines: number;
 }
