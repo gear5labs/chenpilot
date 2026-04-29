@@ -14,9 +14,11 @@ const discord_js_1 = require("discord.js");
 const sdk_core_1 = require("@chen-pilot/sdk-core");
 const helpProvider_1 = require("../services/helpProvider");
 const assetVerification_1 = require("../assetVerification");
+const performanceProfiler_1 = require("../performanceProfiler");
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:3000";
 const DASHBOARD_URL = process.env.DASHBOARD_URL || `${BACKEND_URL}/dashboard`;
 const HORIZON_URL = process.env.STELLAR_HORIZON_URL || 'https://horizon-testnet.stellar.org';
+const DEBOUNCE_MS = 1000; // 1 second debounce between commands
 // Commands that involve personal account data and must only be used in DMs
 const DM_ONLY_COMMANDS = ['!balance', '!sponsor'];
 function isDM(message) {
@@ -75,7 +77,7 @@ class DiscordAdapter {
                 console.log(`✅ Discord bot logged in as ${(_a = this.client.user) === null || _a === void 0 ? void 0 : _a.tag}`);
                 this.startStatusUpdates();
             });
-            this.client.on("messageCreate", (message) => __awaiter(this, void 0, void 0, function* () {
+            this.client.on("messageCreate", (0, performanceProfiler_1.withPerformanceProfiling)('messageCreate', 'discord', 'system', (message) => __awaiter(this, void 0, void 0, function* () {
                 if (message.author.bot)
                     return;
                 const userId = message.author.id;
@@ -142,11 +144,7 @@ class DiscordAdapter {
                                 timestamp: new Date().toISOString(),
                             });
                         }
-                    }
-                    catch (error) {
-                        console.error("Sponsor command error:", error);
-                        yield message.reply("❌ Could not reach the sponsorship service. Please try again later.");
-                    }
+                    }))();
                 }
                 if (message.content.startsWith("!trustline")) {
                     const args = message.content.split(" ").slice(1);
