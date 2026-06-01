@@ -14,17 +14,20 @@ jobs:
   audit:
     name: x402 Heuristic Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Setup Node.js
+      - name: Setup Node.js environment
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Run x402 Audit
+      - name: Execute x402 Security Audit
         env:
           X402_TOKEN: ${{ secrets.X402_TOKEN }}
           X402_PAYMENT_PROOF: ${{ secrets.X402_PAYMENT_PROOF }}
