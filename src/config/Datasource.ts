@@ -12,7 +12,7 @@ import {
 } from "../Agents/registry/PromptVersion.entity";
 import { WebhookIdempotency } from "../Gateway/webhookIdempotency.entity";
 import { AuditLog } from "../AuditLog/auditLog.entity";
-import { BotSession } from "../Bot/botSession.entity";
+import { DeployedContract } from "../ContractRegistry/contractRegistry.entity";
 
 const isDev = config.env === "development";
 
@@ -35,7 +35,7 @@ const dbOptions: DataSourceOptions = {
     PromptMetric,
     WebhookIdempotency,
     AuditLog,
-    BotSession,
+    DeployedContract,
   ],
   migrations: [isDev ? "src/migrations/**/*.ts" : "dist/migrations/**/*.js"],
   subscribers: [],
