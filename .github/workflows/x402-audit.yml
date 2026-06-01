@@ -1,0 +1,31 @@
+name: x402 Smart Contract Audit
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - 'contracts/**'
+  pull_request:
+    branches: ["**"]
+    paths:
+      - 'contracts/**'
+
+jobs:
+  audit:
+    name: x402 Heuristic Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run x402 Audit
+        env:
+          X402_TOKEN: ${{ secrets.X402_TOKEN }}
+          X402_PAYMENT_PROOF: ${{ secrets.X402_PAYMENT_PROOF }}
+        run: node .github/scripts/x402-audit.js
