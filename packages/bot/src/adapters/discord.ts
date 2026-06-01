@@ -8,8 +8,12 @@ import {
   TextBasedChannel,
   ActivityType,
   GuildMember,
+  ButtonBuilder,
+  ButtonStyle,
+  ActionRowBuilder,
+  Interaction,
 } from "discord.js";
-import { TransactionNotificationData, PriceAlert, TrendingAsset } from "../types";
+import { TransactionNotificationData, PriceAlert, TrendingAsset, Button, ButtonInteraction as GenericButtonInteraction, ButtonHandler } from "../types";
 import {
   createTrustlineOperation,
   getNetworkStatus,
@@ -84,6 +88,8 @@ export class DiscordAdapter {
   private alertCheckInterval?: ReturnType<typeof setInterval>;
   // #128: Market overview digest interval
   private marketOverviewInterval?: ReturnType<typeof setInterval>;
+  // Button handlers map: buttonId -> ButtonHandler
+  private buttonHandlers: Map<string, ButtonHandler> = new Map();
 
   constructor(token: string, auditLogChannelId?: string) {
     this.token = token;
@@ -271,6 +277,44 @@ export class DiscordAdapter {
           console.error('❌ Error sending welcome message:', error);
         }
       });
+    });
+
+    // Handle button interactions
+    this.client.on("interactionCreate", async (interaction: Interaction) => {
+      if (!interaction.isButton()) return;
+
+      const buttonId = interaction.customId;
+      const handler = this.buttonHandlers.get(buttonId);
+
+      const genericInteraction: GenericButtonInteraction = {
+        platform: 'discord',
+        userId: interaction.user.id,
+        buttonId: buttonId,
+        chatId: interaction.channelId || '',
+        raw: interaction,
+        reply: async (message: string) => {
+          if (interaction.deferred || interaction.replied) {
+            await interaction.followUp(message);
+          } else {
+            await interaction.reply(message);
+          }
+        }
+      };
+
+      if (handler) {
+        try {
+          await handler(genericInteraction);
+        } catch (error) {
+          console.error('Error handling button interaction:', error);
+          if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply('❌ An error occurred while processing your button click.');
+          }
+        }
+      } else {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply('⚠️ No handler found for this button.');
+        }
+      }
     });
 
     this.client.on("messageCreate", withPerformanceProfiling(
@@ -484,6 +528,27 @@ export class DiscordAdapter {
             await message.reply(
               `📊 **Chen Pilot Dashboard**\n\nAccess your admin dashboard here:\n🔗 ${DASHBOARD_URL}\n\n*Note: You must be logged in to view the dashboard.*`
             );
+          })();
+        }
+
+        if (message.content === '!buttons') {
+          await withPerformanceProfiling('!buttons', 'discord', userId, async () => {
+            // Example buttons
+            const buttons: Button[] = [
+              { label: 'Primary', id: 'primary-btn', style: 'primary' },
+              { label: 'Success', id: 'success-btn', style: 'success' },
+              { label: 'Open Dashboard', id: 'dashboard-btn', url: DASHBOARD_URL }
+            ];
+
+            // Register example handlers
+            this.registerButtonHandler('primary-btn', async (interaction) => {
+              await interaction.reply('Primary button pressed!');
+            });
+            this.registerButtonHandler('success-btn', async (interaction) => {
+              await interaction.reply('Success button pressed!');
+            });
+
+            await this.sendWithButtons(message.channelId, 'Try pressing these buttons!', buttons);
           })();
         }
 
@@ -975,5 +1040,74 @@ If you ever need help, just send \`!help\` or type \`!thread\` to start a suppor
 — *Chen Pilot Team*`;
 
     await sendMessage(finalTips);
+  }
+
+  /**
+   * Register a handler for button interactions
+   */
+  registerButtonHandler(buttonId: string, handler: ButtonHandler): void {
+    this.buttonHandlers.set(buttonId, handler);
+  }
+
+  /**
+   * Send a message with buttons to a specific channel
+   */
+  async sendWithButtons(channelId: string, content: string, buttons: Button[]): Promise<boolean> {
+    if (!this.client) {
+      console.warn("⚠️ Discord bot not initialized");
+      return false;
+    }
+
+    try {
+      const channel = this.client.channels.cache.get(channelId) as TextChannel;
+      if (!channel) {
+        console.warn(`⚠️ Channel ${channelId} not found`);
+        return false;
+      }
+
+      // Build the button components
+      const row = new ActionRowBuilder<ButtonBuilder>();
+
+      for (const btn of buttons) {
+        const button = new ButtonBuilder();
+
+        if (btn.url) {
+          button.setStyle(ButtonStyle.Link).setURL(btn.url);
+        } else {
+          button.setCustomId(btn.id);
+
+          // Map our generic style to Discord's ButtonStyle
+          switch (btn.style) {
+            case 'primary':
+              button.setStyle(ButtonStyle.Primary);
+              break;
+            case 'secondary':
+              button.setStyle(ButtonStyle.Secondary);
+              break;
+            case 'success':
+              button.setStyle(ButtonStyle.Success);
+              break;
+            case 'danger':
+              button.setStyle(ButtonStyle.Danger);
+              break;
+            default:
+              button.setStyle(ButtonStyle.Primary);
+          }
+        }
+
+        button.setLabel(btn.label);
+        row.addComponents(button);
+      }
+
+      await channel.send({
+        content: content,
+        components: [row]
+      });
+
+      return true;
+    } catch (error) {
+      console.error("Error sending message with buttons:", error);
+      return false;
+    }
   }
 }

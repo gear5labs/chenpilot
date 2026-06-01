@@ -1,5 +1,5 @@
 import { Telegraf } from "telegraf";
-import { TransactionNotificationData } from "../types";
+import { TransactionNotificationData, Button, ButtonInteraction as GenericButtonInteraction, ButtonHandler } from "../types";
 import { createTrustlineOperation } from "@chen-pilot/sdk-core";
 import { searchFeatures, formatHelpMessage } from "../services/helpProvider";
 import { AssetVerificationService } from '../assetVerification';
@@ -41,6 +41,8 @@ export class TelegramAdapter {
   private defaultRateLimiter: RateLimiter;
   private strictRateLimiter: RateLimiter;
   private verificationService: AssetVerificationService;
+  // Button handlers map: buttonId -> ButtonHandler
+  private buttonHandlers: Map<string, ButtonHandler> = new Map();
 
   constructor(token: string) {
     this.token = token;
@@ -107,6 +109,37 @@ export class TelegramAdapter {
       }
       
       return next();
+    });
+
+    // Handle callback queries (button presses)
+    this.bot.on('callback_query', async (ctx: any) => {
+      const buttonId = ctx.callbackQuery.data;
+      const userId = String(ctx.from?.id || 'unknown');
+      const chatId = String(ctx.chat?.id || '');
+
+      const genericInteraction: GenericButtonInteraction = {
+        platform: 'telegram',
+        userId: userId,
+        buttonId: buttonId,
+        chatId: chatId,
+        raw: ctx,
+        reply: async (message: string) => {
+          await ctx.answerCbQuery(); // Acknowledge the callback query
+          await ctx.reply(message);
+        }
+      };
+
+      const handler = this.buttonHandlers.get(buttonId);
+      if (handler) {
+        try {
+          await handler(genericInteraction);
+        } catch (error) {
+          console.error('Error handling button interaction:', error);
+          await ctx.answerCbQuery('❌ An error occurred while processing your button click.');
+        }
+      } else {
+        await ctx.answerCbQuery('⚠️ No handler found for this button.');
+      }
     });
 
     this.bot.start(async (ctx: any) => {
@@ -204,6 +237,30 @@ export class TelegramAdapter {
           `📊 <b>Chen Pilot Dashboard</b>\n\nAccess your admin dashboard here:\n🔗 <a href="${DASHBOARD_URL}">Open Dashboard</a>\n\n<i>Note: You must be logged in to view the dashboard.</i>`,
           { parse_mode: 'HTML' }
         );
+      })();
+    });
+
+    // Example buttons command
+    this.bot.command('buttons', async (ctx: any) => {
+      const userId = String(ctx.from?.id || 'unknown');
+      await withPerformanceProfiling('/buttons', 'telegram', userId, async () => {
+        // Example buttons
+        const buttons: Button[] = [
+          { label: 'Primary', id: 'primary-btn', style: 'primary' },
+          { label: 'Success', id: 'success-btn', style: 'success' },
+          { label: 'Open Dashboard', id: 'dashboard-btn', url: DASHBOARD_URL }
+        ];
+
+        // Register example handlers
+        this.registerButtonHandler('primary-btn', async (interaction) => {
+          await interaction.reply('Primary button pressed!');
+        });
+        this.registerButtonHandler('success-btn', async (interaction) => {
+          await interaction.reply('Success button pressed!');
+        });
+
+        const chatId = String(ctx.chat?.id || '');
+        await this.sendWithButtons(chatId, 'Try pressing these buttons!', buttons);
       })();
     });
 
@@ -372,6 +429,46 @@ export class TelegramAdapter {
       return true;
     } catch (error) {
       console.error("Error sending Telegram notification:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Register a handler for button interactions
+   */
+  registerButtonHandler(buttonId: string, handler: ButtonHandler): void {
+    this.buttonHandlers.set(buttonId, handler);
+  }
+
+  /**
+   * Send a message with buttons to a specific chat
+   */
+  async sendWithButtons(chatId: string, content: string, buttons: Button[]): Promise<boolean> {
+    if (!this.bot) {
+      console.warn("⚠️ Telegram bot not initialized");
+      return false;
+    }
+
+    try {
+      // Build inline keyboard
+      const keyboard = buttons.map(btn => {
+        if (btn.url) {
+          return [{ text: btn.label, url: btn.url }];
+        } else {
+          return [{ text: btn.label, callback_data: btn.id }];
+        }
+      });
+
+      await this.bot.telegram.sendMessage(chatId, content, {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: keyboard
+        }
+      });
+
+      return true;
+    } catch (error) {
+      console.error("Error sending message with buttons:", error);
       return false;
     }
   }
