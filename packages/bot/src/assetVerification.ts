@@ -1,49 +1,41 @@
-import * as StellarSdk from 'stellar-sdk';
+import {
+  StellarTrustFramework,
+  AssetTrustResult,
+  TrustPolicyConfig,
+  StellarMetadataManager,
+} from "@chen-pilot/sdk-core";
 
-export interface VerificationResult {
-  isSafe: boolean;
-  domain?: string;
-  status: 'VERIFIED' | 'UNVERIFIED' | 'MALICIOUS';
-  details?: string;
-}
+const parseCsv = (value?: string): string[] =>
+  value
+    ? value.split(",").map((entry) => entry.trim()).filter(Boolean)
+    : [];
 
-/**
- * #148: Verifies a Stellar asset against its issuer's home_domain and TOML (SEP-1).
- */
 export class AssetVerificationService {
-  private horizonServer: StellarSdk.Horizon.Server;
+  private trustFramework: StellarTrustFramework;
 
-  constructor(horizonUrl: string) {
-    this.horizonServer = new StellarSdk.Horizon.Server(horizonUrl);
+  constructor(horizonUrl: string, metadataManager?: StellarMetadataManager) {
+    const config: TrustPolicyConfig = {
+      horizonUrl,
+      enableScamDetection: true,
+      allowUnverifiedAssetUsage: false,
+      requireVerifiedAssetUsage: false,
+      safeIssuers: parseCsv(process.env.TRUST_SAFE_ISSUERS),
+      blockedIssuers: parseCsv(process.env.TRUST_BLOCKED_ISSUERS),
+      safeAssets: parseCsv(process.env.TRUST_SAFE_ASSETS),
+      blockedAssets: parseCsv(process.env.TRUST_BLOCKED_ASSETS),
+      safeDomains: parseCsv(process.env.TRUST_SAFE_DOMAINS),
+      blockedDomains: parseCsv(process.env.TRUST_BLOCKED_DOMAINS),
+      metadataManager,
+    };
+
+    this.trustFramework = new StellarTrustFramework(config);
   }
 
-  async verifyAsset(assetCode: string, issuerAddress: string): Promise<VerificationResult> {
-    try {
-      const issuerAccount = await this.horizonServer.loadAccount(issuerAddress);
-      const homeDomain = issuerAccount.home_domain;
+  async verifyAsset(assetCode: string, issuerAddress: string): Promise<AssetTrustResult> {
+    return this.trustFramework.verifyAsset(assetCode, issuerAddress);
+  }
 
-      if (!homeDomain) {
-        return { isSafe: false, status: 'UNVERIFIED', details: 'No home_domain set on issuer account.' };
-      }
-
-      const toml = await StellarSdk.StellarToml.Resolver.resolve(homeDomain);
-      const currencies: Record<string, unknown>[] = toml.CURRENCIES || [];
-      const isListed = currencies.some(
-        (c) => c['code'] === assetCode && c['issuer'] === issuerAddress
-      );
-
-      if (isListed) {
-        return { isSafe: true, domain: homeDomain, status: 'VERIFIED' };
-      }
-
-      return {
-        isSafe: false,
-        domain: homeDomain,
-        status: 'MALICIOUS',
-        details: 'Asset issuer claims domain but asset is not listed in TOML file.',
-      };
-    } catch {
-      return { isSafe: false, status: 'UNVERIFIED', details: 'Verification failed due to network or TOML resolution error.' };
-    }
+  async canExecuteTrustline(assetCode: string, issuerAddress: string) {
+    return this.trustFramework.canExecuteTrustline(assetCode, issuerAddress);
   }
 }

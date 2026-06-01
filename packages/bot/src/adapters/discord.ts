@@ -454,6 +454,19 @@ export class DiscordAdapter {
               await message.reply(
                 `🔍 Looking up asset ${assetCode} from ${assetIssuer}...`
               );
+
+              const gate = await this.verificationService.canExecuteTrustline(
+                assetCode,
+                assetIssuer
+              );
+
+              if (!gate.allowed) {
+                await message.reply(
+                  `🚫 Trustline blocked: ${gate.reason || gate.trustResult.details}`
+                );
+                return;
+              }
+
               const op = await createTrustlineOperation(assetCode, assetIssuer);
 
               let response = `✅ Found asset ${assetCode}!\n\n`;
@@ -462,11 +475,15 @@ export class DiscordAdapter {
               response += `**Issuer:** \`${(op as any).asset.issuer}\`\n\n`;
               response += `*Note: In a future update, I will provide a direct signing link.*`;
 
+              if (gate.trustResult.status === 'UNVERIFIED') {
+                response += `\n\n⚠️ This asset remains unverified. Proceed with caution.`;
+              }
+
               await message.reply(response);
               await this.logAuditAction({
                 action: 'TRUSTLINE_LOOKUP',
                 triggeredBy: message.author.id,
-                details: `Asset: ${assetCode}, Issuer: ${assetIssuer}`,
+                details: `Asset: ${assetCode}, Issuer: ${assetIssuer}, TrustStatus: ${gate.trustResult.status}`,
                 success: true,
                 timestamp: new Date().toISOString(),
               });

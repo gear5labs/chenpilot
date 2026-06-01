@@ -1,6 +1,7 @@
 import { BaseTool } from "./base/BaseTool";
 import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 import logger from "../../config/logger";
+import { StellarTrustFramework } from "../../../packages/sdk/src/trustFramework";
 
 /**
  * SEP-1 Stellar.toml metadata structure
@@ -101,9 +102,16 @@ export class Sep1Tool extends BaseTool<AssetMetadataPayload> {
     version: "1.0.0",
   };
 
+  private trustFramework: StellarTrustFramework;
+
   constructor() {
     super();
     this.fetch = globalThis.fetch.bind(globalThis);
+    this.trustFramework = new StellarTrustFramework({
+      enableScamDetection: true,
+      allowUnverifiedAssetUsage: true,
+      requireVerifiedAssetUsage: false,
+    });
   }
 
   async execute(payload: AssetMetadataPayload): Promise<ToolResult> {
@@ -221,6 +229,13 @@ export class Sep1Tool extends BaseTool<AssetMetadataPayload> {
       };
     }
 
+    let trustResult = undefined;
+    try {
+      trustResult = await this.trustFramework.verifyAsset(assetCode, assetIssuer);
+    } catch (error) {
+      logger.warn("SEP-1 trust evaluation failed:", error);
+    }
+
     return {
       action: "sep1",
       status: "success",
@@ -229,6 +244,7 @@ export class Sep1Tool extends BaseTool<AssetMetadataPayload> {
         issuer: assetIssuer,
         domain,
         ...currency,
+        trust: trustResult,
       },
       message: `Retrieved metadata for ${assetCode} from ${domain}`,
     };
