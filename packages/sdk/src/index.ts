@@ -5,6 +5,7 @@ export * from "./signature-providers";
 export * from "./soroban";
 export * from "./events";
 export * from "./trustline";
+export * from "./trustFramework";
 export * from "./rateLimiter";
 export * from "./planVerification";
 export * from "./agentClient";

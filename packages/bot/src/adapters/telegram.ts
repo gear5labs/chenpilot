@@ -142,6 +142,17 @@ export class TelegramAdapter {
           await ctx.reply(
             `🔍 Looking up asset ${assetCode} from ${assetIssuer}...`
           );
+
+          const gate = await this.verificationService.canExecuteTrustline(
+            assetCode,
+            assetIssuer
+          );
+
+          if (!gate.allowed) {
+            await ctx.reply(`🚫 Trustline blocked: ${gate.reason || gate.trustResult.details}`);
+            return;
+          }
+
           const op = await createTrustlineOperation(assetCode, assetIssuer);
 
           // In a real scenario, we would generate a signing link (e.g., Albedo or Stellar Laboratory)
@@ -150,6 +161,9 @@ export class TelegramAdapter {
           message += `To add this trustline, you can use the following details in your wallet:\n`;
           message += `<b>Asset:</b> ${assetCode}\n`;
           message += `<b>Issuer:</b> <code>${(op as any).asset.issuer}</code>\n\n`;
+          if (gate.trustResult.status === 'UNVERIFIED') {
+            message += `<b>Warning:</b> This asset is unverified. Proceed with caution.\n\n`;
+          }
           message += `<i>Note: In a future update, I will provide a direct signing link.</i>`;
 
           await ctx.reply(message, { parse_mode: "HTML" });
