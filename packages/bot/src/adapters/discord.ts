@@ -31,7 +31,7 @@ const ADVANCED_ROLE_NAMES = (process.env.DISCORD_ADVANCED_ROLES || 'DeFi Pro,Wha
 const SUPPORTED_CURRENCIES = ['USD', 'XLM', 'BTC'] as const;
 
 // Commands that involve personal account data and must only be used in DMs
-const DM_ONLY_COMMANDS = ['!balance', '!sponsor'];
+const DM_ONLY_COMMANDS = ['!balance', '!sponsor', '!portfolio'];
 
 // Commands that start a wizard
 const WIZARD_COMMANDS = ['!multisig'];
@@ -343,107 +343,177 @@ export class DiscordAdapter {
           const response = this.multisigWizard.processInput(userId, 'discord', message.content);
           await message.reply(response.message);
         }
-      }
 
-      // #118: !currency command — set preferred report currency
-      if (message.content.startsWith('!currency')) {
-        const arg = message.content.split(' ')[1]?.toUpperCase() as 'USD' | 'XLM' | 'BTC' | undefined;
-        if (!arg || !SUPPORTED_CURRENCIES.includes(arg as any)) {
-          return message.reply(`Usage: !currency <USD|XLM|BTC>\nCurrent: **${this.userCurrency.get(userId) ?? 'USD'}**`);
+        // #118: !currency command — set preferred report currency
+        if (message.content.startsWith('!currency')) {
+          const arg = message.content.split(' ')[1]?.toUpperCase() as 'USD' | 'XLM' | 'BTC' | undefined;
+          if (!arg || !SUPPORTED_CURRENCIES.includes(arg as any)) {
+            return message.reply(`Usage: !currency <USD|XLM|BTC>\nCurrent: **${this.userCurrency.get(userId) ?? 'USD'}**`);
+          }
+          this.userCurrency.set(userId, arg);
+          return message.reply(`✅ Report currency set to **${arg}**`);
         }
-        this.userCurrency.set(userId, arg);
-        return message.reply(`✅ Report currency set to **${arg}**`);
-      }
 
-      // #118: !report command — portfolio report in preferred currency
-      if (message.content.startsWith('!report')) {
-        const currency = this.userCurrency.get(userId) ?? 'USD';
-        await message.reply(`⏳ Fetching portfolio report in **${currency}**...`);
-        try {
-          const res = await fetch(`${BACKEND_URL}/api/portfolio/${userId}?currency=${currency}`);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = await res.json() as { totalValue: number; assets: { code: string; balance: number; value: number }[] };
-          let reply = `📊 **Portfolio Report (${currency})**\n\n`;
-          reply += `**Total Value:** ${data.totalValue.toFixed(4)} ${currency}\n\n`;
-          for (const a of data.assets) {
-            reply += `• **${a.code}**: ${a.balance} ≈ ${a.value.toFixed(4)} ${currency}\n`;
+        // #118: !report command — portfolio report in preferred currency
+        if (message.content.startsWith('!report')) {
+          const currency = this.userCurrency.get(userId) ?? 'USD';
+          await message.reply(`⏳ Fetching portfolio report in **${currency}**...`);
+          try {
+            const res = await fetch(`${BACKEND_URL}/api/portfolio/${userId}?currency=${currency}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json() as { totalValue: number; assets: { code: string; balance: number; value: number }[] };
+            let reply = `📊 **Portfolio Report (${currency})**\n\n`;
+            reply += `**Total Value:** ${data.totalValue.toFixed(4)} ${currency}\n\n`;
+            for (const a of data.assets) {
+              reply += `• **${a.code}**: ${a.balance} ≈ ${a.value.toFixed(4)} ${currency}\n`;
+            }
+            return message.reply(reply);
+          } catch {
+            return message.reply(`❌ Could not fetch portfolio. Make sure your account is registered.`);
+          }
+        }
+
+        // !portfolio — formatted portfolio summary with per-asset balances and net worth
+        if (message.content.startsWith('!portfolio')) {
+          if (!isDM(message)) {
+            await rejectPublicChannel(message);
+            return;
+          }
+          await withPerformanceProfiling('!portfolio', 'discord', userId, async () => {
+            const args = message.content.split(' ').slice(1);
+            const requestedCurrency = args[0]?.toUpperCase() as 'USD' | 'XLM' | 'BTC' | undefined;
+            const currency = requestedCurrency ?? this.userCurrency.get(userId) ?? 'USD';
+
+            if (!SUPPORTED_CURRENCIES.includes(currency as any)) {
+              return message.reply(
+                `❌ Unsupported currency **${currency}**. Choose one of: ${SUPPORTED_CURRENCIES.join(', ')}\nExample: \`!portfolio USD\``
+              );
+            }
+
+            await message.reply(`⏳ Fetching your Stellar portfolio in **${currency}**...`);
+
+            try {
+              const res = await fetch(`${BACKEND_URL}/api/portfolio/${userId}?currency=${currency}`);
+              if (!res.ok) {
+                const err = await res.json() as { message?: string };
+                throw new Error(err.message ?? `HTTP ${res.status}`);
+              }
+
+              const data = await res.json() as {
+                address: string;
+                currency: string;
+                totalValue: number | null;
+                assets: { code: string; issuer: string; balance: number; value: number | null }[];
+                fetchedAt: string;
+              };
+
+              const shortAddr = `\`${data.address.slice(0, 4)}...${data.address.slice(-4)}\``;
+              const netWorth = data.totalValue !== null
+                ? `**${data.totalValue.toFixed(4)} ${data.currency}**`
+                : '*price data unavailable*';
+
+              let reply = `💼 **Stellar Portfolio Summary**\n`;
+              reply += `📬 Account: ${shortAddr}\n`;
+              reply += `💰 **Net Worth:** ${netWorth}\n`;
+              reply += `🕐 *${new Date(data.fetchedAt).toUTCString()}*\n\n`;
+              reply += `**Assets**\n`;
+
+              if (data.assets.length === 0) {
+                reply += '*No assets found on this account.*\n';
+              } else {
+                for (const a of data.assets) {
+                  const valueStr = a.value !== null
+                    ? ` ≈ ${a.value.toFixed(4)} ${data.currency}`
+                    : '';
+                  const issuerStr = a.issuer
+                    ? ` (\`${a.issuer.slice(0, 6)}...\`)`
+                    : '';
+                  reply += `• **${a.code}**${issuerStr}: ${a.balance.toFixed(7)}${valueStr}\n`;
+                }
+              }
+
+              reply += `\n*Tip: use \`!currency <USD|XLM|BTC>\` to change your default currency.*`;
+              return message.reply(reply);
+            } catch (err) {
+              return message.reply(
+                `❌ Could not fetch portfolio: ${err instanceof Error ? err.message : String(err)}\n` +
+                `Make sure your account is registered — use \`!sponsor\` to get started.`
+              );
+            }
+          })();
+        }
+
+        // #119: !alert command — set a price alert
+        if (message.content.startsWith('!alert')) {
+          const args = message.content.split(' ').slice(1);
+          if (args.length < 3) {
+            return message.reply('Usage: !alert <assetCode> <above|below> <price> [USD|XLM|BTC]\nExample: !alert XLM above 0.15 USD');
+          }
+          const [assetCode, conditionRaw, priceRaw, currencyRaw] = args;
+          const condition = conditionRaw.toLowerCase() as 'above' | 'below';
+          if (condition !== 'above' && condition !== 'below') {
+            return message.reply('❌ Condition must be `above` or `below`.');
+          }
+          const targetPrice = parseFloat(priceRaw);
+          if (isNaN(targetPrice) || targetPrice <= 0) {
+            return message.reply('❌ Price must be a positive number.');
+          }
+          const currency = (currencyRaw?.toUpperCase() ?? this.userCurrency.get(userId) ?? 'USD') as 'USD' | 'XLM' | 'BTC';
+          if (!SUPPORTED_CURRENCIES.includes(currency as any)) {
+            return message.reply(`❌ Currency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`);
+          }
+          const alertId = `${userId}-${assetCode}-${Date.now()}`;
+          const alert: PriceAlert = { id: alertId, userId, assetCode: assetCode.toUpperCase(), targetPrice, currency, condition, createdAt: new Date().toISOString(), triggered: false };
+          this.priceAlerts.set(alertId, alert);
+          // Register channel for DM delivery
+          if (!this.userChannels.has(userId)) this.userChannels.set(userId, message.channelId);
+          return message.reply(`🔔 Alert set: notify me when **${assetCode.toUpperCase()}** is ${condition} **${targetPrice} ${currency}**`);
+        }
+
+        // #119: !alerts — list active alerts
+        if (message.content === '!alerts') {
+          const userAlerts = [...this.priceAlerts.values()].filter(a => a.userId === userId && !a.triggered);
+          if (userAlerts.length === 0) return message.reply('📭 You have no active price alerts. Use `!alert` to set one.');
+          let reply = `🔔 **Your Active Alerts**\n\n`;
+          for (const a of userAlerts) {
+            reply += `• **${a.assetCode}** ${a.condition} ${a.targetPrice} ${a.currency} (ID: \`${a.id.slice(-6)}\`)\n`;
           }
           return message.reply(reply);
-        } catch {
-          return message.reply(`❌ Could not fetch portfolio. Make sure your account is registered.`);
         }
-      }
 
-      // #119: !alert command — set a price alert
-      if (message.content.startsWith('!alert')) {
-        const args = message.content.split(' ').slice(1);
-        if (args.length < 3) {
-          return message.reply('Usage: !alert <assetCode> <above|below> <price> [USD|XLM|BTC]\nExample: !alert XLM above 0.15 USD');
-        }
-        const [assetCode, conditionRaw, priceRaw, currencyRaw] = args;
-        const condition = conditionRaw.toLowerCase() as 'above' | 'below';
-        if (condition !== 'above' && condition !== 'below') {
-          return message.reply('❌ Condition must be `above` or `below`.');
-        }
-        const targetPrice = parseFloat(priceRaw);
-        if (isNaN(targetPrice) || targetPrice <= 0) {
-          return message.reply('❌ Price must be a positive number.');
-        }
-        const currency = (currencyRaw?.toUpperCase() ?? this.userCurrency.get(userId) ?? 'USD') as 'USD' | 'XLM' | 'BTC';
-        if (!SUPPORTED_CURRENCIES.includes(currency as any)) {
-          return message.reply(`❌ Currency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`);
-        }
-        const alertId = `${userId}-${assetCode}-${Date.now()}`;
-        const alert: PriceAlert = { id: alertId, userId, assetCode: assetCode.toUpperCase(), targetPrice, currency, condition, createdAt: new Date().toISOString(), triggered: false };
-        this.priceAlerts.set(alertId, alert);
-        // Register channel for DM delivery
-        if (!this.userChannels.has(userId)) this.userChannels.set(userId, message.channelId);
-        return message.reply(`🔔 Alert set: notify me when **${assetCode.toUpperCase()}** is ${condition} **${targetPrice} ${currency}**`);
-      }
-
-      // #119: !alerts — list active alerts
-      if (message.content === '!alerts') {
-        const userAlerts = [...this.priceAlerts.values()].filter(a => a.userId === userId && !a.triggered);
-        if (userAlerts.length === 0) return message.reply('📭 You have no active price alerts. Use `!alert` to set one.');
-        let reply = `🔔 **Your Active Alerts**\n\n`;
-        for (const a of userAlerts) {
-          reply += `• **${a.assetCode}** ${a.condition} ${a.targetPrice} ${a.currency} (ID: \`${a.id.slice(-6)}\`)\n`;
-        }
-        return message.reply(reply);
-      }
-
-      // #120: !advanced — role-gated command example
-      if (message.content.startsWith('!advanced')) {
-        if (!this.hasAdvancedRole(message)) {
-          return message.reply(`🔒 This command requires one of the following roles: **${ADVANCED_ROLE_NAMES.join(', ')}**`);
-        }
-        return message.reply('✅ Advanced command executed. (Role check passed)');
-      }
-
-      // #121: !discover — suggest trending Stellar assets
-      if (message.content === '!discover') {
-        if (!this.hasAdvancedRole(message)) {
-          return message.reply(`🔒 \`!discover\` requires one of the following roles: **${ADVANCED_ROLE_NAMES.join(', ')}**`);
-        }
-        await message.reply('🔍 Discovering trending Stellar assets...');
-        try {
-          const res = await fetch(`${BACKEND_URL}/api/assets/trending`);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const assets = await res.json() as TrendingAsset[];
-          if (!assets.length) return message.reply('📭 No trending assets found at this time.');
-          let reply = `🌟 **Trending Stellar Assets**\n\n`;
-          for (const a of assets.slice(0, 5)) {
-            const change = a.priceChange24h >= 0 ? `+${a.priceChange24h.toFixed(2)}%` : `${a.priceChange24h.toFixed(2)}%`;
-            const emoji = a.priceChange24h >= 0 ? '📈' : '📉';
-            reply += `${emoji} **${a.assetCode}**${a.domain ? ` (${a.domain})` : ''}\n`;
-            reply += `  24h Change: ${change} | Volume: ${a.volume24h.toLocaleString()} | Holders: ${a.holders.toLocaleString()}\n\n`;
+        // #120: !advanced — role-gated command example
+        if (message.content.startsWith('!advanced')) {
+          if (!this.hasAdvancedRole(message)) {
+            return message.reply(`🔒 This command requires one of the following roles: **${ADVANCED_ROLE_NAMES.join(', ')}**`);
           }
-          return message.reply(reply);
-        } catch {
-          return message.reply('❌ Could not fetch trending assets. Please try again later.');
+          return message.reply('✅ Advanced command executed. (Role check passed)');
+        }
+
+        // #121: !discover — suggest trending Stellar assets
+        if (message.content === '!discover') {
+          if (!this.hasAdvancedRole(message)) {
+            return message.reply(`🔒 \`!discover\` requires one of the following roles: **${ADVANCED_ROLE_NAMES.join(', ')}**`);
+          }
+          await message.reply('🔍 Discovering trending Stellar assets...');
+          try {
+            const res = await fetch(`${BACKEND_URL}/api/assets/trending`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const assets = await res.json() as TrendingAsset[];
+            if (!assets.length) return message.reply('📭 No trending assets found at this time.');
+            let reply = `🌟 **Trending Stellar Assets**\n\n`;
+            for (const a of assets.slice(0, 5)) {
+              const change = a.priceChange24h >= 0 ? `+${a.priceChange24h.toFixed(2)}%` : `${a.priceChange24h.toFixed(2)}%`;
+              const emoji = a.priceChange24h >= 0 ? '📈' : '📉';
+              reply += `${emoji} **${a.assetCode}**${a.domain ? ` (${a.domain})` : ''}\n`;
+              reply += `  24h Change: ${change} | Volume: ${a.volume24h.toLocaleString()} | Holders: ${a.holders.toLocaleString()}\n\n`;
+            }
+            return message.reply(reply);
+          } catch {
+            return message.reply('❌ Could not fetch trending assets. Please try again later.');
+          }
         }
       }
-    });
+    ));
 
     await this.client.login(token);
     this.startAlertPolling();

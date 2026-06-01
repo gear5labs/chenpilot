@@ -7,12 +7,13 @@ import { RateLimiter, DEFAULT_RATE_LIMIT, STRICT_RATE_LIMIT } from '../rateLimit
 import { withPerformanceProfiling, extractCommandName } from '../performanceProfiler';
 import { MultisigWizard } from '../multisigWizard';
 
+const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:3000";
 const DASHBOARD_URL = process.env.DASHBOARD_URL || `${process.env.API_BASE_URL || 'http://localhost:2333'}/dashboard`;
 const HORIZON_URL = process.env.STELLAR_HORIZON_URL || 'https://horizon-testnet.stellar.org';
 const DEBOUNCE_MS = 1000; // 1 second debounce between commands
 
 // Commands that involve personal account data and must only be used in DMs
-const DM_ONLY_COMMANDS = ['/balance'];
+const DM_ONLY_COMMANDS = ['/balance', '/portfolio'];
 
 // Commands that start a wizard
 const WIZARD_COMMANDS = ['/multisig'];
@@ -202,9 +203,87 @@ export class TelegramAdapter {
       })();
     });
 
-    // #125: Multisig wizard command
-    this.bot.command('multisig', async (ctx: any) => {
+    // /portfolio — formatted portfolio summary with per-asset balances and net worth
+    this.bot.command('portfolio', async (ctx: any) => {
       const userId = String(ctx.from?.id || 'unknown');
+      const commandName = extractCommandName(ctx.message.text, 'telegram');
+
+      if (!isDM(ctx)) {
+        await rejectPublicChannel(ctx);
+        return;
+      }
+
+      await withPerformanceProfiling(commandName, 'telegram', userId, async () => {
+        const SUPPORTED = ['USD', 'XLM', 'BTC'];
+        const args = ctx.message.text.split(' ').slice(1);
+        const currency = (args[0]?.toUpperCase() ?? 'USD');
+
+        if (!SUPPORTED.includes(currency)) {
+          return ctx.reply(
+            `❌ Unsupported currency <b>${currency}</b>. Choose one of: ${SUPPORTED.join(', ')}\nExample: <code>/portfolio USD</code>`,
+            { parse_mode: 'HTML' }
+          );
+        }
+
+        await ctx.reply(
+          `⏳ Fetching your Stellar portfolio in <b>${currency}</b>...`,
+          { parse_mode: 'HTML' }
+        );
+
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/portfolio/${userId}?currency=${currency}`);
+          if (!res.ok) {
+            const err = await res.json() as { message?: string };
+            throw new Error(err.message ?? `HTTP ${res.status}`);
+          }
+
+          const data = await res.json() as {
+            address: string;
+            currency: string;
+            totalValue: number | null;
+            assets: { code: string; issuer: string; balance: number; value: number | null }[];
+            fetchedAt: string;
+          };
+
+          const shortAddr = `<code>${data.address.slice(0, 4)}...${data.address.slice(-4)}</code>`;
+          const netWorth = data.totalValue !== null
+            ? `<b>${data.totalValue.toFixed(4)} ${data.currency}</b>`
+            : '<i>price data unavailable</i>';
+
+          let reply = `💼 <b>Stellar Portfolio Summary</b>\n`;
+          reply += `📬 Account: ${shortAddr}\n`;
+          reply += `💰 <b>Net Worth:</b> ${netWorth}\n`;
+          reply += `🕐 <i>${new Date(data.fetchedAt).toUTCString()}</i>\n\n`;
+          reply += `<b>Assets</b>\n`;
+
+          if (data.assets.length === 0) {
+            reply += '<i>No assets found on this account.</i>\n';
+          } else {
+            for (const a of data.assets) {
+              const valueStr = a.value !== null
+                ? ` ≈ ${a.value.toFixed(4)} ${data.currency}`
+                : '';
+              const issuerStr = a.issuer
+                ? ` (<code>${a.issuer.slice(0, 6)}...</code>)`
+                : '';
+              reply += `• <b>${a.code}</b>${issuerStr}: ${a.balance.toFixed(7)}${valueStr}\n`;
+            }
+          }
+
+          reply += `\n<i>Tip: use /portfolio &lt;USD|XLM|BTC&gt; to choose a currency.</i>`;
+          return ctx.reply(reply, { parse_mode: 'HTML' });
+        } catch (err) {
+          return ctx.reply(
+            `❌ Could not fetch portfolio: ${err instanceof Error ? err.message : String(err)}\n` +
+            `Make sure your account is registered — use /sponsor to get started.`,
+            { parse_mode: 'HTML' }
+          );
+        }
+      })();
+    });
+
+    // #125: Multisig wizard command
+    this.bot.command('multisig', async (ctx: any) => {      const userId = String(ctx.from?.id || 'unknown');
       if (!isDM(ctx)) {
         await rejectPublicChannel(ctx);
         return;
@@ -234,6 +313,7 @@ export class TelegramAdapter {
     await this.bot.telegram.setMyCommands([
       { command: "start", description: "Start the bot" },
       { command: "balance", description: "Check wallet balance" },
+      { command: "portfolio", description: "Portfolio summary & net worth" },
       { command: "swap", description: "Swap assets" },
       { command: "trustline", description: "Add trustline" },
       { command: "multisig", description: "Setup multisig wallet" },
