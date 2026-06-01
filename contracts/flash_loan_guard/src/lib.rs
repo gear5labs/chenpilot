@@ -4,6 +4,10 @@ use soroban_sdk::{
     Address, Env,
 };
 
+// TTL for price snapshot: ~1 day (172_800 ledgers at 5s/ledger)
+// Snapshots must be refreshed regularly to maintain price safety
+const PRICE_SNAPSHOT_TTL_LEDGERS: u32 = 172_800;
+
 // ---------------------------------------------------------------------------
 // Oracle interface — same pattern as liquidity_vault
 // ---------------------------------------------------------------------------
@@ -80,6 +84,8 @@ impl FlashLoanGuardContract {
     /// Enforces `min_ledger_gap`: the snapshot cannot be updated more than once
     /// per `min_ledger_gap` ledgers, preventing an attacker from resetting the
     /// baseline and exploiting in the same ledger close.
+    /// 
+    /// Sets TTL to ensure stale snapshots expire and force a refresh.
     pub fn record_snapshot(env: Env) {
         let config: Config = env.storage().instance().get(&DataKey::Config).expect("not initialized");
         let current_ledger = env.ledger().sequence();
@@ -97,9 +103,11 @@ impl FlashLoanGuardContract {
         let oracle = PriceOracleClient::new(&env, &config.oracle);
         let price = oracle.get_price(&config.guarded_asset);
 
-        env.storage().instance().set(
+        // Store snapshot with TTL to ensure it must be refreshed regularly
+        env.storage().instance().set_with_ttl(
             &DataKey::PriceSnapshot,
             &PriceSnapshot { price, ledger: current_ledger },
+            PRICE_SNAPSHOT_TTL_LEDGERS,
         );
 
         env.events().publish((symbol_short!("Snapshot"),), (price, current_ledger));

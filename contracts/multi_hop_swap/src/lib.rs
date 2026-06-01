@@ -1,6 +1,10 @@
 #![no_std]
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, vec, Env, Address, Vec};
 
+// TTL for pool state (price and reserve): ~30 days (6_048_000 ledgers at 5s/ledger)
+// Pool state is extended on each swap to remain active; inactive pools expire and reset.
+const POOL_STATE_TTL_LEDGERS: u32 = 6_048_000;
+
 /// One leg of a swap route.
 #[contracttype]
 #[derive(Clone)]
@@ -33,12 +37,13 @@ pub struct MultiHopSwap;
 impl MultiHopSwap {
     /// Seed a pool with an initial price ratio so swaps have something to read.
     pub fn seed_pool(env: Env, pool: Address, numer: i128, denom: i128) {
-        env.storage().persistent().set(&PoolKey::Price(pool.clone()), &(numer, denom));
-        env.storage().persistent().set(&PoolKey::Reserve(pool), &(numer * 1_000_i128));
+        env.storage().persistent().set_with_ttl(&PoolKey::Price(pool.clone()), &(numer, denom), POOL_STATE_TTL_LEDGERS);
+        env.storage().persistent().set_with_ttl(&PoolKey::Reserve(pool), &(numer * 1_000_i128), POOL_STATE_TTL_LEDGERS);
     }
 
     /// Execute a multi-hop swap across `hops` pools.
     /// Each hop: reads pool price, computes output, writes updated reserve, emits event.
+    /// Extends TTL on active pools to keep them fresh in storage.
     /// Returns the final amount out.
     pub fn swap(env: Env, caller: Address, hops: Vec<Hop>) -> Vec<HopResult> {
         caller.require_auth();
@@ -66,11 +71,16 @@ impl MultiHopSwap {
                 panic!("slippage exceeded");
             }
 
-            // update reserve
+            // update reserve and extend TTL to keep active pool fresh
             let new_reserve = reserve - amount_out;
             env.storage()
                 .persistent()
-                .set(&PoolKey::Reserve(hop.pool.clone()), &new_reserve);
+                .set_with_ttl(&PoolKey::Reserve(hop.pool.clone()), &new_reserve, POOL_STATE_TTL_LEDGERS);
+            
+            // Extend TTL for pool price to maintain consistency
+            env.storage()
+                .persistent()
+                .extend_ttl(&PoolKey::Price(hop.pool.clone()), POOL_STATE_TTL_LEDGERS);
 
             env.events().publish(
                 (symbol_short!("hop"), hop.pool.clone()),
