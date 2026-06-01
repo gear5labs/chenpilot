@@ -2,6 +2,7 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 import config from "../config/config";
 import AppDataSource from "../config/Datasource";
 import logger from "../config/logger";
+import { transactionLifecycleService } from "../transactions/TransactionLifecycle.service";
 
 /**
  * Delay strategy for transaction submission
@@ -81,6 +82,8 @@ export interface DelayedTransaction {
   txHash?: string;
   error?: string;
   retries: number;
+  /** Unified lifecycle record ID */
+  lifecycleId?: string;
 }
 
 /**
@@ -177,10 +180,22 @@ export class DelayedTransactionService {
       retries: 0,
     };
 
+    // Create unified lifecycle record at intent state
+    try {
+      const lifecycle = await transactionLifecycleService.create(
+        userId,
+        "delayed_job",
+        { strategy: config.strategy, scheduledAt: config.scheduledAt },
+        delayedTx.id
+      );
+      delayedTx.lifecycleId = lifecycle.id;
+    } catch (err) {
+      logger.warn("Failed to create lifecycle record for delayed transaction", { id: delayedTx.id, err });
+    }
+
     // Set initial status based on strategy
     if (config.strategy === "scheduled" && config.scheduledAt) {
       if (config.scheduledAt <= Date.now()) {
-        // Already past scheduled time, submit now
         delayedTx.status = "submitting";
       } else {
         delayedTx.status = "pending";
@@ -189,6 +204,23 @@ export class DelayedTransactionService {
       delayedTx.status = "waiting_for_fee";
     } else if (config.strategy === "congestion_based") {
       delayedTx.status = "waiting_for_congestion";
+    }
+
+    // Advance lifecycle to match initial status
+    if (delayedTx.lifecycleId) {
+      try {
+        if (delayedTx.status === "submitting") {
+          await transactionLifecycleService.transition(delayedTx.lifecycleId, "pending");
+          await transactionLifecycleService.transition(delayedTx.lifecycleId, "submitting");
+        } else if (delayedTx.status === "waiting_for_fee" || delayedTx.status === "waiting_for_congestion") {
+          await transactionLifecycleService.transition(delayedTx.lifecycleId, "pending");
+          await transactionLifecycleService.transition(delayedTx.lifecycleId, "waiting");
+        } else {
+          await transactionLifecycleService.transition(delayedTx.lifecycleId, "pending");
+        }
+      } catch (err) {
+        logger.warn("Failed to advance lifecycle for delayed transaction", { id: delayedTx.id, err });
+      }
     }
 
     this.pendingDelayedTxs.set(delayedTx.id, delayedTx);
@@ -349,6 +381,18 @@ export class DelayedTransactionService {
     }
 
     delayedTx.status = "submitting";
+
+    // Advance lifecycle to submitting if not already there
+    if (delayedTx.lifecycleId) {
+      try {
+        const record = await transactionLifecycleService.findById(delayedTx.lifecycleId);
+        if (record && record.state !== "submitting" && record.state !== "submitted" && record.state !== "confirmed" && record.state !== "failed" && record.state !== "cancelled") {
+          await transactionLifecycleService.transition(delayedTx.lifecycleId, "submitting");
+        }
+      } catch (err) {
+        logger.warn("Failed to advance lifecycle to submitting", { id, err });
+      }
+    }
     
     try {
       const networkPassphrase = config.stellar.networkPassphrase;
@@ -359,6 +403,18 @@ export class DelayedTransactionService {
       delayedTx.status = "submitted";
       delayedTx.submittedAt = Date.now();
       delayedTx.txHash = response.hash;
+
+      if (delayedTx.lifecycleId) {
+        try {
+          await transactionLifecycleService.transition(delayedTx.lifecycleId, "submitted", {
+            correlationId: response.hash,
+            metadata: { txHash: response.hash },
+          });
+          await transactionLifecycleService.transition(delayedTx.lifecycleId, "confirmed");
+        } catch (err) {
+          logger.warn("Failed to advance lifecycle to confirmed", { id, err });
+        }
+      }
       
       logger.info(`Successfully submitted delayed transaction ${id}: ${response.hash}`);
       
@@ -370,9 +426,15 @@ export class DelayedTransactionService {
       if (delayedTx.retries >= maxRetries) {
         delayedTx.status = "failed";
         delayedTx.error = error instanceof Error ? error.message : "Unknown error";
+        if (delayedTx.lifecycleId) {
+          try {
+            await transactionLifecycleService.fail(delayedTx.lifecycleId, delayedTx.error);
+          } catch (err) {
+            logger.warn("Failed to advance lifecycle to failed", { id, err });
+          }
+        }
         logger.error(`Delayed transaction ${id} failed after ${maxRetries} retries`);
       } else {
-        // Reset status based on strategy
         if (delayedTx.config.strategy === "fee_based") {
           delayedTx.status = "waiting_for_fee";
         } else if (delayedTx.config.strategy === "congestion_based") {
@@ -380,7 +442,6 @@ export class DelayedTransactionService {
         } else {
           delayedTx.status = "pending";
         }
-        
         logger.warn(`Delayed transaction ${id} failed, retry ${delayedTx.retries}/${maxRetries}`);
       }
       
@@ -410,6 +471,13 @@ export class DelayedTransactionService {
     }
 
     delayedTx.status = "cancelled";
+
+    if (delayedTx.lifecycleId) {
+      transactionLifecycleService.cancel(delayedTx.lifecycleId, "Cancelled by user").catch((err) => {
+        logger.warn("Failed to cancel lifecycle for delayed transaction", { id, err });
+      });
+    }
+
     logger.info(`Cancelled delayed transaction ${id}`);
     
     return true;

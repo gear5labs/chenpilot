@@ -4,6 +4,7 @@ import { toolRegistry } from "../registry/ToolRegistry";
 import { WorkflowPlan, WorkflowStep } from "../types";
 import { parseSorobanIntent } from "./sorobanIntent";
 import { HashedPlan, planHashService } from "./planHash";
+import { riskEngine, RiskEngine } from "../risk/RiskEngine";
 import logger from "../../config/logger";
 import { RiskLevel } from "../../Auth/userPreferences.entity";
 
@@ -176,9 +177,24 @@ Output JSON format:
   }
 
   private assessRiskLevel(steps: PlanStep[]): "low" | "medium" | "high" {
-    if (steps.length >= 5) return "high";
-    if (steps.length >= 2) return "medium";
-    return "low";
+    if (steps.length === 0) return "low";
+
+    // Score each step and take the highest tier across the plan
+    let maxScore = 0;
+    for (const step of steps) {
+      const assessment = riskEngine.assess({
+        userId: "planner", // no userId at plan-build time; prefs injected via context
+        action: step.action,
+        payload: step.payload,
+        // marketData not available at planning time — engine uses conservative defaults
+      });
+      if (assessment.score > maxScore) maxScore = assessment.score;
+    }
+
+    // Map composite score to the 3-level scale used by ExecutionPlan
+    return RiskEngine.toPreferenceTier(
+      maxScore >= 70 ? "critical" : maxScore >= 50 ? "high" : maxScore >= 30 ? "medium" : "low"
+    );
   }
 
   private validatePlan(plan: ExecutionPlan): PlanValidation {
