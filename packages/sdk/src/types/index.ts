@@ -30,6 +30,15 @@ export interface AgentResponse {
   data?: unknown;
 }
 
+/** Structured error returned by the backend for categorized failures */
+export interface CategorizedError {
+  category: string;
+  code: string;
+  message: string;
+  recoverable: boolean;
+  details?: Record<string, unknown>;
+}
+
 /** Recovery and cleanup actions available during cross-chain flows */
 export enum RecoveryAction {
   RETRY_MINT = "retry_mint",
