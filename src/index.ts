@@ -7,15 +7,29 @@ import logger from "./config/logger";
 import { initializeSocketManager } from "./Gateway/socketManager";
 import { horizonOperationStreamerService } from "./services/horizonOperationStreamer.service";
 import { priceSpikeAlertService } from "./services/priceSpikeAlert.service";
+import { buildDefaultJobHandlers } from "./jobs/jobHandlers";
+import { jobQueueService } from "./jobs/jobQueue.service";
+import { JobWorker } from "./jobs/jobWorker";
 class Server {
   private server: http.Server;
   private port: number;
+  private readonly jobWorker: JobWorker;
 
   constructor() {
     this.port = config.port || 3000;
     this.server = http.createServer(app);
     // Initialize Socket.io manager
     initializeSocketManager(this.server);
+    this.jobWorker = new JobWorker(jobQueueService, {
+      workerId: `api-${process.pid}`,
+      queues: ["transactions", "side-effects"],
+      concurrency: 3,
+      leaseMs: 30000,
+      pollIntervalMs: 2500,
+    });
+    for (const handler of buildDefaultJobHandlers()) {
+      this.jobWorker.registerHandler(handler);
+    }
   }
 
   public async start(): Promise<void> {
@@ -28,6 +42,7 @@ class Server {
         logger.info("Shutting down gracefully...");
         horizonOperationStreamerService.stop();
         priceSpikeAlertService.stop();
+        await this.jobWorker.stop();
         await AppDataSource.destroy();
         this.server.close(() => {
           logger.info("Server closed");
@@ -38,6 +53,7 @@ class Server {
       await AppDataSource.initialize();
       console.log("DB connection established!");
       logger.info("Database connected successfully");
+      this.jobWorker.start();
       horizonOperationStreamerService.start();
       priceSpikeAlertService.start();
       process.on("SIGTERM", shutdown);
