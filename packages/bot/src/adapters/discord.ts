@@ -31,7 +31,7 @@ const ADVANCED_ROLE_NAMES = (process.env.DISCORD_ADVANCED_ROLES || 'DeFi Pro,Wha
 const SUPPORTED_CURRENCIES = ['USD', 'XLM', 'BTC'] as const;
 
 // Commands that involve personal account data and must only be used in DMs
-const DM_ONLY_COMMANDS = ['!balance', '!sponsor'];
+const DM_ONLY_COMMANDS = ['!balance', '!sponsor', '!portfolio'];
 
 // Commands that start a wizard
 const WIZARD_COMMANDS = ['!multisig'];
@@ -372,6 +372,67 @@ export class DiscordAdapter {
         } catch {
           return message.reply(`❌ Could not fetch portfolio. Make sure your account is registered.`);
         }
+      }
+
+      // !portfolio command — rich formatted portfolio summary with net worth
+      if (message.content.startsWith('!portfolio')) {
+        if (!isDM(message)) {
+          await rejectPublicChannel(message);
+          return;
+        }
+        await withPerformanceProfiling('!portfolio', 'discord', userId, async () => {
+          const args = message.content.split(' ').slice(1);
+          const currency = (args[0]?.toUpperCase() ?? this.userCurrency.get(userId) ?? 'USD') as 'USD' | 'XLM' | 'BTC';
+          if (!SUPPORTED_CURRENCIES.includes(currency as any)) {
+            return message.reply(`❌ Unsupported currency. Use one of: ${SUPPORTED_CURRENCIES.join(', ')}\nExample: \`!portfolio USD\``);
+          }
+
+          await message.reply(`⏳ Fetching your Stellar portfolio in **${currency}**...`);
+
+          try {
+            const res = await fetch(`${BACKEND_URL}/api/portfolio/${userId}?currency=${currency}`);
+            if (!res.ok) {
+              const err = await res.json() as { message?: string };
+              throw new Error(err.message ?? `HTTP ${res.status}`);
+            }
+
+            const data = await res.json() as {
+              address: string;
+              currency: string;
+              totalValue: number | null;
+              assets: { code: string; issuer: string; balance: number; value: number | null }[];
+              fetchedAt: string;
+            };
+
+            const shortAddr = `\`${data.address.slice(0, 4)}...${data.address.slice(-4)}\``;
+            const netWorth = data.totalValue !== null
+              ? `**${data.totalValue.toFixed(4)} ${data.currency}**`
+              : '*unavailable*';
+
+            let reply = `💼 **Stellar Portfolio Summary**\n`;
+            reply += `📬 Account: ${shortAddr}\n`;
+            reply += `💰 **Net Worth:** ${netWorth}\n`;
+            reply += `🕐 Updated: ${new Date(data.fetchedAt).toUTCString()}\n\n`;
+            reply += `**Assets:**\n`;
+
+            if (data.assets.length === 0) {
+              reply += '_No assets found on this account._\n';
+            } else {
+              for (const a of data.assets) {
+                const valueStr = a.value !== null
+                  ? ` ≈ ${a.value.toFixed(4)} ${data.currency}`
+                  : '';
+                const issuerStr = a.issuer ? ` (\`${a.issuer.slice(0, 6)}...\`)` : '';
+                reply += `• **${a.code}**${issuerStr}: ${a.balance.toFixed(7)}${valueStr}\n`;
+              }
+            }
+
+            reply += `\n_Tip: Use \`!currency <USD|XLM|BTC>\` to change your default currency._`;
+            return message.reply(reply);
+          } catch (err) {
+            return message.reply(`❌ Could not fetch portfolio: ${err instanceof Error ? err.message : String(err)}\nMake sure your account is registered with \`!sponsor\`.`);
+          }
+        })();
       }
 
       // #119: !alert command — set a price alert

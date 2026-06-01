@@ -54,6 +54,7 @@ export enum AuditAction {
   BOT_COMMAND_VALIDATE = "bot_command_validate",
   BOT_COMMAND_BALANCE = "bot_command_balance",
   BOT_COMMAND_SWAP = "bot_command_swap",
+  BOT_COMMAND_PORTFOLIO = "bot_command_portfolio",
 }
 
 export enum AuditSeverity {

@@ -31,6 +31,7 @@ import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
 import { getSocketManager } from "./socketManager";
 import { BotSessionService } from "../Bot/botSession.service";
 import { BotSessionType, BotPlatform } from "../Bot/botSession.entity";
+import portfolioService from "../services/portfolioService";
 
 const router = Router();
 
@@ -150,6 +151,8 @@ router.post("/bot/metrics", async (req: Request, res: Response) => {
       '/balance': AuditAction.BOT_COMMAND_BALANCE,
       '!swap': AuditAction.BOT_COMMAND_SWAP,
       '/swap': AuditAction.BOT_COMMAND_SWAP,
+      '!portfolio': AuditAction.BOT_COMMAND_PORTFOLIO,
+      '/portfolio': AuditAction.BOT_COMMAND_PORTFOLIO,
     };
 
     const auditAction = commandMap[command] || AuditAction.BOT_COMMAND_START;
@@ -1052,5 +1055,97 @@ router.post(
     }
   }
 );
+
+// -----------------------------------------------------------------------
+// Portfolio endpoints
+// -----------------------------------------------------------------------
+
+/**
+ * GET /api/portfolio/:userId?currency=USD
+ *
+ * Returns a formatted portfolio summary for the user's Stellar account,
+ * including all asset balances and estimated net worth in the requested
+ * currency (USD | XLM | BTC, default USD).
+ */
+router.get(
+  "/portfolio/:userId",
+  authenticateToken,
+  requireOwnerOrElevated("userId"),
+  async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const currency = (req.query.currency as string | undefined) ?? "USD";
+
+      const userRepository = AppDataSource.getRepository(User);
+      const user = await userRepository.findOne({ where: { id: userId } });
+      if (!user) {
+        return res
+          .status(404)
+          .json({ success: false, message: "User not found" });
+      }
+
+      const summary = await portfolioService.getPortfolio(user.address, currency);
+
+      await auditLogService.log({
+        userId,
+        action: AuditAction.BOT_COMMAND_PORTFOLIO,
+        severity: AuditSeverity.INFO,
+        resource: `portfolio:${userId}`,
+        metadata: { currency, address: user.address },
+        success: true,
+      });
+
+      return res.status(200).json({
+        success: true,
+        address: summary.address,
+        currency: summary.currency,
+        totalValue: summary.totalValue,
+        assets: summary.assets.map((a) => ({
+          code: a.code,
+          issuer: a.issuer,
+          balance: a.amount,
+          value: a.valueInCurrency,
+        })),
+        fetchedAt: summary.fetchedAt,
+      });
+    } catch (error) {
+      logger.error("Portfolio fetch error", { error, userId: req.params.userId });
+      const message =
+        error instanceof Error ? error.message : "Internal server error";
+      const statusCode =
+        message.includes("not found") || message.includes("unreachable")
+          ? 404
+          : 500;
+      return res.status(statusCode).json({ success: false, message });
+    }
+  }
+);
+
+/**
+ * GET /api/price/:assetCode?currency=USD
+ *
+ * Returns the current DEX price of an asset in the requested currency.
+ */
+router.get("/price/:assetCode", async (req: Request, res: Response) => {
+  try {
+    const { assetCode } = req.params;
+    const currency = (req.query.currency as string | undefined) ?? "USD";
+
+    const result = await portfolioService.getAssetPrice(assetCode, currency);
+
+    return res.status(200).json({
+      success: true,
+      assetCode: result.assetCode,
+      currency: result.currency,
+      price: result.price,
+    });
+  } catch (error) {
+    logger.error("Price fetch error", { error, assetCode: req.params.assetCode });
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : "Internal server error",
+    });
+  }
+});
 
 export default router;
