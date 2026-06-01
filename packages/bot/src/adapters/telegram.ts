@@ -304,6 +304,26 @@ export class TelegramAdapter {
       return next();
     });
 
+    // #115: Settings command with WebApp
+    this.bot.command('settings', async (ctx: any) => {
+      const userId = String(ctx.from?.id || 'unknown');
+      await withPerformanceProfiling('/settings', 'telegram', userId, async () => {
+        const settingsUrl = `${BACKEND_URL}/settings`;
+        await ctx.replyWithHTML('⚙️ <b>Open Settings</b>', {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: 'Open Settings',
+                  web_app: { url: settingsUrl }
+                }
+              ]
+            ]
+          }
+        });
+      })();
+    });
+
     // Set bot commands for mobile menu
     await this.bot.telegram.setMyCommands([
       { command: "start", description: "Start the bot" },
@@ -311,6 +331,7 @@ export class TelegramAdapter {
       { command: "swap", description: "Swap assets" },
       { command: "trustline", description: "Add trustline" },
       { command: "multisig", description: "Setup multisig wallet" },
+      { command: "settings", description: "Open settings" },
       { command: "help", description: "Show help" },
     ]);
 
