@@ -1,111 +1,168 @@
-const fs = require('fs');
+/**
+ * x402 Automated Smart Contract Security Audit
+ * 
+ * This script scans the 'contracts' directory for Solidity files and performs
+ * a heuristic security audit using the Money Machine x402 API.
+ * 
+ * Requirements:
+ * - Node.js 18+ (uses native fetch)
+ * - GitHub Secret: X402_TOKEN (Bearer token) OR X402_PAYMENT_PROOF (SOL Tx Hash)
+ */
+
+const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 
+// Configuration
 const API_ENDPOINT = 'https://money-machine-x402-ssyopros.zocomputer.io/api/smart-contract-audit';
 const X402_TOKEN = process.env.X402_TOKEN;
 const PAYMENT_PROOF = process.env.X402_PAYMENT_PROOF;
+const SCORE_THRESHOLD = 75; // Minimum passing score
 
-async function run() {
-  const contractsDir = path.join(process.cwd(), 'contracts');
-  if (!fs.existsSync(contractsDir)) {
-    console.log("No contracts directory found.");
-    return;
-  }
-
-  // Find all .sol files recursively
-  const getFiles = (dir) => {
+/**
+ * Recursively find all Solidity files in a directory
+ */
+async function getSolidityFiles(dir) {
     let results = [];
-    const list = fs.readdirSync(dir);
-    list.forEach(file => {
-      file = path.resolve(dir, file);
-      const stat = fs.statSync(file);
-      if (stat && stat.isDirectory()) {
-        results = results.concat(getFiles(file));
-      } else {
-        if (file.endsWith('.sol')) results.push(file);
-      }
-    });
-    return results;
-  };
-
-  const files = getFiles(contractsDir);
-  if (files.length === 0) {
-    console.log("No .sol files found in contracts directory.");
-    return;
-  }
-
-  console.log(`Found ${files.length} contracts to audit.`);
-
-  let exitCode = 0;
-  for (const filePath of files) {
-    const fileName = path.relative(contractsDir, filePath);
-    const content = fs.readFileSync(filePath, 'utf8');
-    const hash = crypto.createHash('sha256').update(content).digest('hex');
-    
-    // In a real scenario, we might upload the code. 
-    // For this simulation, we use the hash as the "address".
-    const url = `${API_ENDPOINT}?address=${hash}`;
-    
-    console.log(`Auditing ${fileName} (hash: ${hash.slice(0, 10)}...)...`);
-    
-    const headers = {
-      'Content-Type': 'application/json'
-    };
-    if (X402_TOKEN) {
-      headers['Authorization'] = `Bearer ${X402_TOKEN}`;
-    } else if (PAYMENT_PROOF) {
-      headers['x-payment-proof'] = PAYMENT_PROOF;
+    try {
+        const list = await fs.readdir(dir, { withFileTypes: true });
+        for (const file of list) {
+            const res = path.resolve(dir, file.name);
+            if (file.isDirectory()) {
+                results = results.concat(await getSolidityFiles(res));
+            } else if (file.name.endsWith('.sol')) {
+                results.push(res);
+            }
+        }
+    } catch (error) {
+        if (error.code === 'ENOENT') {
+            console.warn(`[WARN] Directory not found: ${dir}`);
+        } else {
+            throw error;
+        }
     }
+    return results;
+}
+
+/**
+ * Perform audit on a single file
+ */
+async function auditFile(filePath, contractsBaseDir) {
+    const fileName = path.relative(contractsBaseDir, filePath);
+    const content = await fs.readFile(filePath, 'utf8');
+    const hash = crypto.createHash('sha256').update(content).digest('hex');
+
+    const url = `${API_ENDPOINT}?address=${hash}`;
+    const headers = { 'Content-Type': 'application/json' };
+
+    if (X402_TOKEN) {
+        headers['Authorization'] = `Bearer ${X402_TOKEN}`;
+    } else if (PAYMENT_PROOF) {
+        headers['x-payment-proof'] = PAYMENT_PROOF;
+    }
+
+    process.stdout.write(`Auditing ${fileName}... `);
 
     try {
-      const response = await fetch(url, { headers });
-      if (!response.ok) {
-        let errDetail = '';
-        try {
-          const err = await response.json();
-          errDetail = `${err.error} - ${err.detail || ''}`;
-        } catch (e) {
-          errDetail = await response.text();
+        const response = await fetch(url, { headers });
+        
+        if (!response.ok) {
+            const status = response.status;
+            let detail = '';
+            try {
+                const err = await response.json();
+                detail = err.detail || err.error || 'Unknown error';
+            } catch {
+                detail = await response.text();
+            }
+
+            console.log('FAILED');
+            return {
+                fileName,
+                success: false,
+                status,
+                detail: status === 402 ? 'Payment Required (Check X402 secrets)' : detail
+            };
+        }
+
+        const report = await response.json();
+        console.log(`DONE (Score: ${report.audit_score}/100)`);
+        return {
+            fileName,
+            success: true,
+            report
+        };
+    } catch (error) {
+        console.log('ERROR');
+        return {
+            fileName,
+            success: false,
+            detail: error.message
+        };
+    }
+}
+
+/**
+ * Main Execution
+ */
+async function main() {
+    console.log('==================================================');
+    console.log('   x402 Security Audit - Execution Started');
+    console.log('==================================================\n');
+
+    const contractsDir = path.join(process.cwd(), 'contracts');
+    const files = await getSolidityFiles(contractsDir);
+
+    if (files.length === 0) {
+        console.log('No Solidity contracts found to audit.');
+        process.exit(0);
+    }
+
+    console.log(`Targeting ${files.length} contracts for heuristic analysis...\n`);
+
+    const results = [];
+    for (const file of files) {
+        results.push(await auditFile(file, contractsDir));
+    }
+
+    console.log('\n==================================================');
+    console.log('               AUDIT SUMMARY');
+    console.log('==================================================\n');
+
+    let allPassed = true;
+    const summary = results.map(res => {
+        if (!res.success) {
+            allPassed = false;
+            return `[FAIL] ${res.fileName}: ${res.detail}`;
         }
         
-        console.error(`Error auditing ${fileName}: ${errDetail}`);
-        if (response.status === 402) {
-          console.error("Payment required. Please provide X402_TOKEN or X402_PAYMENT_PROOF secrets.");
+        const isPassed = res.report.audit_score >= SCORE_THRESHOLD;
+        if (!isPassed) allPassed = false;
+
+        const statusLabel = isPassed ? 'PASS' : 'FAIL';
+        let findingsSummary = '';
+        if (res.report.findings?.length > 0) {
+            findingsSummary = `\n       Findings: ${res.report.findings.length} issues (${res.report.security_status})`;
         }
-        exitCode = 1;
-        continue;
-      }
 
-      const report = await response.json();
-      printReport(fileName, report);
-
-      if (report.audit_score < 70) {
-        console.error(`[FAILURE] ${fileName} failed security audit with score ${report.audit_score}`);
-        exitCode = 1;
-      }
-    } catch (e) {
-      console.error(`Failed to call audit API for ${fileName}: ${e.message}`);
-      exitCode = 1;
-    }
-  }
-
-  process.exit(exitCode);
-}
-
-function printReport(file, report) {
-  console.log('--------------------------------------------------');
-  console.log(`Audit Report for ${file}`);
-  console.log(`Status: ${report.security_status}`);
-  console.log(`Score: ${report.audit_score}/100`);
-  console.log(`Issues Found: ${report.total_issues_found}`);
-  if (report.findings && report.findings.length > 0) {
-    report.findings.forEach(f => {
-      console.log(`  - [${f.severity}] ${f.name}: ${f.description}`);
+        return `[${statusLabel}] ${res.fileName} - Score: ${res.report.audit_score}/100${findingsSummary}`;
     });
-  }
-  console.log(`Recommendation: ${report.recommendation}`);
-  console.log('--------------------------------------------------');
+
+    summary.forEach(line => console.log(line));
+
+    console.log('\n==================================================');
+    if (allPassed) {
+        console.log('   STATUS: ALL CONTRACTS PASSED SECURITY AUDIT');
+        console.log('==================================================');
+        process.exit(0);
+    } else {
+        console.log('   STATUS: SECURITY AUDIT FAILED - ACTION REQUIRED');
+        console.log('==================================================');
+        process.exit(1);
+    }
 }
 
-run();
+main().catch(error => {
+    console.error(`[FATAL] Script execution failed: ${error.message}`);
+    process.exit(1);
+});
