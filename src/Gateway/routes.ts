@@ -28,7 +28,6 @@ import {
 } from "./middleware/rbac.middleware";
 import { auditLogService } from "../AuditLog/auditLog.service";
 import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
-import { getSocketManager } from "./socketManager";
 import { BotSessionService } from "../Bot/botSession.service";
 import { BotSessionType, BotPlatform } from "../Bot/botSession.entity";
 
@@ -863,12 +862,6 @@ router.get("/realtime/stats", (req: Request, res: Response) => {
     const { getSocketManager } = require("./socketManager");
     const socketManager = getSocketManager();
 
-    interface SocketClient {
-      socketId: string;
-      userId?: string;
-      connectedAt: Date;
-    }
-
     const stats = {
       success: true,
       totalConnected: socketManager.getConnectedClientsCount(),
@@ -921,11 +914,6 @@ router.get("/realtime/user/:userId/clients", (req: Request, res: Response) => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getSocketManager } = require("./socketManager");
     const socketManager = getSocketManager();
-
-    interface SocketClient {
-      socketId: string;
-      connectedAt: Date;
-    }
 
     const clients = socketManager.getUserClients(userId);
 

@@ -3,11 +3,8 @@ import {
   GatewayIntentBits,
   Message,
   TextChannel,
-  ThreadChannel,
   ChannelType,
-  TextBasedChannel,
   ActivityType,
-  GuildMember,
 } from "discord.js";
 import { TransactionNotificationData, PriceAlert, TrendingAsset } from "../types";
 import {
@@ -21,6 +18,7 @@ import { withPerformanceProfiling, extractCommandName } from '../performanceProf
 import { MultisigWizard } from '../multisigWizard';
 import { ScamDetectionService } from '../scamDetection';
 import { MarketOverviewService } from '../marketOverview';
+import { PriceChartService } from '../priceChart';
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:3000";
 const DASHBOARD_URL = process.env.DASHBOARD_URL || `${BACKEND_URL}/dashboard`;
@@ -34,7 +32,7 @@ const ADVANCED_ROLE_NAMES = (process.env.DISCORD_ADVANCED_ROLES || 'DeFi Pro,Wha
 const SUPPORTED_CURRENCIES = ['USD', 'XLM', 'BTC'] as const;
 
 // Commands that involve personal account data and must only be used in DMs
-const DM_ONLY_COMMANDS = ['!balance', '!sponsor'];
+// const DM_ONLY_COMMANDS = ['!balance', '!sponsor'];
 
 // Commands that start a wizard
 const WIZARD_COMMANDS = ['!multisig'];
@@ -77,6 +75,8 @@ export class DiscordAdapter {
   private scamDetectionService: ScamDetectionService;
   // #128: Market overview service
   private marketOverviewService: MarketOverviewService;
+  // Price chart service for generating static price charts
+  private priceChartService: PriceChartService;
   // #118: User preferred currency (userId -> currency)
   private userCurrency: Map<string, 'USD' | 'XLM' | 'BTC'> = new Map();
   // #119: Active price alerts
@@ -93,7 +93,6 @@ export class DiscordAdapter {
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers,
       ],
     });
     this.verificationService = new AssetVerificationService(HORIZON_URL);
@@ -106,6 +105,8 @@ export class DiscordAdapter {
     this.scamDetectionService = new ScamDetectionService();
     // #128: Initialize market overview service
     this.marketOverviewService = new MarketOverviewService();
+    // Initialize price chart service
+    this.priceChartService = new PriceChartService();
   }
 
   // #145: Returns true if the user is flooding (within debounce window)
@@ -262,15 +263,6 @@ export class DiscordAdapter {
     this.client.once("ready", () => {
       console.log(`✅ Discord bot logged in as ${this.client.user?.tag}`);
       this.startStatusUpdates();
-
-      // #117: Automated welcome flow for new server members
-      this.client.on('guildMemberAdd', async (member: GuildMember) => {
-        try {
-          await this.sendWelcomeMessage(member);
-        } catch (error) {
-          console.error('❌ Error sending welcome message:', error);
-        }
-      });
     });
 
     this.client.on("messageCreate", withPerformanceProfiling(
@@ -459,7 +451,7 @@ export class DiscordAdapter {
               let response = `✅ Found asset ${assetCode}!\n\n`;
               response += `To add this trustline, you can use the following details in your wallet:\n`;
               response += `**Asset:** ${assetCode}\n`;
-              response += `**Issuer:** \`${(op as any).asset.issuer}\`\n\n`;
+              response += `**Issuer:** \`${(op as { asset: { issuer: string } }).asset.issuer}\`\n\n`;
               response += `*Note: In a future update, I will provide a direct signing link.*`;
 
               await message.reply(response);
@@ -537,7 +529,7 @@ export class DiscordAdapter {
       // #118: !currency command — set preferred report currency
       if (message.content.startsWith('!currency')) {
         const arg = message.content.split(' ')[1]?.toUpperCase() as 'USD' | 'XLM' | 'BTC' | undefined;
-        if (!arg || !SUPPORTED_CURRENCIES.includes(arg as any)) {
+        if (!arg || !(SUPPORTED_CURRENCIES as readonly string[]).includes(arg)) {
           return message.reply(`Usage: !currency <USD|XLM|BTC>\nCurrent: **${this.userCurrency.get(userId) ?? 'USD'}**`);
         }
         this.userCurrency.set(userId, arg);
@@ -579,7 +571,7 @@ export class DiscordAdapter {
           return message.reply('❌ Price must be a positive number.');
         }
         const currency = (currencyRaw?.toUpperCase() ?? this.userCurrency.get(userId) ?? 'USD') as 'USD' | 'XLM' | 'BTC';
-        if (!SUPPORTED_CURRENCIES.includes(currency as any)) {
+        if (!(SUPPORTED_CURRENCIES as readonly string[]).includes(currency)) {
           return message.reply(`❌ Currency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`);
         }
         const alertId = `${userId}-${assetCode}-${Date.now()}`;
@@ -632,6 +624,65 @@ export class DiscordAdapter {
           return message.reply('❌ Could not fetch trending assets. Please try again later.');
         }
       }
+
+      // Price chart command - generate static price chart for an asset
+      if (message.content.startsWith('!price')) {
+        await withPerformanceProfiling(commandName, 'discord', userId, async () => {
+          const args = message.content.split(' ').slice(1);
+          if (args.length < 1) {
+            return message.reply('Usage: !price <assetCode> [currency] [days]\nExample: !price XLM USD 7\n\nSupported currencies: USD, XLM, BTC\nDefault: USD, 7 days');
+          }
+
+          const assetCode = args[0].toUpperCase();
+          const currency = (args[1]?.toUpperCase() ?? this.userCurrency.get(userId) ?? 'USD') as 'USD' | 'XLM' | 'BTC';
+          const days = parseInt(args[2] ?? '7', 10);
+
+          if (!(SUPPORTED_CURRENCIES as readonly string[]).includes(currency)) {
+            return message.reply(`❌ Currency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`);
+          }
+
+          if (isNaN(days) || days < 1 || days > 90) {
+            return message.reply('❌ Days must be between 1 and 90');
+          }
+
+          await message.reply(`📊 Generating price chart for **${assetCode}** (${days} days)...`);
+
+          try {
+            // Fetch current price and price change
+            const currentPrice = await this.priceChartService.getCurrentPrice(assetCode, currency);
+            const priceChange = await this.priceChartService.getPriceChange(assetCode, currency, 24);
+
+            // Generate the chart
+            const chartBuffer = await this.priceChartService.generatePriceChart(
+              assetCode,
+              currency,
+              days
+            );
+
+            // Create message with chart and price info
+            const changeEmoji = priceChange >= 0 ? '📈' : '📉';
+            const changeText = priceChange >= 0 ? `+${priceChange.toFixed(2)}%` : `${priceChange.toFixed(2)}%`;
+
+            let reply = `${changeEmoji} **${assetCode} Price Chart**\n\n`;
+            reply += `**Current Price:** ${currentPrice.toFixed(6)} ${currency}\n`;
+            reply += `**24h Change:** ${changeText}\n`;
+            reply += `**Period:** Last ${days} days\n\n`;
+
+            // Send the chart as an attachment
+            await message.reply({
+              content: reply,
+              files: [{
+                attachment: chartBuffer,
+                name: `${assetCode}_price_chart.png`
+              }]
+            });
+
+          } catch (error) {
+            console.error('Price chart generation error:', error);
+            await message.reply(`❌ Could not generate price chart for **${assetCode}**. The asset may not be supported or the API is unavailable.`);
+          }
+        })();
+      }
     }));
 
     await this.client.login(token);
@@ -662,7 +713,7 @@ export class DiscordAdapter {
           alert.triggered = true;
           const channelId = this.userChannels.get(alert.userId);
           if (!channelId) continue;
-          const channel = this.client.channels.cache.get(channelId) as any;
+          const channel = this.client.channels.cache.get(channelId) as TextChannel;
           if (!channel) continue;
           await channel.send(
             `🔔 **Price Alert Triggered!**\n**${alert.assetCode}** is now ${alert.condition} **${alert.targetPrice} ${alert.currency}** (current: ${price} ${alert.currency})`
@@ -675,7 +726,7 @@ export class DiscordAdapter {
   private async logAuditAction(entry: { action: string; triggeredBy: string; details?: string; success?: boolean; timestamp?: string }): Promise<void> {
     if (!this.auditLogChannelId || !this.client) return;
     try {
-      const ch = this.client.channels.cache.get(this.auditLogChannelId) as any;
+      const ch = this.client.channels.cache.get(this.auditLogChannelId) as TextChannel;
       if (ch && typeof ch.send === 'function') {
         await ch.send(`📝 Audit: ${entry.action} by ${entry.triggeredBy} — ${entry.details ?? ''}`);
       }
@@ -731,7 +782,7 @@ export class DiscordAdapter {
 
     const channel = this.client.channels.cache.get(
       channelId
-    ) as any;
+    ) as TextChannel;
     if (!channel) {
       console.warn(`⚠️ Channel or Thread ${channelId} not found`);
       return false;
@@ -790,7 +841,7 @@ export class DiscordAdapter {
 
     const channel = this.client.channels.cache.get(
       channelId
-    ) as any;
+    ) as TextChannel;
     if (!channel) {
       return false;
     }
@@ -857,123 +908,5 @@ export class DiscordAdapter {
         type: ActivityType.Custom,
       });
     }
-  }
-
-  // #117: Send interactive welcome message to new server members
-  private async sendWelcomeMessage(member: GuildMember): Promise<void> {
-    const username = member.user.username;
-    const welcomeChannel = member.guild.systemChannel;
-
-    // Try to DM the member first, fall back to the server's system channel
-    const sendMessage = async (content: string) => {
-      try {
-        await member.send(content);
-        return 'dm';
-      } catch {
-        // Cannot DM — member likely has DMs disabled
-        if (welcomeChannel) {
-          await welcomeChannel.send({ content, allowedMentions: { users: [member.id] } });
-          return 'channel';
-        }
-        return null;
-      }
-    };
-
-    // Step 1: Initial welcome greeting
-    const greeting = `🎉 **Welcome to the Chen Pilot Community, ${username}!** 🎉
-
-I'm **Chen Pilot**, your AI-powered Stellar DeFi assistant! I'm here to help you navigate the Stellar ecosystem, manage your assets, and discover decentralized finance opportunities.
-
-Let me walk you through everything you can do with me! 🚀`;
-
-    const sentVia = await sendMessage(greeting);
-    if (!sentVia) {
-      console.warn(`⚠️ Could not send welcome message to ${member.id}: no DM access and no system channel`);
-      return;
-    }
-
-    // Log welcome event
-    await this.logAuditAction({
-      action: 'WELCOME_MESSAGE_SENT',
-      triggeredBy: member.id,
-      details: `Username: ${username}, Sent via: ${sentVia === 'dm' ? 'DM' : 'system channel'}`,
-      success: true,
-      timestamp: new Date().toISOString(),
-    });
-
-    // Small delay between messages for readability
-    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-    await delay(1000);
-
-    // Step 2: Wallet connection guide
-    const walletGuide = `**🔗 Step 1: Connect Your Stellar Wallet**
-
-To get started with DeFi on Stellar, you need a wallet. Here's how:
-
-1️⃣ **Get a Wallet**: Download *Freighter* (Stellar's official browser extension) from \`freighter.app\`
-2️⃣ **Fund Your Account**: Use \`!sponsor\` to request free account sponsorship (covers minimum balance)
-3️⃣ **Trustlines**: Use \`!trustline <assetCode> <issuer>\` to add assets like **USDC**, **XLM**, etc.
-4️⃣ **Verify**: Use \`!validate <assetCode> <issuer>\` to check if an asset is safe before interacting
-
-> 💡 *Tip: Always verify unknown assets with \`!validate\` to avoid scams!*`;
-
-    await sendMessage(walletGuide);
-    await delay(1000);
-
-    // Step 3: Essential commands overview
-    const commandsOverview = `**📋 Step 2: Essential Commands**
-
-Here are the key commands to get started:
-
-• **!help** — List all available features
-• **!balance** — Check your wallet balance (DM only)
-• **!report** — Portfolio summary in your chosen currency
-• **!currency <USD|XLM|BTC>** — Set your preferred reporting currency
-• **!ping** — Check bot latency and backend health
-• **!alert <asset> <above|below> <price>** — Set price alerts
-• **!alerts** — View your active alerts
-• **!discover** — Explore trending Stellar assets (requires role)
-• **!dashboard** — Open the admin dashboard
-
-> 🔒 *Commands marked "DM only" must be sent in a private message for security.*`;
-
-    await sendMessage(commandsOverview);
-    await delay(1000);
-
-    // Step 4: Advanced features teaser
-    const advancedTeaser = `**⚡ Step 3: Advanced Features**
-
-Ready to level up? Here's what else I can do:
-
-• **🔐 Multi-Sig Wallets**: Use \`!multisig\` in DMs to set up multi-signature security
-• **🧵 Support Threads**: Type \`!thread\` to create a dedicated support session
-• **📊 Price Alerts**: Stay on top of market movements with \`!alert\`
-• **🔍 Asset Verification**: Protect yourself with \`!validate\`
-• **📈 Market Overview**: Get daily market digests (if configured)
-
-New features are constantly being added — type **!help** anytime to see what's new!
-
----
-
-**🚀 Ready to dive in?** Start by setting your reporting currency with \`!currency\`, then use \`!sponsor\` to fund your account, and you're on your way!`;
-
-    await sendMessage(advancedTeaser);
-    await delay(1000);
-
-    // Step 5: Final tips
-    const finalTips = `**💡 Pro Tips**
-
-✅ **Use DMs for sensitive commands** — Commands like \`!balance\` and \`!sponsor\` only work in DMs for your safety
-✅ **Rate limits apply** — Please wait 2 seconds between commands to avoid flooding
-✅ **Report scams** — Suspicious links are automatically detected and flagged
-✅ **Stay updated** — Type \`!help\` anytime for the latest features
-
-If you ever need help, just send \`!help\` or type \`!thread\` to start a support conversation.
-
-**Welcome aboard, ${username}! Let's build the future of DeFi on Stellar together! 🌟**
-
-— *Chen Pilot Team*`;
-
-    await sendMessage(finalTips);
   }
 }

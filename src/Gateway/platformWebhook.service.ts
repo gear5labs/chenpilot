@@ -1,6 +1,8 @@
 import { Request } from "express";
 import crypto from "crypto";
 import { webhookIdempotencyService } from "./webhookIdempotency.service";
+import { voiceTranscriptionService } from "../services/voiceTranscription.service";
+import { agentLLM } from "../Agents/agent";
 
 /**
  * Telegram webhook payload structure
@@ -21,6 +23,13 @@ export interface TelegramWebhookPayload {
     };
     date: number;
     text?: string;
+    voice?: {
+      file_id: string;
+      file_unique_id: string;
+      duration: number;
+      mime_type?: string;
+      file_size?: number;
+    };
   };
   callback_query?: {
     id: string;
@@ -275,6 +284,106 @@ export class PlatformWebhookService {
   }
 
   /**
+   * Download voice file from Telegram
+   */
+  private async downloadTelegramVoiceFile(
+    fileId: string
+  ): Promise<Buffer | null> {
+    try {
+      const botToken = this.TELEGRAM_SECRET;
+      if (!botToken) {
+        console.error("Telegram bot token not configured");
+        return null;
+      }
+
+      // Get file info from Telegram
+      const fileInfoResponse = await fetch(
+        `https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`
+      );
+      const fileInfo = await fileInfoResponse.json();
+
+      if (!fileInfo.ok) {
+        console.error("Failed to get Telegram file info:", fileInfo);
+        return null;
+      }
+
+      // Download the file
+      const fileUrl = `https://api.telegram.org/file/bot${botToken}/${fileInfo.result.file_path}`;
+      const fileResponse = await fetch(fileUrl);
+
+      if (!fileResponse.ok) {
+        console.error("Failed to download Telegram voice file");
+        return null;
+      }
+
+      const arrayBuffer = await fileResponse.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    } catch (error) {
+      console.error("Error downloading Telegram voice file:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Handle Telegram voice message
+   */
+  private async handleVoiceMessage(
+    payload: TelegramWebhookPayload
+  ): Promise<unknown> {
+    const voice = payload.message?.voice;
+    if (!voice) {
+      return { error: "No voice data found" };
+    }
+
+    console.log(
+      `Processing voice message from ${payload.message?.from.username}, duration: ${voice.duration}s`
+    );
+
+    // Download voice file
+    const audioBuffer = await this.downloadTelegramVoiceFile(voice.file_id);
+    if (!audioBuffer) {
+      return { error: "Failed to download voice file" };
+    }
+
+    // Transcribe audio
+    const transcriptionResult = await voiceTranscriptionService.transcribeAudio(
+      audioBuffer,
+      voice.mime_type || "audio/ogg"
+    );
+
+    if (!transcriptionResult.success || !transcriptionResult.text) {
+      return { error: "Failed to transcribe voice message" };
+    }
+
+    console.log(`Transcribed text: ${transcriptionResult.text}`);
+
+    // Process transcribed text with agent for intent parsing
+    const userId = String(payload.message?.from.id);
+    try {
+      const agentResult = await agentLLM.callLLM(
+        userId,
+        "You are a helpful AI assistant. Parse the user's intent from their voice message and respond appropriately.",
+        transcriptionResult.text,
+        false
+      );
+
+      return {
+        type: "voice",
+        transcription: transcriptionResult.text,
+        agentResponse: agentResult,
+        processed: true,
+      };
+    } catch (error) {
+      console.error("Error processing voice message with agent:", error);
+      return {
+        type: "voice",
+        transcription: transcriptionResult.text,
+        error: "Failed to process with agent",
+      };
+    }
+  }
+
+  /**
    * Handle Telegram update - implement your business logic here
    */
   private async handleTelegramUpdate(
@@ -282,17 +391,49 @@ export class PlatformWebhookService {
   ): Promise<unknown> {
     console.log("Processing Telegram update:", payload.update_id);
 
-    // TODO: Implement your Telegram message handling logic
-    // Examples:
-    // - Process commands
-    // - Handle messages
-    // - Process callback queries
-    // - Integrate with your AI agent
+    // Handle voice messages
+    if (payload.message?.voice) {
+      return this.handleVoiceMessage(payload);
+    }
 
+    // Handle text messages
     if (payload.message?.text) {
       console.log(
         `Message from ${payload.message.from.username}: ${payload.message.text}`
       );
+      
+      // Process text message with agent
+      const userId = String(payload.message.from.id);
+      try {
+        const agentResult = await agentLLM.callLLM(
+          userId,
+          "You are a helpful AI assistant. Respond to the user's message appropriately.",
+          payload.message.text,
+          false
+        );
+
+        return {
+          type: "text",
+          text: payload.message.text,
+          agentResponse: agentResult,
+          processed: true,
+        };
+      } catch (error) {
+        console.error("Error processing text message with agent:", error);
+        return {
+          type: "text",
+          text: payload.message.text,
+          error: "Failed to process with agent",
+        };
+      }
+    }
+
+    // Handle callback queries
+    if (payload.callback_query) {
+      console.log(
+        `Callback query from ${payload.callback_query.from.username}: ${payload.callback_query.data}`
+      );
+      return { processed: true, type: "callback" };
     }
 
     return { processed: true };
