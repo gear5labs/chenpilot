@@ -88,6 +88,31 @@ For more details, see [src/config/LOGGING.md](src/config/LOGGING.md)
 
 ---
 
+## 🛡️ Security & Smart Contract Auditing
+
+Chen Pilot includes an automated smart contract security auditing layer in its CI/CD pipeline using the **x402-based heuristic audit engine**. 
+
+### Automated Audits
+
+Every pull request and push to the `main` branch that modifies contracts in the `contracts/` directory triggers an automated security scan. The audit checks for:
+
+- **Reentrancy Risks**
+- **Unbounded Mints**
+- **Centralized Ownership**
+- **Honeypot Potentials**
+- **Integer Overflows/Underflows**
+
+### Configuration
+
+To enable automated audits in your fork, you must configure one of the following GitHub Secrets in your repository:
+
+- `X402_TOKEN`: A Bearer token for the Money Machine x402 API.
+- `X402_PAYMENT_PROOF`: A Solana transaction signature for a 0.005 SOL micro-payment to `AKz1pZ8yxtFQLwTpDKJGZjLeBUX4rnobX7HdMF3uvK6W`.
+
+For more details on pricing and tiers, visit [Money Machine Pricing](https://ssyopros.zo.space/pricing).
+
+---
+
 ## 🧹 Code Quality & Git Hooks
 
 This project uses **Husky**, **lint-staged**, and **commitlint** to enforce code quality and commit message standards.
