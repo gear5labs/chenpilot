@@ -30,7 +30,7 @@ import {
   requireOwnerOrElevated,
 } from "./middleware/rbac.middleware";
 import { auditLogService } from "../AuditLog/auditLog.service";
-import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
+import contractRegistryRoutes from "../ContractRegistry/contractRegistry.routes";
 import { getSocketManager } from "./socketManager";
 import { BotSessionService } from "../Bot/botSession.service";
 import { BotSessionType, BotPlatform } from "../Bot/botSession.entity";
