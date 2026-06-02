@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.searchFeatures = searchFeatures;
 exports.formatHelpMessage = formatHelpMessage;
+exports.formatAiHelpMessage = formatAiHelpMessage;
 const FEATURES = [
     {
         name: "Trustlines",
@@ -91,4 +92,8 @@ function formatHelpMessage(features, isSearch = false, format = "html") {
         message += italic(`Tip: You can search for specific features by typing ${format === "html" ? "/help &lt;query&gt;" : "!help <query>"}`);
     }
     return message;
+}
+function formatAiHelpMessage(response, format = "html") {
+    const bold = (text) => format === "html" ? `<b>${text}</b>` : `**${text}**`;
+    return `${bold("🤖 Chen Pilot AI Help")}\n\n${response}`;
 }

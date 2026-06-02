@@ -9,6 +9,8 @@ import { horizonOperationStreamerService } from "./services/horizonOperationStre
 import { priceSpikeAlertService } from "./services/priceSpikeAlert.service";
 import { durableRecoveryService } from "./Agents/planner/DurableRecoveryService";
 import { durableOperationService } from "./Reliability/DurableOperationService";
+import secretManager from "./utils/secretManager";
+import toolRegistry from "./registry/toolRegistry";
 
 class Server {
   private server: http.Server;
@@ -38,10 +40,18 @@ class Server {
         });
       };
       console.log("Attempting to connect to DB...");
+      // Initialize cross-cutting managers
+      await secretManager.init();
+      const regValidation = toolRegistry.validateStartup();
+      if (!regValidation.ok) {
+        logger.warn("Tool registry startup warnings", {
+          warnings: regValidation.warnings,
+        });
+      }
       await AppDataSource.initialize();
       console.log("DB connection established!");
       logger.info("Database connected successfully");
-      
+
       // Recover interrupted durable executions
       await durableRecoveryService.recoverInterruptedExecutions();
 

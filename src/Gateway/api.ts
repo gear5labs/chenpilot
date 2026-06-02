@@ -15,7 +15,11 @@ import {
   ipBlacklistRoutes,
 } from "../Security";
 
-import { observabilityMiddleware, updateObservabilityContext } from "../observability";
+import {
+  observabilityMiddleware,
+  updateObservabilityContext,
+} from "../observability";
+import idempotencyMiddleware from "../middleware/idempotency";
 
 import { authenticate } from "../Auth/auth";
 import UserService from "../Auth/user.service";
@@ -44,6 +48,8 @@ app.use(
 );
 
 app.use(express.json());
+// Apply idempotency middleware for POST/PUT/PATCH to provide durable replay safety
+app.use(idempotencyMiddleware);
 app.use(observabilityMiddleware);
 app.use(requestLogger);
 app.use(ipBlacklistMiddleware);
