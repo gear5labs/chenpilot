@@ -5,28 +5,25 @@ import { rateLimit } from "express-rate-limit";
 import { container } from "tsyringe";
 import swaggerUi from "swagger-ui-express";
 import routes from "./routes";
-import authRoutes from "./auth.routes";
-import { swaggerSpec } from "./swagger";
-import requestLogger from "../middleware/requestLogger";
+import promptRoutes from "./promptRoutes";
 import { ipBlacklistMiddleware, ipBlacklistRoutes } from "../Security";
-
 import { authenticate } from "../Auth/auth";
 import UserService from "../Auth/user.service";
 import { validateQuery } from "../Agents/validationService";
 import { intentAgent } from "../Agents/agents/intentagent";
 import { ErrorHandler } from "./middleware/errorHandler";
 import { UnauthorizedError, ValidationError, BadError } from "../utils/error";
+import requestLogger from "../middleware/requestLogger";
 
 const app = express();
 
-// --- GLOBAL SECURITY MIDDLEWARE ---
-// AC: Helmet configured securely
+// Global security middleware
 app.use(helmet());
 
-// AC: CORS configured securely
+// CORS configuration
 app.use(
   cors({
-    origin: process.env.ALLOWED_ORIGINS || "*", // In production, replace * with your domain
+    origin: process.env.ALLOWED_ORIGINS || "*",
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   })
@@ -36,18 +33,12 @@ app.use(express.json());
 app.use(requestLogger);
 app.use(ipBlacklistMiddleware);
 
-// --- SWAGGER API DOCS ---
-app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+// Swagger API docs
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(require("./swagger").swaggerSpec));
 
-// --- RATE LIMITING STRATEGY (GLOBAL/SENSITIVE) ---
-
-/**
- * AC: Authenticated/Sensitive Rate Limit
- * Applied to AI queries and wallet-related operations.
- * Limit: 20 requests per minute per IP.
- */
+// Sensitive rate limiter for AI queries
 const sensitiveLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minute
+  windowMs: 1 * 60 * 1000,
   limit: 20,
   standardHeaders: "draft-8",
   legacyHeaders: false,
@@ -58,137 +49,29 @@ const sensitiveLimiter = rateLimit({
   },
 });
 
-function createSuccess<T>(data: T, message: string) {
-  return {
-    success: true,
-    data,
-    message,
-  };
-}
-
-/**
- * @swagger
- * /signup:
- *   post:
- *     summary: Create a new user
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - name
- *             properties:
- *               name:
- *                 type: string
- *                 description: Unique username
- *     responses:
- *       201:
- *         description: User created successfully
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/SuccessResponse'
- *       400:
- *         description: Name is required
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- */
-app.post("/signup", async (req, res, next) => {
-  try {
-    const { name } = req.body;
-
-    if (!name) {
-      throw new BadError("Name is required");
-    }
-
-    const userService = container.resolve(UserService);
-    const user = await userService.createUser({ name });
-
-    res.status(201).json(createSuccess(user, "User created successfully"));
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Auth routes (password reset, email verification)
-app.use("/auth", authRoutes);
-
+// Query endpoint - for AI agent queries
 app.post("/query", sensitiveLimiter, async (req, res, next) => {
-  /**
-   * @swagger
-   * /query:
-   *   post:
-   *     summary: Send a natural-language query to the AI agent
-   *     tags: [AI Agent]
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             required:
-   *               - userId
-   *               - query
-   *             properties:
-   *               userId:
-   *                 type: string
-   *                 format: uuid
-   *                 description: ID of the authenticated user
-   *               query:
-   *                 type: string
-   *                 description: Natural language command (e.g. "swap 100 XLM to USDC")
-   *     responses:
-   *       200:
-   *         description: Query processed successfully
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 result:
-   *                   type: object
-   *       401:
-   *         description: Invalid credentials
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/ErrorResponse'
-   *       422:
-   *         description: Invalid query
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/ErrorResponse'
-   */
-  // app.post("/query", async (req, res, next) => {
   try {
     const { userId, query } = req.body;
-
     const user = await authenticate(userId);
-
     if (!user) throw new UnauthorizedError("invalid credentials");
 
     const valid = await validateQuery(query, userId);
     if (!valid) throw new ValidationError("invalid query");
 
-    // 3. intent → execution
     const result = await intentAgent.handle(query, userId);
-
     res.json({ result });
   } catch (error) {
     next(error);
   }
 });
 
+// Mount all API routes under /api prefix
 app.use("/api", routes);
-app.use("/api/security/blacklist", ipBlacklistRoutes);
 app.use("/api/prompts", promptRoutes);
+app.use("/api/security/blacklist", ipBlacklistRoutes);
 
+// Global error handler
 app.use(ErrorHandler);
 
 export default app;

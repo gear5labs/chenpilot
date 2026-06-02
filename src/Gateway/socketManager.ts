@@ -2,14 +2,21 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 import { Server as HTTPServer } from "http";
 import logger from "../config/logger";
 import { EventEmitter } from "events";
+import { container } from "tsyringe";
+import JwtService from "../Auth/jwt.service";
+import { auditLogService } from "../AuditLog/auditLog.service";
+import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
 
 /**
  * Represents a connected client with metadata
  */
 interface ConnectedClient {
-  userId?: string;
+  userId: string;
   socketId: string;
   connectedAt: Date;
+  userAgent?: string;
+  ip?: string;
+  role: string;
 }
 
 /**
@@ -159,6 +166,7 @@ export class SocketManager {
   private connectedClients: Map<string, ConnectedClient>;
   private eventEmitter: RealtimeEventEmitter;
   private userSockets: Map<string, Set<string>>; // userId -> Set of socketIds
+  private jwtService: JwtService;
 
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
@@ -166,16 +174,18 @@ export class SocketManager {
         origin: process.env.ALLOWED_ORIGINS || "*",
         credentials: true,
         methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allowedHeaders: ["Content-Type"],
+        allowedHeaders: ["Content-Type", "Authorization"],
       },
       transports: ["websocket", "polling"],
       pingInterval: 25000,
       pingTimeout: 60000,
+      maxHttpBufferSize: 1e6, // 1 MB max message size
     } as any);
 
     this.connectedClients = new Map();
     this.userSockets = new Map();
     this.eventEmitter = new RealtimeEventEmitter();
+    this.jwtService = container.resolve(JwtService);
 
     this.setupConnectionHandlers();
     this.setupEventListeners();
@@ -185,65 +195,74 @@ export class SocketManager {
    * Setup socket connection and disconnection handlers
    */
   private setupConnectionHandlers(): void {
-    this.io.on("connection", (socket: Socket) => {
-      logger.info(`Client connected: ${socket.id}`);
+    this.io.on("connection", async (socket: Socket) => {
+      const ip = socket.handshake.headers["x-forwarded-for"] as string || socket.handshake.address;
+      const userAgent = socket.handshake.headers["user-agent"];
 
-      const client: ConnectedClient = {
-        socketId: socket.id,
-        connectedAt: new Date(),
-      };
+      logger.info(`Client connected: ${socket.id} (IP: ${ip})`);
 
-      this.connectedClients.set(socket.id, client);
+      // Listen for authentication immediately
+      socket.once("authenticate", async (token: string) => {
+        try {
+          const payload = this.jwtService.verifyAccessToken(token);
 
-      // Handle authentication and user association
-      socket.on("authenticate", (userId: string) => {
-        if (userId) {
-          client.userId = userId;
+          const client: ConnectedClient = {
+            userId: payload.userId,
+            socketId: socket.id,
+            connectedAt: new Date(),
+            userAgent,
+            ip,
+            role: payload.role,
+          };
+
+          this.connectedClients.set(socket.id, client);
 
           // Track user's sockets
-          if (!this.userSockets.has(userId)) {
-            this.userSockets.set(userId, new Set());
+          if (!this.userSockets.has(payload.userId)) {
+            this.userSockets.set(payload.userId, new Set());
           }
-          this.userSockets.get(userId)!.add(socket.id);
+          this.userSockets.get(payload.userId)!.add(socket.id);
 
-          socket.join(`user:${userId}`);
-          logger.info(`Client ${socket.id} authenticated as user ${userId}`);
+          socket.join(`user:${payload.userId}`);
+          socket.emit("authenticated", { success: true, userId: payload.userId });
+          
+          // Audit log connection
+          await auditLogService.log({
+            userId: payload.userId,
+            action: AuditAction.SENSITIVE_DATA_ACCESS,
+            severity: AuditSeverity.INFO,
+            ipAddress: ip,
+            userAgent,
+            resource: "realtime:connection",
+            metadata: {
+              event: "connected",
+              socketId: socket.id
+            },
+            success: true,
+          });
+
+          logger.info(`Client ${socket.id} authenticated as user ${payload.userId}`);
+
+          // Now set up other listeners AFTER authentication
+          this.setupAuthenticatedListeners(socket, client);
+        } catch (error) {
+          logger.warn(`Authentication failed for client ${socket.id}:`, { error: (error as Error).message });
+          socket.emit("error", { message: "Authentication failed. Invalid token." });
+          socket.disconnect(true);
         }
       });
 
-      // Handle subscription to transaction updates — requires prior authentication
-      socket.on("subscribe:transactions", (transactionId?: string) => {
-        if (!client.userId) {
-          socket.emit("error", { message: "Authentication required before subscribing." });
-          logger.warn(`Unauthenticated client ${socket.id} attempted to subscribe to transactions`);
-          return;
+      // If no auth after 30 seconds, disconnect
+      const authTimeout = setTimeout(() => {
+        if (!this.connectedClients.has(socket.id)) {
+          logger.warn(`Client ${socket.id} disconnected (no authentication received)`);
+          socket.disconnect(true);
         }
-        if (transactionId) {
-          socket.join(`transaction:${transactionId}`);
-          logger.info(
-            `Client ${socket.id} subscribed to transaction ${transactionId}`
-          );
-        }
-      });
-
-      // Handle subscription to bot updates — requires prior authentication
-      socket.on("subscribe:bot-alerts", (botId?: string) => {
-        if (!client.userId) {
-          socket.emit("error", { message: "Authentication required before subscribing." });
-          logger.warn(`Unauthenticated client ${socket.id} attempted to subscribe to bot alerts`);
-          return;
-        }
-        if (botId) {
-          socket.join(`bot:${botId}`);
-          logger.info(`Client ${socket.id} subscribed to bot ${botId}`);
-        } else {
-          socket.join("bot:all");
-          logger.info(`Client ${socket.id} subscribed to all bot alerts`);
-        }
-      });
+      }, 30000);
 
       // Handle disconnection
-      socket.on("disconnect", () => {
+      socket.on("disconnect", async (reason) => {
+        clearTimeout(authTimeout);
         const disconnectedClient = this.connectedClients.get(socket.id);
         if (disconnectedClient?.userId) {
           const userSockets = this.userSockets.get(disconnectedClient.userId);
@@ -253,15 +272,97 @@ export class SocketManager {
               this.userSockets.delete(disconnectedClient.userId);
             }
           }
+
+          // Audit log disconnection
+          await auditLogService.log({
+            userId: disconnectedClient.userId,
+            action: AuditAction.SENSITIVE_DATA_ACCESS,
+            severity: AuditSeverity.INFO,
+            ipAddress: disconnectedClient.ip,
+            userAgent: disconnectedClient.userAgent,
+            resource: "realtime:connection",
+            metadata: {
+              event: "disconnected",
+              socketId: socket.id,
+              reason
+            },
+            success: true,
+          });
         }
         this.connectedClients.delete(socket.id);
-        logger.info(`Client disconnected: ${socket.id}`);
+        logger.info(`Client disconnected: ${socket.id} (Reason: ${reason})`);
       });
 
       // Handle errors
       socket.on("error", (error: Error) => {
         logger.error(`Socket error for ${socket.id}:`, { error: error.message });
       });
+    });
+  }
+
+  /**
+   * Setup event listeners for authenticated clients
+   */
+  private setupAuthenticatedListeners(socket: Socket, client: ConnectedClient): void {
+    // Handle subscription to transaction updates
+    socket.on("subscribe:transactions", async (transactionId?: string) => {
+      try {
+        if (transactionId) {
+          // TODO: Verify user owns this transactionId (add a lookup here later)
+          socket.join(`transaction:${transactionId}`);
+          logger.info(
+            `Client ${socket.id} (user: ${client.userId}) subscribed to transaction ${transactionId}`
+          );
+
+          // Audit log subscription
+          await auditLogService.log({
+            userId: client.userId,
+            action: AuditAction.SENSITIVE_DATA_ACCESS,
+            severity: AuditSeverity.INFO,
+            ipAddress: client.ip,
+            userAgent: client.userAgent,
+            resource: "realtime:subscription",
+            metadata: {
+              type: "transactions",
+              transactionId,
+            },
+            success: true,
+          });
+        }
+      } catch (error) {
+        logger.error(`Failed to subscribe to transactions:`, { error });
+        socket.emit("error", { message: "Failed to subscribe." });
+      }
+    });
+
+    // Handle subscription to bot updates
+    socket.on("subscribe:bot-alerts", async (botId?: string) => {
+      try {
+        if (botId) {
+          // TODO: Verify user owns this botId (add a lookup here later)
+          socket.join(`bot:${botId}`);
+          logger.info(
+            `Client ${socket.id} (user: ${client.userId}) subscribed to bot ${botId}`
+          );
+
+          await auditLogService.log({
+            userId: client.userId,
+            action: AuditAction.SENSITIVE_DATA_ACCESS,
+            severity: AuditSeverity.INFO,
+            ipAddress: client.ip,
+            userAgent: client.userAgent,
+            resource: "realtime:subscription",
+            metadata: {
+              type: "bot-alerts",
+              botId,
+            },
+            success: true,
+          });
+        }
+      } catch (error) {
+        logger.error(`Failed to subscribe to bot alerts:`, { error });
+        socket.emit("error", { message: "Failed to subscribe." });
+      }
     });
   }
 
@@ -343,7 +444,6 @@ export class SocketManager {
     if (update.userId) {
       this.io.to(`user:${update.userId}`).emit("transaction:update", update);
     }
-    this.io.to(`transaction:${update.transactionId}`).emit("transaction:update", update);
   }
 
   /**
@@ -357,7 +457,6 @@ export class SocketManager {
     if (update.userId) {
       this.io.to(`user:${update.userId}`).emit(eventName, update);
     }
-    this.io.to(`transaction:${update.transactionId}`).emit(eventName, update);
   }
 
   /**
@@ -367,7 +466,6 @@ export class SocketManager {
     if (update.userId) {
       this.io.to(`user:${update.userId}`).emit("swap:status", update);
     }
-    this.io.to(`transaction:${update.transactionId}`).emit("swap:status", update);
   }
 
   /**
@@ -380,7 +478,6 @@ export class SocketManager {
     if (alert.botId) {
       this.io.to(`bot:${alert.botId}`).emit("bot:alert", alert);
     }
-    this.io.to("bot:all").emit("bot:alert", alert);
   }
 
   /**
@@ -390,8 +487,9 @@ export class SocketManager {
     if (statusChange.userId) {
       this.io.to(`user:${statusChange.userId}`).emit("bot:status-change", statusChange);
     }
-    this.io.to(`bot:${statusChange.botId}`).emit("bot:status-change", statusChange);
-    this.io.to("bot:all").emit("bot:status-change", statusChange);
+    if (statusChange.botId) {
+      this.io.to(`bot:${statusChange.botId}`).emit("bot:status-change", statusChange);
+    }
   }
 
   /**
@@ -404,7 +502,6 @@ export class SocketManager {
     if (alert.botId) {
       this.io.to(`bot:${alert.botId}`).emit("bot:error", alert);
     }
-    this.io.to("bot:all").emit("bot:error", alert);
   }
 
   /**
@@ -414,7 +511,6 @@ export class SocketManager {
     if (status.userId) {
       this.io.to(`user:${status.userId}`).emit("deployment:status", status);
     }
-    this.io.emit("deployment:status", status);
   }
 
   /**

@@ -1,9 +1,7 @@
 import { Router, Request, Response } from "express";
 import { authenticateToken } from "../Auth/auth.middleware";
-import {
-  requireAdmin,
-  requireOwnerOrElevated,
-} from "../Gateway/middleware/rbac.middleware";
+import { requireOwnerOrElevated } from "../Gateway/middleware/rbac.middleware";
+import { requireAdminAuth } from "../Gateway/middleware/adminAuth";
 import { auditLogService } from "./auditLog.service";
 import { AuditAction, AuditSeverity } from "./auditLog.entity";
 
@@ -73,8 +71,7 @@ const router = Router();
  */
 router.get(
   "/logs",
-  authenticateToken,
-  requireAdmin,
+  requireAdminAuth(),
   async (req: Request, res: Response) => {
     try {
       const {
@@ -209,8 +206,7 @@ router.get(
  */
 router.get(
   "/security-events",
-  authenticateToken,
-  requireAdmin,
+  requireAdminAuth(),
   async (req: Request, res: Response) => {
     try {
       const { hours, limit } = req.query;
@@ -265,8 +261,7 @@ router.get(
  */
 router.get(
   "/failed-auth",
-  authenticateToken,
-  requireAdmin,
+  requireAdminAuth(),
   async (req: Request, res: Response) => {
     try {
       const { userId, hours } = req.query;

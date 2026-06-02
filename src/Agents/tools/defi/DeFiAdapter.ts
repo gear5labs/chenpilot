@@ -3,6 +3,12 @@ import {
   AdapterCapabilities,
   getAdapterConfig,
 } from "../../../config/defiAdapters";
+import {
+  CircuitBreaker,
+  withRetry,
+  CircuitBreakerOptions,
+  RetryOptions,
+} from "../../../utils/resilience";
 
 /**
  * Result returned by DeFi adapter operations
@@ -52,6 +58,8 @@ export interface TransactionRequest {
  */
 export abstract class DeFiAdapter {
   protected config: DeFiAdapterConfig;
+  protected circuitBreaker: CircuitBreaker;
+  protected retryOptions: RetryOptions;
   
   constructor(protocol: "equilibre" | "yieldblox") {
     this.config = getAdapterConfig(protocol);
@@ -61,6 +69,22 @@ export abstract class DeFiAdapter {
         `[DeFiAdapter] ${this.config.name} adapter is disabled`
       );
     }
+
+    const circuitBreakerOptions: CircuitBreakerOptions = {
+      name: `DeFiAdapter-${this.config.name}`,
+      failureThreshold: 5,
+      recoveryTimeout: 30000,
+      successThreshold: 2,
+      timeoutMs: this.config.timeout,
+    };
+    this.circuitBreaker = new CircuitBreaker(circuitBreakerOptions);
+
+    this.retryOptions = {
+      maxAttempts: this.config.retry.maxAttempts,
+      initialDelayMs: this.config.retry.backoffMs,
+      maxDelayMs: 30000,
+      backoffMultiplier: 2,
+    };
   }
 
   /**
@@ -93,49 +117,45 @@ export abstract class DeFiAdapter {
   }
 
   /**
-   * Execute an API request with retry logic
+   * Execute an API request with retry logic and circuit breaker
    */
   protected async fetchWithRetry<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const { timeout, retry } = this.config;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    return this.circuitBreaker.execute(() =>
+      withRetry(async () => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
+        try {
+          const response = await fetch(`${this.config.apiUrl}${endpoint}`, {
+            ...options,
+            signal: controller.signal,
+            headers: {
+              "Content-Type": "application/json",
+              ...options.headers,
+            },
+          });
 
-    let lastError: Error | undefined;
-    
-    for (let attempt = 1; attempt <= retry.maxAttempts; attempt++) {
-      try {
-        const response = await fetch(`${this.config.apiUrl}${endpoint}`, {
-          ...options,
-          signal: controller.signal,
-          headers: {
-            "Content-Type": "application/json",
-            ...options.headers,
-          },
-        });
+          clearTimeout(timeoutId);
 
-        clearTimeout(timeoutId);
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
 
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
+          return await response.json();
+        } finally {
+          clearTimeout(timeoutId);
         }
+      }, this.retryOptions)
+    );
+  }
 
-        return await response.json();
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        
-        if (attempt < retry.maxAttempts) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, retry.backoffMs * attempt)
-          );
-        }
-      }
-    }
-
-    clearTimeout(timeoutId);
-    throw lastError || new Error("Request failed after retries");
+  /**
+   * Get circuit breaker metrics for monitoring
+   */
+  getCircuitBreakerMetrics() {
+    return this.circuitBreaker.getMetrics();
   }
 
   /**
