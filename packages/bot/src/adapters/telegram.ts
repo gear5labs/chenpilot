@@ -207,6 +207,57 @@ export class TelegramAdapter {
       })();
     });
 
+    // #122: Feedback command for automated bug reporting
+    this.bot.command('feedback', async (ctx: any) => {
+      const userId = String(ctx.from?.id || 'unknown');
+      await withPerformanceProfiling('/feedback', 'telegram', userId, async () => {
+        const args = ctx.message.text.split(' ').slice(1).join(' ');
+        
+        if (!args) {
+          return ctx.reply(
+            '📝 <b>Feedback Command</b>\n\nUsage: /feedback <your message>\n\nExample: /feedback The balance command is not working properly\n\n<i>Your feedback will be automatically forwarded to the development team.</i>',
+            { parse_mode: 'HTML' }
+          );
+        }
+
+        try {
+          // Capture technical details
+          const feedbackData = {
+            userId,
+            username: ctx.from?.username || 'unknown',
+            message: args,
+            timestamp: new Date().toISOString(),
+            platform: 'telegram',
+            chatId: ctx.chat?.id,
+          };
+
+          // Send feedback to backend
+          const response = await fetch(`${BACKEND_URL}/api/feedback`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(feedbackData),
+          });
+
+          if (response.ok) {
+            await ctx.reply(
+              '✅ <b>Feedback Received</b>\n\nThank you for your feedback! It has been automatically forwarded to the development team.\n\n<i>We will review it and take appropriate action.</i>',
+              { parse_mode: 'HTML' }
+            );
+          } else {
+            await ctx.reply(
+              '⚠️ <b>Feedback Submission Failed</b>\n\nSorry, we couldn\'t submit your feedback at this time. Please try again later.',
+              { parse_mode: 'HTML' }
+            );
+          }
+        } catch (error) {
+          await ctx.reply(
+            '❌ <b>Error</b>\n\nAn error occurred while submitting your feedback. Please try again later.',
+            { parse_mode: 'HTML' }
+          );
+        }
+      })();
+    });
+
     // #148: /validate command for Stellar asset verification
     this.bot.command('validate', async (ctx: any) => {
       const userId = String(ctx.from?.id || 'unknown');
@@ -255,15 +306,69 @@ export class TelegramAdapter {
       const userId = String(ctx.from?.id || 'unknown');
       const text = ctx.message?.text || '';
       const command = text.split(' ')[0];
-      
+
       const wizardState = this.multisigWizard.getWizardState(userId, 'telegram');
       if (wizardState && !WIZARD_COMMANDS.includes(command)) {
         const response = this.multisigWizard.processInput(userId, 'telegram', text);
         await ctx.reply(response.message);
         return;
       }
-      
+
       return next();
+    });
+
+    // #112: Inline query handler for asset search
+    this.bot.on('inline_query', async (ctx: any) => {
+      const query = ctx.inlineQuery.query.trim();
+      const userId = String(ctx.from?.id || 'unknown');
+
+      await withPerformanceProfiling('inline_query', 'telegram', userId, async () => {
+        if (query.length < 2) {
+          // Return empty results for very short queries
+          return ctx.answerInlineQuery([]);
+        }
+
+        try {
+          // Search for assets via backend API
+          const searchUrl = `${BACKEND_URL}/api/assets/search?q=${encodeURIComponent(query)}&limit=5`;
+          const response = await fetch(searchUrl);
+          
+          if (!response.ok) {
+            return ctx.answerInlineQuery([]);
+          }
+
+          const assets = await response.json() as Array<{
+            code: string;
+            issuer?: string;
+            domain?: string;
+            price?: number;
+            priceChange24h?: number;
+          }>;
+
+          // Format results as inline query results
+          const results = assets.map((asset, index) => ({
+            type: 'article',
+            id: `${asset.code}-${asset.issuer || 'native'}-${index}`,
+            title: `${asset.code}${asset.domain ? ` (${asset.domain})` : ''}`,
+            description: asset.price 
+              ? `Price: $${asset.price.toFixed(4)} ${asset.priceChange24h !== undefined ? `| 24h: ${asset.priceChange24h >= 0 ? '+' : ''}${asset.priceChange24h.toFixed(2)}%` : ''}`
+              : 'Stellar asset',
+            input_message_content: {
+              message_text: this.formatAssetInlineResult(asset),
+              parse_mode: 'HTML'
+            },
+            thumb_url: asset.domain ? `https://www.google.com/s2/favicons?domain=${asset.domain}` : undefined,
+          }));
+
+          await ctx.answerInlineQuery(results, {
+            cache_time: 300, // Cache results for 5 minutes
+          });
+        } catch (error) {
+          console.error('Error handling inline query:', error);
+          // Return empty results on error
+          return ctx.answerInlineQuery([]);
+        }
+      })();
     });
 
     // Set bot commands for mobile menu
@@ -273,6 +378,7 @@ export class TelegramAdapter {
       { command: "swap", description: "Swap assets" },
       { command: "trustline", description: "Add trustline" },
       { command: "multisig", description: "Setup multisig wallet" },
+      { command: "feedback", description: "Send feedback or report bugs" },
       { command: "help", description: "Show help" },
     ]);
 
@@ -351,6 +457,34 @@ export class TelegramAdapter {
       message += `📝 <b>Memo:</b> ${data.memo}\n`;
     }
 
+    return message;
+  }
+
+  // #112: Format asset result for inline query
+  private formatAssetInlineResult(asset: {
+    code: string;
+    issuer?: string;
+    domain?: string;
+    price?: number;
+    priceChange24h?: number;
+  }): string {
+    let message = `💎 <b>${asset.code}</b>\n\n`;
+    
+    if (asset.domain) {
+      message += `<b>Issuer:</b> ${asset.domain}\n`;
+    }
+    
+    if (asset.price !== undefined) {
+      message += `<b>Price:</b> $${asset.price.toFixed(4)}\n`;
+      
+      if (asset.priceChange24h !== undefined) {
+        const changeEmoji = asset.priceChange24h >= 0 ? '📈' : '📉';
+        const changeSign = asset.priceChange24h >= 0 ? '+' : '';
+        message += `<b>24h:</b> ${changeEmoji} ${changeSign}${asset.priceChange24h.toFixed(2)}%\n`;
+      }
+    }
+    
+    message += `\n<i>Data from Chen Pilot</i>`;
     return message;
   }
 

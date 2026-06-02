@@ -346,6 +346,53 @@ export class DiscordAdapter {
           })();
         }
 
+        // #122: Feedback command for automated bug reporting
+        if (message.content.startsWith('!feedback')) {
+          await withPerformanceProfiling('!feedback', 'discord', userId, async () => {
+            const feedbackMessage = message.content.replace('!feedback', '').trim();
+            
+            if (!feedbackMessage) {
+              return message.reply(
+                '📝 **Feedback Command**\n\nUsage: `!feedback <your message>`\n\nExample: `!feedback The balance command is not working properly`\n\n*Your feedback will be automatically forwarded to the development team.*'
+              );
+            }
+
+            try {
+              // Capture technical details
+              const feedbackData = {
+                userId,
+                username: message.author.username,
+                message: feedbackMessage,
+                timestamp: new Date().toISOString(),
+                platform: 'discord',
+                channelId: message.channelId,
+                guildId: message.guildId,
+              };
+
+              // Send feedback to backend
+              const response = await fetch(`${BACKEND_URL}/api/feedback`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(feedbackData),
+              });
+
+              if (response.ok) {
+                await message.reply(
+                  '✅ **Feedback Received**\n\nThank you for your feedback! It has been automatically forwarded to the development team.\n\n*We will review it and take appropriate action.*'
+                );
+              } else {
+                await message.reply(
+                  '⚠️ **Feedback Submission Failed**\n\nSorry, we couldn\'t submit your feedback at this time. Please try again later.'
+                );
+              }
+            } catch {
+              await message.reply(
+                '❌ **Error**\n\nAn error occurred while submitting your feedback. Please try again later.'
+              );
+            }
+          })();
+        }
+
         if (message.content.startsWith("!help")) {
           await withPerformanceProfiling(commandName, 'discord', userId, async () => {
             const query = message.content.replace("!help", "").trim();
