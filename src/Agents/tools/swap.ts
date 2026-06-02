@@ -2,7 +2,7 @@ import { BaseTool } from "./base/BaseTool";
 import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import config from "../../config/config";
-import accountsData from "../../Auth/accounts.json";
+import { accountSecretStore } from "../../Auth/accountSecretStore";
 import logger from "../../config/logger";
 import stellarPriceService from "../../services/stellarPrice.service";
 import { flashSwapRiskAnalyzer } from "../../services/flashSwapRiskAnalyzer";
@@ -19,6 +19,7 @@ interface StellarAccountData {
   userId: string;
   secretKey: string;
   publicKey: string;
+  [key: string]: unknown;
 }
 
 // Stellar asset definitions
@@ -65,6 +66,9 @@ export class SwapTool extends BaseTool<SwapPayload> {
     ],
     category: "trading",
     version: "1.0.0",
+    riskLevel: "high",
+    capabilities: ["dex_trading", "path_payment"],
+    permissions: ["user"],
   };
 
   private server: StellarSdk.Horizon.Server;
@@ -77,10 +81,10 @@ export class SwapTool extends BaseTool<SwapPayload> {
   }
 
   private getStellarAccount(userId: string): StellarSdk.Keypair {
-    const accounts = accountsData as StellarAccountData[];
-    const accountData = accounts.find((a) => a.userId === userId);
+    const accountData =
+      accountSecretStore.getAccountByUserId<StellarAccountData>(userId);
 
-    if (!accountData) {
+    if (!accountData?.secretKey) {
       throw new Error(`Stellar account not found for user: ${userId}`);
     }
 
