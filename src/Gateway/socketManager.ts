@@ -2,10 +2,7 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 import { Server as HTTPServer } from "http";
 import logger from "../config/logger";
 import { EventEmitter } from "events";
-import { container } from "tsyringe";
-import JwtService from "../Auth/jwt.service";
-import { auditLogService } from "../AuditLog/auditLog.service";
-import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
+import { evaluateRealtimeAbusePolicy } from "../Security";
 
 /**
  * Represents a connected client with metadata
@@ -32,6 +29,11 @@ export enum RealtimeEventType {
   BOT_ERROR = "bot:error",
   DEPLOYMENT_STATUS = "deployment:status",
   SWAP_STATUS = "swap:status",
+  AGENT_EXECUTION_STARTED = "agent:execution-started",
+  AGENT_STEP_COMPLETED = "agent:step-completed",
+  AGENT_EXECUTION_COMPLETED = "agent:execution-completed",
+  AGENT_EXECUTION_FAILED = "agent:execution-failed",
+  AGENT_APPROVAL_REQUIRED = "agent:approval-required",
 }
 
 /**
@@ -46,6 +48,21 @@ export interface TransactionStatusUpdate {
   feeUsed?: number;
   memo?: string;
   userId?: string;
+}
+
+/**
+ * Agent execution payload
+ */
+export interface AgentExecutionUpdate {
+  executionId: string;
+  planId: string;
+  userId: string;
+  status: string;
+  currentStep?: number;
+  totalSteps?: number;
+  result?: any;
+  error?: string;
+  timestamp: Date;
 }
 
 /**
@@ -155,6 +172,16 @@ export class RealtimeEventEmitter extends EventEmitter {
   emitSwapStatus(update: TransactionStatusUpdate): void {
     this.emit(RealtimeEventType.SWAP_STATUS, update);
   }
+
+  /**
+   * Emit agent execution update
+   */
+  emitAgentExecutionUpdate(
+    type: RealtimeEventType,
+    update: AgentExecutionUpdate
+  ): void {
+    this.emit(type, update);
+  }
 }
 
 /**
@@ -252,13 +279,70 @@ export class SocketManager {
         }
       });
 
-      // If no auth after 30 seconds, disconnect
-      const authTimeout = setTimeout(() => {
-        if (!this.connectedClients.has(socket.id)) {
-          logger.warn(`Client ${socket.id} disconnected (no authentication received)`);
-          socket.disconnect(true);
+      // Handle subscription to transaction updates — requires prior authentication
+      socket.on("subscribe:transactions", async (transactionId?: string) => {
+        if (!client.userId) {
+          socket.emit("error", { message: "Authentication required before subscribing." });
+          logger.warn(`Unauthenticated client ${socket.id} attempted to subscribe to transactions`);
+          return;
         }
-      }, 30000);
+        const abuseDecision = await evaluateRealtimeAbusePolicy(
+          "subscribe:transactions",
+          {
+            userId: client.userId,
+            sessionId: socket.id,
+            ipAddress: socket.handshake.address,
+          },
+          { transactionId }
+        );
+        if (!abuseDecision.allowed) {
+          socket.emit("error", {
+            message: abuseDecision.reason,
+            code: abuseDecision.policyId,
+            retryAfterMs: abuseDecision.retryAfterMs,
+          });
+          return;
+        }
+        if (transactionId) {
+          socket.join(`transaction:${transactionId}`);
+          logger.info(
+            `Client ${socket.id} subscribed to transaction ${transactionId}`
+          );
+        }
+      });
+
+      // Handle subscription to bot updates — requires prior authentication
+      socket.on("subscribe:bot-alerts", async (botId?: string) => {
+        if (!client.userId) {
+          socket.emit("error", { message: "Authentication required before subscribing." });
+          logger.warn(`Unauthenticated client ${socket.id} attempted to subscribe to bot alerts`);
+          return;
+        }
+        const abuseDecision = await evaluateRealtimeAbusePolicy(
+          "subscribe:bot-alerts",
+          {
+            userId: client.userId,
+            sessionId: socket.id,
+            ipAddress: socket.handshake.address,
+          },
+          { botId }
+        );
+        if (!abuseDecision.allowed) {
+          socket.emit("error", {
+            message: abuseDecision.reason,
+            code: abuseDecision.policyId,
+            retryAfterMs: abuseDecision.retryAfterMs,
+          });
+          return;
+        }
+        if (botId) {
+          socket.join(`bot:${botId}`);
+          logger.info(`Client ${socket.id} subscribed to bot ${botId}`);
+        } else {
+          socket.join("bot:all");
+          logger.info(`Client ${socket.id} subscribed to all bot alerts`);
+        }
+      });
 
       // Handle disconnection
       socket.on("disconnect", async (reason) => {
@@ -435,6 +519,19 @@ export class SocketManager {
         this.broadcastDeploymentStatus(status);
       }
     );
+
+    // Agent execution updates
+    [
+      RealtimeEventType.AGENT_EXECUTION_STARTED,
+      RealtimeEventType.AGENT_STEP_COMPLETED,
+      RealtimeEventType.AGENT_EXECUTION_COMPLETED,
+    RealtimeEventType.AGENT_EXECUTION_FAILED,
+    RealtimeEventType.AGENT_APPROVAL_REQUIRED,
+  ].forEach((eventType) => {
+    this.eventEmitter.on(eventType, (update: AgentExecutionUpdate) => {
+      this.broadcastAgentUpdate(eventType, update);
+    });
+  });
   }
 
   /**
@@ -511,6 +608,19 @@ export class SocketManager {
     if (status.userId) {
       this.io.to(`user:${status.userId}`).emit("deployment:status", status);
     }
+  }
+
+  /**
+   * Broadcast agent execution update
+   */
+  private broadcastAgentUpdate(
+    eventType: string,
+    update: AgentExecutionUpdate
+  ): void {
+    if (update.userId) {
+      this.io.to(`user:${update.userId}`).emit(eventType, update);
+    }
+    this.io.to(`execution:${update.executionId}`).emit(eventType, update);
   }
 
   /**

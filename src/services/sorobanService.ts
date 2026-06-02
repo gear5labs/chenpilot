@@ -23,9 +23,16 @@ export type {
 export type { SimulationEstimates } from "./soroban/simulator";
 export { invokeContract, estimateContract } from "./soroban/invoker";
 export {
-  getSorobanCircuitBreakerMetrics,
-  resetSorobanCircuitBreaker,
-} from "./soroban/simulator";
+  contractMetadataRegistry,
+  ContractMetadataRegistry,
+} from "./contracts";
+export type {
+  ContractBinding,
+  ContractCapability,
+  ContractEnvironment,
+  ContractMetadata,
+  ContractRegistrySnapshot,
+} from "./contracts";
 
 // Re-export error types so callers can do `instanceof` checks
 export {

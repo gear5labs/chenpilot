@@ -3,12 +3,8 @@ import {
   AdapterCapabilities,
   getAdapterConfig,
 } from "../../../config/defiAdapters";
-import {
-  CircuitBreaker,
-  withRetry,
-  CircuitBreakerOptions,
-  RetryOptions,
-} from "../../../utils/resilience";
+import { resilienceEngine } from "./resilience/ResilienceEngine";
+import { z } from "zod";
 
 /**
  * Result returned by DeFi adapter operations
@@ -119,14 +115,23 @@ export abstract class DeFiAdapter {
   /**
    * Execute an API request with retry logic and circuit breaker
    */
-  protected async fetchWithRetry<T>(
+  /**
+   * Execute an API request with strict schema validation and full resilience wrapping.
+   */
+  protected async fetchWithSchema<T>(
     endpoint: string,
+    schema?: z.ZodTypeAny,
     options: RequestInit = {}
   ): Promise<T> {
-    return this.circuitBreaker.execute(() =>
-      withRetry(async () => {
+    const key = `${this.config.id}:${endpoint.split("?")[0]}`;
+
+    return resilienceEngine.execute(
+      key,
+      async () => {
+        const timeout = this.config.timeout;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+
         try {
           const response = await fetch(`${this.config.apiUrl}${endpoint}`, {
             ...options,
@@ -144,18 +149,29 @@ export abstract class DeFiAdapter {
           }
 
           return await response.json();
-        } finally {
+        } catch (error) {
           clearTimeout(timeoutId);
+          throw error;
         }
-      }, this.retryOptions)
-    );
+      },
+      schema,
+      {
+        retry: {
+          maxAttempts: this.config.retry.maxAttempts,
+          baseDelayMs: this.config.retry.backoffMs,
+        },
+      }
+    ) as Promise<T>;
   }
 
   /**
-   * Get circuit breaker metrics for monitoring
+   * Execute an API request with retry logic (backwards compatible, without schema validation).
    */
-  getCircuitBreakerMetrics() {
-    return this.circuitBreaker.getMetrics();
+  protected async fetchWithRetry<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<T> {
+    return this.fetchWithSchema<T>(endpoint, undefined, options);
   }
 
   /**
@@ -240,7 +256,7 @@ export class DeFiAdapterFactory {
   }
 }
 
-export {
+export type {
   DeFiAdapterConfig,
   AdapterCapabilities,
 };
