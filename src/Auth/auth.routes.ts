@@ -3,6 +3,12 @@ import { container } from "tsyringe";
 import JwtService from "./jwt.service";
 import UserService from "./user.service";
 import { authenticateToken } from "./auth.middleware";
+import { validateBody } from "../Gateway/middleware/validation";
+import {
+  LoginDto,
+  RefreshTokenDto,
+  LogoutDto,
+} from "../validators/dto/AuthDto";
 import logger from "../config/logger";
 import { auditLogService } from "../AuditLog/auditLog.service";
 import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
@@ -12,147 +18,136 @@ const router = Router();
 /**
  * POST /auth/login - Login and get token pair
  */
-router.post("/login", async (req: Request, res: Response) => {
-  try {
-    const { name } = req.body;
+router.post(
+  "/login",
+  validateBody(LoginDto),
+  async (req: Request, res: Response) => {
+    try {
+      const { name } = req.body as LoginDto;
+      const userService = container.resolve(UserService);
+      const user = await userService.getUserByName(name);
 
-    if (!name) {
-      return res.status(400).json({
-        success: false,
-        message: "Username is required",
+      if (!user) {
+        // Log failed login attempt
+        await auditLogService.logFromRequest(req, AuditAction.LOGIN_FAILED, {
+          severity: AuditSeverity.WARNING,
+          success: false,
+          metadata: { username: name, reason: "User not found" },
+        });
+
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      const jwtService = container.resolve(JwtService);
+      const tokens = await jwtService.generateTokenPair(
+        user.id,
+        user.name,
+        user.role
+      );
+
+      // Log successful login
+      await auditLogService.logFromRequest(req, AuditAction.LOGIN_SUCCESS, {
+        userId: user.id,
+        severity: AuditSeverity.INFO,
+        metadata: { username: name, role: user.role },
       });
-    }
 
-    const userService = container.resolve(UserService);
-    const user = await userService.getUserByName(name);
-
-    if (!user) {
-      // Log failed login attempt
-      await auditLogService.logFromRequest(req, AuditAction.LOGIN_FAILED, {
-        severity: AuditSeverity.WARNING,
-        success: false,
-        metadata: { username: name, reason: "User not found" },
+      logger.info("User logged in", {
+        userId: user.id,
+        name: user.name,
+        role: user.role,
       });
 
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    const jwtService = container.resolve(JwtService);
-    const tokens = await jwtService.generateTokenPair(
-      user.id,
-      user.name,
-      user.role
-    );
-
-    // Log successful login
-    await auditLogService.logFromRequest(req, AuditAction.LOGIN_SUCCESS, {
-      userId: user.id,
-      severity: AuditSeverity.INFO,
-      metadata: { username: name, role: user.role },
-    });
-
-    logger.info("User logged in", {
-      userId: user.id,
-      name: user.name,
-      role: user.role,
-    });
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        user: {
-          id: user.id,
-          name: user.name,
-          address: user.address,
+      return res.status(200).json({
+        success: true,
+        data: {
+          user: {
+            id: user.id,
+            name: user.name,
+            address: user.address,
+          },
+          ...tokens,
         },
-        ...tokens,
-      },
-    });
-  } catch (error) {
-    logger.error("Login error", { error, name: req.body?.name });
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
+      });
+    } catch (error) {
+      logger.error("Login error", { error, name: req.body?.name });
+      return res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
   }
-});
+);
 
 /**
  * POST /auth/refresh - Rotate refresh token and get new token pair
  */
-router.post("/refresh", async (req: Request, res: Response) => {
-  try {
-    const { refreshToken } = req.body;
+router.post(
+  "/refresh",
+  validateBody(RefreshTokenDto),
+  async (req: Request, res: Response) => {
+    try {
+      const { refreshToken } = req.body as RefreshTokenDto;
+      const jwtService = container.resolve(JwtService);
+      const tokens = await jwtService.rotateRefreshToken(refreshToken);
 
-    if (!refreshToken) {
-      return res.status(400).json({
+      // Log token refresh
+      await auditLogService.logFromRequest(req, AuditAction.TOKEN_REFRESH, {
+        severity: AuditSeverity.INFO,
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: tokens,
+      });
+    } catch (error) {
+      logger.error("Token refresh error", { error });
+      const statusCode =
+        error instanceof Error && error.message.includes("revoked") ? 401 : 401;
+      return res.status(statusCode).json({
         success: false,
-        message: "Refresh token is required",
+        message:
+          error instanceof Error ? error.message : "Token refresh failed",
       });
     }
-
-    const jwtService = container.resolve(JwtService);
-    const tokens = await jwtService.rotateRefreshToken(refreshToken);
-
-    // Log token refresh
-    await auditLogService.logFromRequest(req, AuditAction.TOKEN_REFRESH, {
-      severity: AuditSeverity.INFO,
-    });
-
-    return res.status(200).json({
-      success: true,
-      data: tokens,
-    });
-  } catch (error) {
-    logger.error("Token refresh error", { error });
-    const statusCode =
-      error instanceof Error && error.message.includes("revoked") ? 401 : 401;
-    return res.status(statusCode).json({
-      success: false,
-      message: error instanceof Error ? error.message : "Token refresh failed",
-    });
   }
-});
+);
 
 /**
  * POST /auth/logout - Revoke current refresh token
  */
-router.post("/logout", async (req: Request, res: Response) => {
-  try {
-    const { refreshToken } = req.body;
+router.post(
+  "/logout",
+  validateBody(LogoutDto),
+  async (req: Request, res: Response) => {
+    try {
+      const { refreshToken } = req.body as LogoutDto;
+      const jwtService = container.resolve(JwtService);
+      await jwtService.revokeToken(refreshToken, "User logout");
 
-    if (!refreshToken) {
-      return res.status(400).json({
+      // Log logout
+      await auditLogService.logFromRequest(req, AuditAction.LOGOUT, {
+        severity: AuditSeverity.INFO,
+      });
+
+      logger.info("User logged out");
+
+      return res.status(200).json({
+        success: true,
+        message: "Logged out successfully",
+      });
+    } catch (error) {
+      logger.error("Logout error", { error });
+      return res.status(500).json({
         success: false,
-        message: "Refresh token is required",
+        message: "Logout failed",
       });
     }
-
-    const jwtService = container.resolve(JwtService);
-    await jwtService.revokeToken(refreshToken, "User logout");
-
-    // Log logout
-    await auditLogService.logFromRequest(req, AuditAction.LOGOUT, {
-      severity: AuditSeverity.INFO,
-    });
-
-    logger.info("User logged out");
-
-    return res.status(200).json({
-      success: true,
-      message: "Logged out successfully",
-    });
-  } catch (error) {
-    logger.error("Logout error", { error });
-    return res.status(500).json({
-      success: false,
-      message: "Logout failed",
-    });
   }
-});
+);
 
 /**
  * POST /auth/logout-all - Revoke all refresh tokens for user (logout from all devices)

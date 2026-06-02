@@ -22,15 +22,24 @@ import auditLogRoutes from "../AuditLog/auditLog.routes";
 import adminAgentRoutes from "../Agents/admin/adminAgent.routes";
 import { stellarLiquidityTool } from "../Agents/tools/stellarLiquidityTool";
 import { authenticateToken } from "../Auth/auth.middleware";
+import { validateBody, validateQuery } from "./middleware/validation";
 import {
   requireAdmin,
   requireOwnerOrElevated,
 } from "./middleware/rbac.middleware";
 import { auditLogService } from "../AuditLog/auditLog.service";
 import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
-import { getSocketManager } from "./socketManager";
+
 import { BotSessionService } from "../Bot/botSession.service";
-import { BotSessionType, BotPlatform } from "../Bot/botSession.entity";
+import { BotPlatform } from "../Bot/botSession.entity";
+import {
+  BotMetricsDto,
+  CreateBotSessionDto,
+  QueryBotSessionDto,
+  UpdateBotSessionDto,
+} from "../validators/dto/BotDto";
+import { SignupDto } from "../validators/dto/AuthDto";
+import { TransactionQueryDto } from "../validators/dto/TransactionDto";
 
 const router = Router();
 
@@ -120,241 +129,242 @@ router.use("/audit", auditLogRoutes);
 router.use("/admin/agents", adminAgentRoutes);
 
 // #149: Bot command performance metrics endpoint
-router.post("/bot/metrics", async (req: Request, res: Response) => {
-  try {
-    const { command, platform, userId, executionTimeMs, success, error, timestamp } = req.body;
+router.post(
+  "/bot/metrics",
+  validateBody(BotMetricsDto),
+  async (req: Request, res: Response) => {
+    try {
+      const metrics = req.body as BotMetricsDto;
+      const success = metrics.success === "true" || metrics.success === true;
 
-    // Validate required fields
-    if (!command || !platform || !userId || executionTimeMs === undefined) {
-      return res.status(400).json({
+      // Map bot command to audit action
+      const commandMap: Record<string, AuditAction> = {
+        "!start": AuditAction.BOT_COMMAND_START,
+        "/start": AuditAction.BOT_COMMAND_START,
+        "!help": AuditAction.BOT_COMMAND_HELP,
+        "/help": AuditAction.BOT_COMMAND_HELP,
+        "!thread": AuditAction.BOT_COMMAND_THREAD,
+        "!sponsor": AuditAction.BOT_COMMAND_SPONSOR,
+        "!trustline": AuditAction.BOT_COMMAND_TRUSTLINE,
+        "/trustline": AuditAction.BOT_COMMAND_TRUSTLINE,
+        "!dashboard": AuditAction.BOT_COMMAND_DASHBOARD,
+        "/dashboard": AuditAction.BOT_COMMAND_DASHBOARD,
+        "!validate": AuditAction.BOT_COMMAND_VALIDATE,
+        "/validate": AuditAction.BOT_COMMAND_VALIDATE,
+        "!balance": AuditAction.BOT_COMMAND_BALANCE,
+        "/balance": AuditAction.BOT_COMMAND_BALANCE,
+        "!swap": AuditAction.BOT_COMMAND_SWAP,
+        "/swap": AuditAction.BOT_COMMAND_SWAP,
+      };
+
+      const auditAction =
+        commandMap[metrics.command] || AuditAction.BOT_COMMAND_START;
+
+      // Log to audit log
+      await auditLogService.log({
+        userId: metrics.userId,
+        action: auditAction,
+        severity: success ? AuditSeverity.INFO : AuditSeverity.WARNING,
+        resource: `${metrics.platform}:${metrics.command}`,
+        metadata: {
+          platform: metrics.platform,
+          command: metrics.command,
+          executionTimeMs: metrics.executionTimeMs,
+          timestamp: metrics.timestamp,
+        },
+        errorMessage: metrics.error,
+        success,
+      });
+
+      // Also log to application logger for visibility
+      logger.info("Bot command performance metrics received", {
+        platform: metrics.platform,
+        command: metrics.command,
+        userId: metrics.userId,
+        executionTimeMs: metrics.executionTimeMs,
+        success,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Metrics logged successfully",
+      });
+    } catch (error) {
+      logger.error("Error logging bot metrics", { error, body: req.body });
+      return res.status(500).json({
         success: false,
-        message: "Missing required fields: command, platform, userId, executionTimeMs"
+        message: "Failed to log metrics",
       });
     }
-
-    // Map bot command to audit action
-    const commandMap: Record<string, AuditAction> = {
-      '!start': AuditAction.BOT_COMMAND_START,
-      '/start': AuditAction.BOT_COMMAND_START,
-      '!help': AuditAction.BOT_COMMAND_HELP,
-      '/help': AuditAction.BOT_COMMAND_HELP,
-      '!thread': AuditAction.BOT_COMMAND_THREAD,
-      '!sponsor': AuditAction.BOT_COMMAND_SPONSOR,
-      '!trustline': AuditAction.BOT_COMMAND_TRUSTLINE,
-      '/trustline': AuditAction.BOT_COMMAND_TRUSTLINE,
-      '!dashboard': AuditAction.BOT_COMMAND_DASHBOARD,
-      '/dashboard': AuditAction.BOT_COMMAND_DASHBOARD,
-      '!validate': AuditAction.BOT_COMMAND_VALIDATE,
-      '/validate': AuditAction.BOT_COMMAND_VALIDATE,
-      '!balance': AuditAction.BOT_COMMAND_BALANCE,
-      '/balance': AuditAction.BOT_COMMAND_BALANCE,
-      '!swap': AuditAction.BOT_COMMAND_SWAP,
-      '/swap': AuditAction.BOT_COMMAND_SWAP,
-    };
-
-    const auditAction = commandMap[command] || AuditAction.BOT_COMMAND_START;
-
-    // Log to audit log
-    await auditLogService.log({
-      userId,
-      action: auditAction,
-      severity: success ? AuditSeverity.INFO : AuditSeverity.WARNING,
-      resource: `${platform}:${command}`,
-      metadata: {
-        platform,
-        command,
-        executionTimeMs,
-        timestamp,
-      },
-      errorMessage: error,
-      success,
-    });
-
-    // Also log to application logger for visibility
-    logger.info("Bot command performance metrics received", {
-      platform,
-      command,
-      userId,
-      executionTimeMs,
-      success,
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Metrics logged successfully"
-    });
-  } catch (error) {
-    logger.error("Error logging bot metrics", { error, body: req.body });
-    return res.status(500).json({
-      success: false,
-      message: "Failed to log metrics"
-    });
   }
-});
+);
 
 // #126: Bot session management endpoints
 const botSessionService = new BotSessionService();
 
 // Create or update a bot session
-router.post("/bot/session", async (req: Request, res: Response) => {
-  try {
-    const { userId, platform, sessionType, step, sessionData, expiresAt } = req.body;
+router.post(
+  "/bot/session",
+  validateBody(CreateBotSessionDto),
+  async (req: Request, res: Response) => {
+    try {
+      const sessionDto = req.body as CreateBotSessionDto;
 
-    // Validate required fields
-    if (!userId || !platform || !sessionType || step === undefined || !sessionData) {
-      return res.status(400).json({
+      // Set default expiration (24 hours from now) if not provided
+      const expiration = sessionDto.expiresAt
+        ? new Date(sessionDto.expiresAt)
+        : new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      const session = await botSessionService.create({
+        userId: sessionDto.userId,
+        platform: sessionDto.platform,
+        sessionType: sessionDto.sessionType,
+        step: sessionDto.step,
+        sessionData: sessionDto.sessionData,
+        expiresAt: expiration,
+      });
+
+      return res.status(200).json({
+        success: true,
+        session,
+      });
+    } catch (error) {
+      logger.error("Error creating bot session", { error, body: req.body });
+      return res.status(500).json({
         success: false,
-        message: "Missing required fields: userId, platform, sessionType, step, sessionData"
+        message: "Failed to create session",
       });
     }
-
-    // Validate platform
-    if (!Object.values(BotPlatform).includes(platform)) {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid platform. Must be one of: ${Object.values(BotPlatform).join(', ')}`
-      });
-    }
-
-    // Validate session type
-    if (!Object.values(BotSessionType).includes(sessionType)) {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid session type. Must be one of: ${Object.values(BotSessionType).join(', ')}`
-      });
-    }
-
-    // Set default expiration (24 hours from now) if not provided
-    const expiration = expiresAt ? new Date(expiresAt) : new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-    const session = await botSessionService.create({
-      userId,
-      platform,
-      sessionType,
-      step,
-      sessionData,
-      expiresAt: expiration,
-    });
-
-    return res.status(200).json({
-      success: true,
-      session,
-    });
-  } catch (error) {
-    logger.error("Error creating bot session", { error, body: req.body });
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create session"
-    });
   }
-});
+);
 
 // Get active session for a user
-router.get("/bot/session", async (req: Request, res: Response) => {
-  try {
-    const { userId, platform, sessionType } = req.query;
+router.get(
+  "/bot/session",
+  validateQuery(QueryBotSessionDto),
+  async (req: Request, res: Response) => {
+    try {
+      const query = req.query as unknown as QueryBotSessionDto;
 
-    if (!userId || !platform || !sessionType) {
-      return res.status(400).json({
+      const session = await botSessionService.findActiveSession(
+        query.userId,
+        query.platform,
+        query.sessionType
+      );
+
+      if (!session) {
+        return res.status(404).json({
+          success: false,
+          message: "No active session found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        session,
+      });
+    } catch (error) {
+      logger.error("Error getting bot session", { error, query: req.query });
+      return res.status(500).json({
         success: false,
-        message: "Missing required query parameters: userId, platform, sessionType"
+        message: "Failed to get session",
       });
     }
-
-    const session = await botSessionService.findActiveSession(
-      userId as string,
-      platform as BotPlatform,
-      sessionType as BotSessionType
-    );
-
-    if (!session) {
-      return res.status(404).json({
-        success: false,
-        message: "No active session found"
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      session,
-    });
-  } catch (error) {
-    logger.error("Error getting bot session", { error, query: req.query });
-    return res.status(500).json({
-      success: false,
-      message: "Failed to get session"
-    });
   }
-});
+);
 
 // Update a bot session
-router.put("/bot/session/:sessionId", async (req: Request, res: Response) => {
-  try {
-    const { sessionId } = req.params;
-    const { step, sessionData, expiresAt, isActive } = req.body;
+router.put(
+  "/bot/session/:sessionId",
+  validateBody(UpdateBotSessionDto),
+  async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      const updateDto = req.body as UpdateBotSessionDto;
+      const isActive =
+        updateDto.isActive === "true" || updateDto.isActive === true;
 
-    const session = await botSessionService.update(sessionId, {
-      step,
-      sessionData,
-      expiresAt: expiresAt ? new Date(expiresAt) : undefined,
-      isActive,
-    });
+      const session = await botSessionService.update(sessionId, {
+        step: updateDto.step,
+        sessionData: updateDto.sessionData,
+        expiresAt: updateDto.expiresAt
+          ? new Date(updateDto.expiresAt)
+          : undefined,
+        isActive,
+      });
 
-    return res.status(200).json({
-      success: true,
-      session,
-    });
-  } catch (error) {
-    logger.error("Error updating bot session", { error, params: req.params, body: req.body });
-    return res.status(500).json({
-      success: false,
-      message: "Failed to update session"
-    });
+      return res.status(200).json({
+        success: true,
+        session,
+      });
+    } catch (error) {
+      logger.error("Error updating bot session", {
+        error,
+        params: req.params,
+        body: req.body,
+      });
+      return res.status(500).json({
+        success: false,
+        message: "Failed to update session",
+      });
+    }
   }
-});
+);
 
 // Deactivate a bot session
-router.delete("/bot/session/:sessionId", async (req: Request, res: Response) => {
-  try {
-    const { sessionId } = req.params;
-    await botSessionService.deactivateSession(sessionId);
+router.delete(
+  "/bot/session/:sessionId",
+  async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      await botSessionService.deactivateSession(sessionId);
 
-    return res.status(200).json({
-      success: true,
-      message: "Session deactivated"
-    });
-  } catch (error) {
-    logger.error("Error deactivating bot session", { error, params: req.params });
-    return res.status(500).json({
-      success: false,
-      message: "Failed to deactivate session"
-    });
+      return res.status(200).json({
+        success: true,
+        message: "Session deactivated",
+      });
+    } catch (error) {
+      logger.error("Error deactivating bot session", {
+        error,
+        params: req.params,
+      });
+      return res.status(500).json({
+        success: false,
+        message: "Failed to deactivate session",
+      });
+    }
   }
-});
+);
 
 // Deactivate all sessions for a user
-router.delete("/bot/sessions/user/:userId", async (req: Request, res: Response) => {
-  try {
-    const { userId } = req.params;
-    const { platform } = req.query;
+router.delete(
+  "/bot/sessions/user/:userId",
+  async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const { platform } = req.query;
 
-    const count = await botSessionService.deactivateUserSessions(
-      userId,
-      platform as BotPlatform
-    );
+      const count = await botSessionService.deactivateUserSessions(
+        userId,
+        platform as BotPlatform
+      );
 
-    return res.status(200).json({
-      success: true,
-      message: `${count} session(s) deactivated`
-    });
-  } catch (error) {
-    logger.error("Error deactivating user sessions", { error, params: req.params });
-    return res.status(500).json({
-      success: false,
-      message: "Failed to deactivate sessions"
-    });
+      return res.status(200).json({
+        success: true,
+        message: `${count} session(s) deactivated`,
+      });
+    } catch (error) {
+      logger.error("Error deactivating user sessions", {
+        error,
+        params: req.params,
+      });
+      return res.status(500).json({
+        success: false,
+        message: "Failed to deactivate sessions",
+      });
+    }
   }
-});
+);
 
 // Public webhook endpoint for Stellar funding notifications
 router.post(
@@ -473,129 +483,66 @@ router.post(
   }
 );
 
-/**
- * @swagger
- * /api/signup:
- *   post:
- *     summary: Register a new user with wallet details
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - name
- *               - address
- *               - pk
- *             properties:
- *               name:
- *                 type: string
- *                 description: Unique username
- *               address:
- *                 type: string
- *                 description: Stellar public address
- *               pk:
- *                 type: string
- *                 description: Private key
- *     responses:
- *       201:
- *         description: User registered successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 userId:
- *                   type: string
- *                   format: uuid
- *       400:
- *         description: Missing required fields
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       409:
- *         description: User with this name already exists
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- */
-router.post("/signup", async (req: Request, res: Response) => {
-  try {
-    const { name, address, pk } = req.body;
+router.post(
+  "/signup",
+  validateBody(SignupDto),
+  async (req: Request, res: Response) => {
+    try {
+      const signupDto = req.body as SignupDto;
 
-    // Validate required fields
-    if (!name || !address || !pk) {
-      return res.status(400).json({
+      const userRepository = AppDataSource.getRepository(User);
+
+      // Check for existing user (name is unique)
+      const existingUser = await userRepository.findOne({
+        where: { name: signupDto.name },
+      });
+
+      if (existingUser) {
+        return res.status(409).json({
+          success: false,
+          message: "User with this name already exists",
+        });
+      }
+
+      // Create user
+      const user = userRepository.create({
+        name: signupDto.name,
+        address: signupDto.address,
+        pk: signupDto.pk,
+        // isDeployed and tokenType will use defaults
+      });
+
+      // Save user
+      const savedUser = await userRepository.save(user);
+
+      // Log user creation
+      await auditLogService.log({
+        userId: savedUser.id,
+        action: AuditAction.USER_CREATED,
+        severity: AuditSeverity.INFO,
+        ipAddress:
+          (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+          (req.headers["x-real-ip"] as string) ||
+          req.socket.remoteAddress ||
+          "unknown",
+        userAgent: req.headers["user-agent"],
+        metadata: { username: signupDto.name, address: signupDto.address },
+      });
+
+      //  Return success
+      return res.status(201).json({
+        success: true,
+        userId: savedUser.id,
+      });
+    } catch (error) {
+      logger.error("Signup error", { error, name: req.body?.name });
+      return res.status(500).json({
         success: false,
-        message: "name, address, and pk are required",
+        message: "Internal server error",
       });
     }
-
-    const userRepository = AppDataSource.getRepository(User);
-
-    // Check for existing user (name is unique)
-    const existingUser = await userRepository.findOne({
-      where: { name },
-    });
-
-    if (existingUser) {
-      return res.status(409).json({
-        success: false,
-        message: "User with this name already exists",
-      });
-    }
-
-    // Create user
-    const user = userRepository.create({
-      name,
-      address,
-      pk,
-      // isDeployed and tokenType will use defaults
-    });
-
-    // Save user
-    const savedUser = await userRepository.save(user);
-
-    // Log user creation
-    await auditLogService.log({
-      userId: savedUser.id,
-      action: AuditAction.USER_CREATED,
-      severity: AuditSeverity.INFO,
-      ipAddress:
-        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
-        (req.headers["x-real-ip"] as string) ||
-        req.socket.remoteAddress ||
-        "unknown",
-      userAgent: req.headers["user-agent"],
-      metadata: { username: name, address },
-    });
-
-    //  Return success
-    return res.status(201).json({
-      success: true,
-      userId: savedUser.id,
-    });
-  } catch (error) {
-    logger.error("Signup error", { error, name: req.body?.name });
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
   }
-});
+);
 
 /**
  * @swagger
@@ -690,6 +637,7 @@ router.get(
   "/account/:userId/transactions",
   authenticateToken,
   requireOwnerOrElevated("userId"),
+  validateQuery(TransactionQueryDto),
   async (req: Request, res: Response) => {
     try {
       const { userId } = req.params;
@@ -702,15 +650,12 @@ router.get(
         });
       }
 
-      // Extract and validate query parameters
-      const { type, startDate, endDate, limit, cursor } = req.query as Record<
-        string,
-        string | undefined
-      >;
+      // Extract validated query parameters
+      const query = req.query as unknown as TransactionQueryDto;
 
       // Validate type parameter
       const validTypes = ["funding", "deployment", "swap", "transfer", "all"];
-      if (type && !validTypes.includes(type)) {
+      if (query.type && !validTypes.includes(query.type)) {
         return res.status(400).json({
           success: false,
           message: `Invalid type. Must be one of: ${validTypes.join(", ")}`,
@@ -718,7 +663,7 @@ router.get(
       }
 
       // Validate limit parameter
-      const parsedLimit = limit ? parseInt(limit, 10) : 20;
+      const parsedLimit = query.limit ? parseInt(query.limit, 10) : 20;
       if (isNaN(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
         return res.status(400).json({
           success: false,
@@ -727,7 +672,7 @@ router.get(
       }
 
       // Validate date parameters
-      if (startDate && isNaN(Date.parse(startDate))) {
+      if (query.startDate && isNaN(Date.parse(query.startDate))) {
         return res.status(400).json({
           success: false,
           message:
@@ -735,7 +680,7 @@ router.get(
         });
       }
 
-      if (endDate && isNaN(Date.parse(endDate))) {
+      if (query.endDate && isNaN(Date.parse(query.endDate))) {
         return res.status(400).json({
           success: false,
           message:
@@ -745,11 +690,11 @@ router.get(
 
       // Build query parameters
       const queryParams: TransactionQueryParams = {
-        type: type as TransactionType,
-        startDate,
-        endDate,
+        type: query.type as TransactionType,
+        startDate: query.startDate,
+        endDate: query.endDate,
         limit: parsedLimit,
-        cursor,
+        cursor: query.cursor,
       };
 
       // Fetch transaction history
@@ -773,28 +718,29 @@ router.get(
         message,
       });
     }
-  },
-
-  router.post("/liquidity", async (req: Request, res: Response) => {
-    try {
-      const { assetCode, assetIssuer, depthLimit } = req.body;
-
-      const result = await stellarLiquidityTool.execute({
-        assetCode,
-        assetIssuer,
-        depthLimit,
-      });
-
-      res.json(result);
-    } catch (err) {
-      // Check if it's a standard Error object
-      const errorMessage =
-        err instanceof Error ? err.message : "An unknown error occurred";
-
-      res.status(500).json({ error: errorMessage });
-    }
-  })
+  }
 );
+
+// Liquidity pool endpoint
+router.post("/liquidity", async (req: Request, res: Response) => {
+  try {
+    const { assetCode, assetIssuer, depthLimit } = req.body;
+
+    const result = await stellarLiquidityTool.execute({
+      assetCode,
+      assetIssuer,
+      depthLimit,
+    });
+
+    res.json(result);
+  } catch (err) {
+    // Check if it's a standard Error object
+    const errorMessage =
+      err instanceof Error ? err.message : "An unknown error occurred";
+
+    res.status(500).json({ error: errorMessage });
+  }
+});
 
 // GET /admin/stats - Internal admin route for CPU and memory usage
 router.get(
@@ -863,12 +809,6 @@ router.get("/realtime/stats", (req: Request, res: Response) => {
     const { getSocketManager } = require("./socketManager");
     const socketManager = getSocketManager();
 
-    interface SocketClient {
-      socketId: string;
-      userId?: string;
-      connectedAt: Date;
-    }
-
     const stats = {
       success: true,
       totalConnected: socketManager.getConnectedClientsCount(),
@@ -922,11 +862,6 @@ router.get("/realtime/user/:userId/clients", (req: Request, res: Response) => {
     const { getSocketManager } = require("./socketManager");
     const socketManager = getSocketManager();
 
-    interface SocketClient {
-      socketId: string;
-      connectedAt: Date;
-    }
-
     const clients = socketManager.getUserClients(userId);
 
     res.json({
@@ -978,12 +913,10 @@ router.post(
 
       const sponsorSecret = process.env.SPONSOR_SECRET_KEY;
       if (!sponsorSecret) {
-        return res
-          .status(503)
-          .json({
-            success: false,
-            message: "Sponsorship service not configured",
-          });
+        return res.status(503).json({
+          success: false,
+          message: "Sponsorship service not configured",
+        });
       }
 
       const networkPassphrase =
