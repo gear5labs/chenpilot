@@ -349,4 +349,61 @@ export interface ContractCompatibilityMetadata {
   versions: ContractVersionMetadata[];
   /** Default version to use when none specified */
   defaultVersion?: string;
-}
+}
+
+// ─── Cohesive SDK types for querying, simulation, execution, idempotency, vault workflows ────────
+
+export interface RequestOptions {
+  userId: string;
+  idempotencyKey?: string;
+  timeoutMs?: number;
+  maxRetries?: number;
+  retryDelayMs?: number;
+  signal?: AbortSignalLike;
+}
+
+export interface SimulationRequest {
+  type: "swap" | "vault-operation";
+  params: CrossChainSwapRequest | Record<string, unknown>;
+}
+
+export interface SimulationResult {
+  success: boolean;
+  estimatedOutput?: string;
+  fees?: Record<string, string>;
+  warnings?: string[];
+  details?: Record<string, unknown>;
+}
+
+export interface ExecutionRequest {
+  type: "swap" | "vault-operation";
+  params: CrossChainSwapRequest | Record<string, unknown>;
+}
+
+export interface ExecutionResult {
+  success: boolean;
+  transactionId?: string;
+  status: "pending" | "completed" | "failed";
+  details?: Record<string, unknown>;
+}
+
+export interface VaultOperationRequest {
+  operation: "deposit" | "withdraw" | "transfer" | "get-balance";
+  params: Record<string, unknown>;
+}
+
+export interface VaultOperationResult {
+  success: boolean;
+  balance?: string;
+  transactionId?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface AbortSignalLike {
+  aborted: boolean;
+  addEventListener?: (
+    type: "abort",
+    listener: () => void,
+    options?: { once?: boolean }
+  ) => void;
+}
