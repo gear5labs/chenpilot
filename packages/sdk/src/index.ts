@@ -22,3 +22,4 @@ export * from "./memoUtils";
 export * from "./xdrDecoder";
 export * from "./assetCache";
 export * from "./networkStatus";
+export * from "./contractClient";

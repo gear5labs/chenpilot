@@ -30,15 +30,6 @@ export interface AgentResponse {
   data?: unknown;
 }
 
-/** Structured error returned by the backend for categorized failures */
-export interface CategorizedError {
-  category: string;
-  code: string;
-  message: string;
-  recoverable: boolean;
-  details?: Record<string, unknown>;
-}
-
 /** Recovery and cleanup actions available during cross-chain flows */
 export enum RecoveryAction {
   RETRY_MINT = "retry_mint",
@@ -333,4 +324,29 @@ export interface MetadataListResponse {
   total: number;
   /** Whether more results are available (for pagination) */
   hasMore: boolean;
+}
+
+/** Capability identifier for a contract */
+export type ContractCapability = string;
+
+/** Metadata for a specific contract version */
+export interface ContractVersionMetadata {
+  /** Semantic version, e.g., "1.2.3" */
+  version: string;
+  /** Optional description of this version */
+  description?: string;
+  /** Capabilities supported by this version */
+  capabilities: ContractCapability[];
+  /** Arbitrary compatibility metadata */
+  metadata?: Record<string, unknown>;
+}
+
+/** Compatibility metadata for a contract across versions */
+export interface ContractCompatibilityMetadata {
+  /** Contract identifier (Stellar contract ID) */
+  contractId: string;
+  /** List of supported versions */
+  versions: ContractVersionMetadata[];
+  /** Default version to use when none specified */
+  defaultVersion?: string;
 }
