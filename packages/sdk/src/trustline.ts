@@ -59,7 +59,7 @@ export async function hasValidStellarTrustline(
     return { exists: true, authorized: true };
   }
 
-  let account: any;
+  let account: Record<string, unknown>;
   try {
     account = await server.accounts().accountId(accountId).call();
   } catch (err) {
@@ -70,11 +70,11 @@ export async function hasValidStellarTrustline(
     };
   }
 
-  const balances: any[] = account.balances || [];
+  const balances: Record<string, unknown>[] = (account.balances as Record<string, unknown>[]) || [];
   const match = balances.find((b) => {
     return (
-      b.asset_code === assetCode &&
-      (assetIssuer ? b.asset_issuer === assetIssuer : true)
+      b['asset_code'] === assetCode &&
+      (assetIssuer ? b['asset_issuer'] === assetIssuer : true)
     );
   });
 
@@ -103,14 +103,14 @@ export async function findZeroBalanceTrustlines(
 ): Promise<TrustlineInfo[]> {
   const server = new Server(horizonUrl || "https://horizon.stellar.org");
   const account = await server.accounts().accountId(accountId).call();
-  const balances: any[] = account.balances || [];
+  const balances: Record<string, unknown>[] = (account.balances as Record<string, unknown>[]) || [];
 
   return balances
-    .filter((b) => b.asset_type !== "native" && parseFloat(b.balance) === 0)
+    .filter((b) => b['asset_type'] !== "native" && parseFloat(b['balance'] as string) === 0)
     .map((b) => ({
-      assetCode: b.asset_code,
-      assetIssuer: b.asset_issuer,
-      balance: b.balance,
+      assetCode: b['asset_code'] as string,
+      assetIssuer: b['asset_issuer'] as string,
+      balance: b['balance'] as string,
     }));
 }
 
@@ -133,7 +133,7 @@ export async function createTrustlineOperation(
   assetIssuer: string,
   limit?: string,
   timeout?: number
-): Promise<any> {
+): Promise<Operation> {
   let issuer = assetIssuer;
 
   if (assetIssuer.includes(".") && !assetIssuer.startsWith("G")) {

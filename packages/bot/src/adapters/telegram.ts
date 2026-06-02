@@ -1,4 +1,4 @@
-import { Telegraf } from "telegraf";
+import { Telegraf, Context } from "telegraf";
 import { TransactionNotificationData } from "../types";
 import { createTrustlineOperation, AgentClient } from "@chen-pilot/sdk-core";
 import { searchFeatures, formatHelpMessage, formatAiHelpMessage } from "../services/helpProvider";
@@ -93,7 +93,7 @@ export class TelegramAdapter {
     this.bot = new Telegraf(this.token);
 
     // #145: Middleware to debounce all incoming messages/commands
-    this.bot.use(async (ctx: any, next: () => Promise<void>) => {
+    this.bot.use(async (ctx: Context, next: () => Promise<void>) => {
       const userId: number | undefined = ctx.from?.id;
       if (userId && this.isFlooding(userId)) {
         await ctx.reply("⏳ Please wait a moment before sending another command.");
@@ -113,11 +113,11 @@ export class TelegramAdapter {
       return next();
     });
 
-    this.bot.start(async (ctx: any) => {
+    this.bot.start(async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
       await withPerformanceProfiling('/start', 'telegram', userId, () => ctx.reply('Welcome to Chen Pilot! I am your AI-powered Stellar DeFi assistant.'))();
     });
-    this.bot.help(async (ctx: any) => {
+    this.bot.help(async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
       await withPerformanceProfiling('/help', 'telegram', userId, async () => {
         // Extract query after /help command
@@ -156,7 +156,7 @@ export class TelegramAdapter {
       })();
     });
 
-    this.bot.command('trustline', async (ctx: any) => {
+    this.bot.command('trustline', async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
       const commandName = extractCommandName(ctx.message.text, 'telegram');
       await withPerformanceProfiling(commandName, 'telegram', userId, async () => {
@@ -187,7 +187,7 @@ export class TelegramAdapter {
           let message = `✅ Found asset ${assetCode}!\n\n`;
           message += `To add this trustline, you can use the following details in your wallet:\n`;
           message += `<b>Asset:</b> ${assetCode}\n`;
-          message += `<b>Issuer:</b> <code>${(op as any).asset.issuer}</code>\n\n`;
+          message += `<b>Issuer:</b> <code>${(op as { asset: { issuer: string } }).asset.issuer}</code>\n\n`;
           message += `<i>Note: In a future update, I will provide a direct signing link.</i>`;
 
           await ctx.reply(message, { parse_mode: "HTML" });
@@ -200,7 +200,7 @@ export class TelegramAdapter {
     });
 
     // #134: Ping command — measure end-to-end latency
-    this.bot.command('ping', async (ctx: any) => {
+    this.bot.command('ping', async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
       await withPerformanceProfiling('/ping', 'telegram', userId, async () => {
         const startTime = Date.now();
@@ -235,7 +235,7 @@ export class TelegramAdapter {
     });
 
     // #146: Dashboard command
-    this.bot.command('dashboard', async (ctx: any) => {
+    this.bot.command('dashboard', async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
       await withPerformanceProfiling('/dashboard', 'telegram', userId, async () => {
         await ctx.reply(
@@ -246,7 +246,7 @@ export class TelegramAdapter {
     });
 
     // #148: /validate command for Stellar asset verification
-    this.bot.command('validate', async (ctx: any) => {
+    this.bot.command('validate', async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
       const commandName = extractCommandName(ctx.message.text, 'telegram');
       await withPerformanceProfiling(commandName, 'telegram', userId, async () => {
@@ -277,7 +277,7 @@ export class TelegramAdapter {
     });
 
     // #125: Multisig wizard command
-    this.bot.command('multisig', async (ctx: any) => {
+    this.bot.command('multisig', async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
       if (!isDM(ctx)) {
         await rejectPublicChannel(ctx);
@@ -289,7 +289,7 @@ export class TelegramAdapter {
     });
 
     // #125: Handle wizard input (for active wizard sessions)
-    this.bot.use(async (ctx: any, next: () => Promise<void>) => {
+    this.bot.use(async (ctx: Context, next: () => Promise<void>) => {
       const userId = String(ctx.from?.id || 'unknown');
       const text = ctx.message?.text || '';
       const command = text.split(' ')[0];
