@@ -1,3 +1,6 @@
 # Ignore artifacts:
 build
 coverage
+
+# Compiled JS outputs alongside TypeScript sources
+packages/bot/src/**/*.js

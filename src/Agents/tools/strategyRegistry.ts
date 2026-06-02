@@ -111,7 +111,10 @@ export class StrategyRegistryTool extends BaseTool<StrategyRegistryPayload> {
       "is_verified pool 0123...",
     ],
     category: "stellar",
-    version: "1.0.1",
+    version: "1.0.0",
+    riskLevel: "medium",
+    capabilities: ["governance"],
+    permissions: ["user"],
   };
 
   /** Validate payload fields */
