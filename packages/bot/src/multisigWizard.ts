@@ -158,7 +158,7 @@ export class MultisigWizard {
     state.step = 3;
 
     return {
-      message: this.getStepMessage(state, numSigners),
+      message: this.getStepMessage(state),
       nextStep: 3,
       config: state.config,
     };
@@ -169,8 +169,6 @@ export class MultisigWizard {
    */
   private handleStep3(state: WizardState, input: string): WizardResponse {
     const signers = state.config.signers!;
-    const targetSigners = parseInt(input.split(' ')[0]) || signers.length + 1;
-
     // Check if we're adding a signer or moving to next step
     if (input.toLowerCase() === 'done' || input.toLowerCase() === 'next') {
       if (signers.length === 0) {
@@ -208,7 +206,6 @@ export class MultisigWizard {
 
     state.step = 3; // Stay on step 3 to collect more signers
 
-    const remaining = (state.config.threshold! - signers.length);
     const message = `✅ Signer ${signers.length} added: \`${input.slice(0, 8)}...\`\n\n`;
     
     if (signers.length < state.config.threshold!) {
@@ -277,11 +274,10 @@ export class MultisigWizard {
     }
 
     // Show current weights and ask if done
-    let weightList = signers.map((s, i) => `${i + 1}. \`${s.key.slice(0, 8)}...\`: weight ${s.weight}`).join('\n');
+    const weightList = signers.map((s, i) => `${i + 1}. \`${s.key.slice(0, 8)}...\`: weight ${s.weight}`).join('\n');
     
     return {
-      message: `✅ Signer ${signerIndex + 1} weight set to ${weight}\n\nCurrent weights:\n${weightList}\n\nConfigure more weights or type 'done' to continue.`,
-      nextStep: 4,
+      message: `✅ Signer ${signerIndex + 1} weight set to ${weight}\n\nCurrent weights:\n${weightList}\n\nConfigure more weights or type 'done' to continue.`,      nextStep: 4,
       config: state.config,
     };
   }
@@ -334,7 +330,7 @@ export class MultisigWizard {
   /**
    * Get the message for the current wizard step
    */
-  private getStepMessage(state: WizardState, additionalInfo?: number): string {
+  private getStepMessage(state: WizardState): string {
     switch (state.step) {
       case 1:
         return `🔐 **Multisig Setup Wizard**\n\n` +
@@ -348,27 +344,29 @@ export class MultisigWizard {
                `How many signers will this account have? (1-20)\n\n` +
                `Note: You need at least ${state.config.threshold} signers to meet the threshold.`;
 
-      case 3:
+      case 3: {
         const currentCount = state.config.signers?.length || 0;
         return `🔐 **Multisig Setup Wizard**\n\n` +
                `Step 3/5: Add Signers\n\n` +
                `Signers added: ${currentCount}\n` +
                `Signers needed: at least ${state.config.threshold}\n\n` +
                `Enter a Stellar public key to add a signer, or type 'done' to continue.`;
+      }
 
-      case 4:
+      case 4: {
         const signers = state.config.signers!;
         if (signers.length === 1) {
           state.step = 5;
           return this.getStepMessage(state);
         }
-        let weightList = signers.map((s, i) => `${i + 1}. \`${s.key.slice(0, 8)}...\`: weight ${s.weight}`).join('\n');
+        const weightList = signers.map((s, i) => `${i + 1}. \`${s.key.slice(0, 8)}...\`: weight ${s.weight}`).join('\n');
         return `🔐 **Multisig Setup Wizard**\n\n` +
                `Step 4/5: Configure Weights\n\n` +
                `Current weights:\n${weightList}\n\n` +
                `Use format: <signer_number> <weight>\n` +
                `Example: 1 2 (sets signer 1's weight to 2)\n\n` +
                `Type 'done' when finished.`;
+      }
 
       case 5:
         return `🔐 **Multisig Setup Wizard**\n\n` +
