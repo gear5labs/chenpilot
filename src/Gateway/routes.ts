@@ -18,11 +18,14 @@ import {
 } from "./transaction.service";
 import logger from "../config/logger";
 import authRoutes from "../Auth/auth.routes";
+import userPreferencesRoutes from "../Auth/userPreferences.routes";
 import dataExportRoutes from "../services/dataExport.routes";
 import contractMetadataRoutes from "../services/contracts/contractMetadata.routes";
 import horizonProxyRoutes from "./horizonProxy.routes";
 import auditLogRoutes from "../AuditLog/auditLog.routes";
 import adminAgentRoutes from "../Agents/admin/adminAgent.routes";
+import experimentRoutes from "../Agents/admin/experiment.routes";
+import simulationRoutes from "../Agents/admin/simulation.routes";
 import { stellarLiquidityTool } from "../Agents/tools/stellarLiquidityTool";
 import { authenticateToken } from "../Auth/auth.middleware";
 import {
@@ -30,6 +33,7 @@ import {
   requireOwnerOrElevated,
 } from "./middleware/rbac.middleware";
 import { auditLogService } from "../AuditLog/auditLog.service";
+import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
 import contractRegistryRoutes from "../ContractRegistry/contractRegistry.routes";
 import { getSocketManager } from "./socketManager";
 import { BotSessionService } from "../Bot/botSession.service";
@@ -112,6 +116,9 @@ router.use(generalLimiter);
 // Mount auth routes
 router.use("/auth", authRoutes);
 
+// Mount user preferences routes
+router.use("/user/preferences", userPreferencesRoutes);
+
 // Mount data export routes
 router.use("/export", dataExportRoutes);
 
@@ -126,6 +133,11 @@ router.use("/audit", auditLogRoutes);
 // Mount admin agent management routes (requires admin role)
 router.use("/admin/agents", adminAgentRoutes);
 
+// Mount experiment management routes (requires admin role)
+router.use("/admin/experiments", experimentRoutes);
+
+// Mount simulation routes (requires admin role)
+router.use("/admin/simulation", simulationRoutes);
 router.get(
   "/admin/operator-report",
   authenticateToken,
@@ -902,6 +914,8 @@ router.get("/realtime/stats", (req: Request, res: Response) => {
   try {
     // Dynamic import to avoid circular dependency issues
     // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getSocketManager: getManager } = require("./socketManager");
+    const socketManager = getManager();
     const { getSocketManager } = require("./socketManager");
     const socketManager = getSocketManager();
 
@@ -955,6 +969,8 @@ router.get("/realtime/user/:userId/clients", (req: Request, res: Response) => {
     const { userId } = req.params;
     // Dynamic import to avoid circular dependency issues
     // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getSocketManager: getManager } = require("./socketManager");
+    const socketManager = getManager();
     const { getSocketManager } = require("./socketManager");
     const socketManager = getSocketManager();
 
