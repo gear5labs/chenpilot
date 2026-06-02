@@ -1,5 +1,5 @@
 import { Account, RpcProvider, Contract, uint256 } from "starknet";
-import accountsData from "../../Auth/accounts.json";
+import { accountSecretStore } from "../../Auth/accountSecretStore";
 import tokenAbi from "../../abis/token.json";
 import { container } from "tsyringe";
 import {
@@ -25,6 +25,7 @@ interface AccountData {
   precalculatedAddress: string;
   deployed: boolean;
   contract_address?: string;
+  [key: string]: unknown;
 }
 
 type supportedTokens = "STRK" | "ETH" | "DAI";
@@ -76,21 +77,22 @@ export class WalletTool extends BaseTool {
     ],
     category: "wallet",
     version: "1.0.0",
+    riskLevel: "high",
+    capabilities: ["starknet_wallet", "transfer"],
+    permissions: ["user"],
   };
 
-  private accounts: AccountData[];
   private provider: RpcProvider;
   private contactService = container.resolve(ContactService);
   constructor() {
     super();
-    this.accounts = accountsData as AccountData[];
     this.provider = new RpcProvider({
       nodeUrl: config.node_url,
     });
   }
 
   private getAccount(userId: string): AccountData {
-    const account = this.accounts.find((a) => a.userId === userId);
+    const account = accountSecretStore.getAccountByUserId<AccountData>(userId);
     if (!account) throw new Error(`Account not found: ${userId}`);
     return account;
   }

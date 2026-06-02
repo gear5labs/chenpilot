@@ -8,3 +8,4 @@ export {
   default as default,
 } from "./ipBlacklist.middleware";
 export { default as ipBlacklistRoutes } from "./ipBlacklist.routes";
+export * from "./abusePrevention";

@@ -5,6 +5,9 @@ import {
   TransactionRequest,
   PositionResult,
 } from "./DeFiAdapter";
+import { DeFiAdapter, AdapterResult, QuoteResult, TransactionRequest, PositionResult } from "./DeFiAdapter";
+import { LendingCapability, BorrowingCapability } from "./CapabilityContract";
+import { YieldBloxLendingPositionsResponseSchema, YieldBloxBorrowingPositionsResponseSchema } from "./resilience/Schemas";
 
 /**
  * YieldBlox Lending Adapter
@@ -14,7 +17,7 @@ import {
  * - Lending (supply assets to earn interest)
  * - Borrowing (use supplied assets as collateral)
  */
-export class YieldBloxAdapter extends DeFiAdapter {
+export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, BorrowingCapability {
   constructor() {
     super("yieldblox");
   }
@@ -82,6 +85,9 @@ export class YieldBloxAdapter extends DeFiAdapter {
     try {
       const response = await this.fetchWithRetry<any>(
         `/v1/lending/positions/${address}`
+      const response = await this.fetchWithSchema<any>(
+        `/v1/lending/positions/${address}`,
+        YieldBloxLendingPositionsResponseSchema
       );
 
       const positions: PositionResult[] = (response.positions || []).map(
@@ -128,6 +134,9 @@ export class YieldBloxAdapter extends DeFiAdapter {
     try {
       const response = await this.fetchWithRetry<any>(
         `/v1/borrowing/positions/${address}`
+      const response = await this.fetchWithSchema<any>(
+        `/v1/borrowing/positions/${address}`,
+        YieldBloxBorrowingPositionsResponseSchema
       );
 
       const positions: PositionResult[] = (response.positions || []).map(

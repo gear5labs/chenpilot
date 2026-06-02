@@ -173,7 +173,7 @@ export class ScamDetectionService {
       }
 
       return { isScam: false };
-    } catch (error) {
+    } catch {
       // Invalid URL, might be obfuscated
       return {
         isScam: true,
@@ -187,7 +187,7 @@ export class ScamDetectionService {
    * Extract URLs from text using regex
    */
   private extractUrls(text: string): string[] {
-    const urlRegex = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/gi;
+    const urlRegex = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)/gi;
     const matches = text.match(urlRegex);
     return matches || [];
   }

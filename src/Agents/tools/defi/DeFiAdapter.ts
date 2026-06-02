@@ -3,6 +3,8 @@ import {
   AdapterCapabilities,
   getAdapterConfig,
 } from "../../../config/defiAdapters";
+import { resilienceEngine } from "./resilience/ResilienceEngine";
+import { z } from "zod";
 
 /**
  * Result returned by DeFi adapter operations
@@ -94,8 +96,12 @@ export abstract class DeFiAdapter {
   /**
    * Execute an API request with retry logic
    */
-  protected async fetchWithRetry<T>(
+  /**
+   * Execute an API request with strict schema validation and full resilience wrapping.
+   */
+  protected async fetchWithSchema<T>(
     endpoint: string,
+    schema?: z.ZodTypeAny,
     options: RequestInit = {}
   ): Promise<T> {
     const { timeout, retry } = this.config;
@@ -129,12 +135,55 @@ export abstract class DeFiAdapter {
           await new Promise((resolve) =>
             setTimeout(resolve, retry.backoffMs * attempt)
           );
-        }
-      }
-    }
+    const key = `${this.config.id}:${endpoint.split("?")[0]}`;
 
-    clearTimeout(timeoutId);
-    throw lastError || new Error("Request failed after retries");
+    return resilienceEngine.execute(
+      key,
+      async () => {
+        const timeout = this.config.timeout;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+        try {
+          const response = await fetch(`${this.config.apiUrl}${endpoint}`, {
+            ...options,
+            signal: controller.signal,
+            headers: {
+              "Content-Type": "application/json",
+              ...options.headers,
+            },
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          return await response.json();
+        } catch (error) {
+          clearTimeout(timeoutId);
+          throw error;
+        }
+      },
+      schema,
+      {
+        retry: {
+          maxAttempts: this.config.retry.maxAttempts,
+          baseDelayMs: this.config.retry.backoffMs,
+        },
+      }
+    ) as Promise<T>;
+  }
+
+  /**
+   * Execute an API request with retry logic (backwards compatible, without schema validation).
+   */
+  protected async fetchWithRetry<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<T> {
+    return this.fetchWithSchema<T>(endpoint, undefined, options);
   }
 
   /**
@@ -226,3 +275,7 @@ export class DeFiAdapterFactory {
 }
 
 export { DeFiAdapterConfig, AdapterCapabilities };
+export type {
+  DeFiAdapterConfig,
+  AdapterCapabilities,
+};

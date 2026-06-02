@@ -5,6 +5,9 @@ import {
   TransactionRequest,
   PositionResult,
 } from "./DeFiAdapter";
+import { DeFiAdapter, AdapterResult, QuoteResult, TransactionRequest, PositionResult } from "./DeFiAdapter";
+import { SwapCapability, LiquidityCapability } from "./CapabilityContract";
+import { EquilibreSwapQuoteResponseSchema, EquilibreLiquidityPositionsResponseSchema } from "./resilience/Schemas";
 
 /**
  * Equilibre DEX Adapter
@@ -14,7 +17,7 @@ import {
  * - Token swaps via path payments
  * - Liquidity provision
  */
-export class EquilibreAdapter extends DeFiAdapter {
+export class EquilibreAdapter extends DeFiAdapter implements SwapCapability, LiquidityCapability {
   constructor() {
     super("equilibre");
   }
@@ -36,14 +39,18 @@ export class EquilibreAdapter extends DeFiAdapter {
     }
 
     try {
-      const response = await this.fetchWithRetry<any>("/v1/swap/quote", {
-        method: "POST",
-        body: JSON.stringify({
-          fromToken,
-          toToken,
-          amount,
-        }),
-      });
+      const response = await this.fetchWithSchema<any>(
+        "/v1/swap/quote",
+        EquilibreSwapQuoteResponseSchema,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            fromToken,
+            toToken,
+            amount,
+          }),
+        }
+      );
 
       return {
         success: true,
@@ -140,6 +147,9 @@ export class EquilibreAdapter extends DeFiAdapter {
     try {
       const response = await this.fetchWithRetry<any>(
         `/v1/liquidity/positions/${address}`
+      const response = await this.fetchWithSchema<any>(
+        `/v1/liquidity/positions/${address}`,
+        EquilibreLiquidityPositionsResponseSchema
       );
 
       const positions: PositionResult[] = (response.positions || []).map(

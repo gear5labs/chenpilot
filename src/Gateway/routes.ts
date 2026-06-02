@@ -4,8 +4,10 @@ import helmet from "helmet";
 import * as os from "os";
 import * as crypto from "crypto";
 import * as StellarSdk from "@stellar/stellar-sdk";
+import { container } from "tsyringe";
 import AppDataSource from "../config/Datasource";
 import { User } from "../Auth/user.entity";
+import UserService from "../Auth/user.service";
 import { stellarWebhookService } from "./webhook.service";
 import { platformWebhookService } from "./platformWebhook.service";
 import { SponsorshipTransactionBuilder } from "../../packages/sdk/src/sponsorship";
@@ -18,6 +20,7 @@ import logger from "../config/logger";
 import authRoutes from "../Auth/auth.routes";
 import userPreferencesRoutes from "../Auth/userPreferences.routes";
 import dataExportRoutes from "../services/dataExport.routes";
+import contractMetadataRoutes from "../services/contracts/contractMetadata.routes";
 import horizonProxyRoutes from "./horizonProxy.routes";
 import auditLogRoutes from "../AuditLog/auditLog.routes";
 import adminAgentRoutes from "../Agents/admin/adminAgent.routes";
@@ -31,8 +34,11 @@ import {
 } from "./middleware/rbac.middleware";
 import { auditLogService } from "../AuditLog/auditLog.service";
 import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
+import contractRegistryRoutes from "../ContractRegistry/contractRegistry.routes";
+import { getSocketManager } from "./socketManager";
 import { BotSessionService } from "../Bot/botSession.service";
 import { BotSessionType, BotPlatform } from "../Bot/botSession.entity";
+import { operatorReportingService } from "../services/operatorReporting.service";
 
 const router = Router();
 
@@ -116,6 +122,9 @@ router.use("/user/preferences", userPreferencesRoutes);
 // Mount data export routes
 router.use("/export", dataExportRoutes);
 
+// Mount contract metadata discovery routes
+router.use("/contracts", contractMetadataRoutes);
+
 // Mount Horizon proxy routes (authenticated)
 router.use("/horizon", horizonProxyRoutes);
 // Mount audit log routes
@@ -129,6 +138,37 @@ router.use("/admin/experiments", experimentRoutes);
 
 // Mount simulation routes (requires admin role)
 router.use("/admin/simulation", simulationRoutes);
+router.get(
+  "/admin/operator-report",
+  authenticateToken,
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const startDate = req.query.startDate
+        ? new Date(req.query.startDate as string)
+        : undefined;
+      const endDate = req.query.endDate
+        ? new Date(req.query.endDate as string)
+        : undefined;
+
+      const report = await operatorReportingService.buildReport({
+        startDate,
+        endDate,
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: report,
+      });
+    } catch (error) {
+      logger.error("Error building operator report", { error });
+      return res.status(500).json({
+        success: false,
+        message: "Failed to build operator report",
+      });
+    }
+  }
+);
 
 // #149: Bot command performance metrics endpoint
 router.post("/bot/metrics", async (req: Request, res: Response) => {
@@ -534,18 +574,10 @@ router.post(
  *             type: object
  *             required:
  *               - name
- *               - address
- *               - pk
  *             properties:
  *               name:
  *                 type: string
  *                 description: Unique username
- *               address:
- *                 type: string
- *                 description: Stellar public address
- *               pk:
- *                 type: string
- *                 description: Private key
  *     responses:
  *       201:
  *         description: User registered successfully
@@ -581,44 +613,20 @@ router.post(
  */
 router.post("/signup", async (req: Request, res: Response) => {
   try {
-    const { name, address, pk } = req.body;
+    const { name } = req.body;
 
-    // Validate required fields
-    if (!name || !address || !pk) {
+    if (!name) {
       return res.status(400).json({
         success: false,
-        message: "name, address, and pk are required",
+        message: "name is required",
       });
     }
 
-    const userRepository = AppDataSource.getRepository(User);
+    const userService = container.resolve(UserService);
+    const user = await userService.createUser({ name });
 
-    // Check for existing user (name is unique)
-    const existingUser = await userRepository.findOne({
-      where: { name },
-    });
-
-    if (existingUser) {
-      return res.status(409).json({
-        success: false,
-        message: "User with this name already exists",
-      });
-    }
-
-    // Create user
-    const user = userRepository.create({
-      name,
-      address,
-      pk,
-      // isDeployed and tokenType will use defaults
-    });
-
-    // Save user
-    const savedUser = await userRepository.save(user);
-
-    // Log user creation
     await auditLogService.log({
-      userId: savedUser.id,
+      userId: user.id,
       action: AuditAction.USER_CREATED,
       severity: AuditSeverity.INFO,
       ipAddress:
@@ -627,13 +635,12 @@ router.post("/signup", async (req: Request, res: Response) => {
         req.socket.remoteAddress ||
         "unknown",
       userAgent: req.headers["user-agent"],
-      metadata: { username: name, address },
+      metadata: { username: name, address: user.address },
     });
 
-    //  Return success
     return res.status(201).json({
       success: true,
-      userId: savedUser.id,
+      userId: user.id,
     });
   } catch (error) {
     logger.error("Signup error", { error, name: req.body?.name });
@@ -909,6 +916,8 @@ router.get("/realtime/stats", (req: Request, res: Response) => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getSocketManager: getManager } = require("./socketManager");
     const socketManager = getManager();
+    const { getSocketManager } = require("./socketManager");
+    const socketManager = getSocketManager();
 
     const stats = {
       success: true,
@@ -962,6 +971,8 @@ router.get("/realtime/user/:userId/clients", (req: Request, res: Response) => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getSocketManager: getManager } = require("./socketManager");
     const socketManager = getManager();
+    const { getSocketManager } = require("./socketManager");
+    const socketManager = getSocketManager();
 
     const clients = socketManager.getUserClients(userId);
 
