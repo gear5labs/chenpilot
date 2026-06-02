@@ -1,4 +1,4 @@
-import { Repository, LessThan } from "typeorm";
+import { Repository, LessThan, FindOptionsWhere } from "typeorm";
 import AppDataSource from "../config/Datasource";
 import { BotSession, BotSessionType, BotPlatform } from "./botSession.entity";
 import logger from "../config/logger";
@@ -124,7 +124,7 @@ export class BotSessionService {
           platform,
           sessionType,
           isActive: true,
-          expiresAt: undefined as any, // Will be handled by cleanup
+          expiresAt: undefined as unknown as Date, // Will be handled by cleanup
         },
         order: { createdAt: "DESC" },
       });
@@ -193,7 +193,7 @@ export class BotSessionService {
    */
   async query(query: BotSessionQuery): Promise<BotSession[]> {
     try {
-      const where: any = {};
+      const where: FindOptionsWhere<BotSession> = {};
       if (query.userId) where.userId = query.userId;
       if (query.platform) where.platform = query.platform;
       if (query.sessionType) where.sessionType = query.sessionType;
@@ -248,7 +248,7 @@ export class BotSessionService {
    */
   async deactivateUserSessions(userId: string, platform?: BotPlatform): Promise<number> {
     try {
-      const where: any = { userId, isActive: true };
+      const where: FindOptionsWhere<BotSession> = { userId, isActive: true };
       if (platform) where.platform = platform;
 
       const result = await this.botSessionRepository.update(where, { isActive: false });

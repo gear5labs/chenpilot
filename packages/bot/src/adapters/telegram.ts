@@ -1,7 +1,7 @@
-import { Telegraf } from "telegraf";
+import { Telegraf, Context } from "telegraf";
 import { TransactionNotificationData } from "../types";
-import { createTrustlineOperation } from "@chen-pilot/sdk-core";
-import { searchFeatures, formatHelpMessage } from "../services/helpProvider";
+import { createTrustlineOperation, AgentClient } from "@chen-pilot/sdk-core";
+import { searchFeatures, formatHelpMessage, formatAiHelpMessage } from "../services/helpProvider";
 import { AssetVerificationService } from '../assetVerification';
 import { RateLimiter, DEFAULT_RATE_LIMIT, STRICT_RATE_LIMIT } from '../rateLimiter';
 import { withPerformanceProfiling, extractCommandName } from '../performanceProfiler';
@@ -13,7 +13,7 @@ const HORIZON_URL = process.env.STELLAR_HORIZON_URL || 'https://horizon-testnet.
 const DEBOUNCE_MS = 1000; // 1 second debounce between commands
 
 // Commands that involve personal account data and must only be used in DMs
-const DM_ONLY_COMMANDS = ['/balance'];
+const DM_ONLY_COMMANDS = ['/balance', '/swap'];
 
 // Commands that start a wizard
 const WIZARD_COMMANDS = ['/multisig'];
@@ -41,6 +41,8 @@ export class TelegramAdapter {
   private defaultRateLimiter: RateLimiter;
   private strictRateLimiter: RateLimiter;
   private verificationService: AssetVerificationService;
+  // #114: AI agent client
+  private agentClient: AgentClient;
 
   constructor(token: string) {
     this.token = token;
@@ -50,6 +52,8 @@ export class TelegramAdapter {
     // #123: Initialize rate limiters
     this.defaultRateLimiter = new RateLimiter(DEFAULT_RATE_LIMIT);
     this.strictRateLimiter = new RateLimiter(STRICT_RATE_LIMIT);
+    // #114: Initialize AI agent client
+    this.agentClient = new AgentClient({ baseUrl: BACKEND_URL });
   }
 
   // #145: Returns true if the user is flooding (within debounce window)
@@ -89,7 +93,7 @@ export class TelegramAdapter {
     this.bot = new Telegraf(this.token);
 
     // #145: Middleware to debounce all incoming messages/commands
-    this.bot.use(async (ctx: any, next: () => Promise<void>) => {
+    this.bot.use(async (ctx: Context, next: () => Promise<void>) => {
       const userId: number | undefined = ctx.from?.id;
       if (userId && this.isFlooding(userId)) {
         await ctx.reply("⏳ Please wait a moment before sending another command.");
@@ -109,16 +113,50 @@ export class TelegramAdapter {
       return next();
     });
 
-    this.bot.start(async (ctx: any) => {
+    this.bot.start(async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
       await withPerformanceProfiling('/start', 'telegram', userId, () => ctx.reply('Welcome to Chen Pilot! I am your AI-powered Stellar DeFi assistant.'))();
     });
-    this.bot.help(async (ctx: any) => {
+    this.bot.help(async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
-      await withPerformanceProfiling('/help', 'telegram', userId, () => ctx.reply('Commands: /start, /balance, /swap, /trustline, /dashboard, /validate'))();
+      await withPerformanceProfiling('/help', 'telegram', userId, async () => {
+        // Extract query after /help command
+        const messageText = ctx.message?.text || '';
+        const query = messageText.replace(/^\/help\s*/i, '').trim();
+        
+        if (query.length > 0) {
+          // Check if it's a natural language question vs keyword search
+          const isNaturalLanguage = query.includes(" ") && !["swap", "balance", "trustline", "sponsor", "notify", "status", "price", "help"].includes(query.toLowerCase());
+          
+          if (isNaturalLanguage) {
+            try {
+              await ctx.reply("🤖 Thinking... Let me get you some help with that.");
+              const response = await this.agentClient.query({
+                userId,
+                query,
+              });
+              const aiResponse = typeof response.result === 'string' ? response.result : (response.result as any).message || "Sorry, I couldn't help with that.";
+              await ctx.reply(formatAiHelpMessage(aiResponse, "html"), { parse_mode: "HTML" });
+            } catch (error) {
+              // Fallback to keyword search if AI fails
+              console.error("AI help failed, falling back to keyword search:", error);
+              const results = searchFeatures(query);
+              await ctx.reply(formatHelpMessage(results, true, "html"), { parse_mode: "HTML" });
+            }
+          } else {
+            // Keyword search
+            const results = searchFeatures(query);
+            await ctx.reply(formatHelpMessage(results, true, "html"), { parse_mode: "HTML" });
+          }
+        } else {
+          // Show all commands
+          const results = searchFeatures(query);
+          await ctx.reply(formatHelpMessage(results, false, "html"), { parse_mode: "HTML" });
+        }
+      })();
     });
 
-    this.bot.command('trustline', async (ctx: any) => {
+    this.bot.command('trustline', async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
       const commandName = extractCommandName(ctx.message.text, 'telegram');
       await withPerformanceProfiling(commandName, 'telegram', userId, async () => {
@@ -149,7 +187,7 @@ export class TelegramAdapter {
           let message = `✅ Found asset ${assetCode}!\n\n`;
           message += `To add this trustline, you can use the following details in your wallet:\n`;
           message += `<b>Asset:</b> ${assetCode}\n`;
-          message += `<b>Issuer:</b> <code>${(op as any).asset.issuer}</code>\n\n`;
+          message += `<b>Issuer:</b> <code>${(op as { asset: { issuer: string } }).asset.issuer}</code>\n\n`;
           message += `<i>Note: In a future update, I will provide a direct signing link.</i>`;
 
           await ctx.reply(message, { parse_mode: "HTML" });
@@ -162,7 +200,7 @@ export class TelegramAdapter {
     });
 
     // #134: Ping command — measure end-to-end latency
-    this.bot.command('ping', async (ctx: any) => {
+    this.bot.command('ping', async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
       await withPerformanceProfiling('/ping', 'telegram', userId, async () => {
         const startTime = Date.now();
@@ -197,7 +235,7 @@ export class TelegramAdapter {
     });
 
     // #146: Dashboard command
-    this.bot.command('dashboard', async (ctx: any) => {
+    this.bot.command('dashboard', async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
       await withPerformanceProfiling('/dashboard', 'telegram', userId, async () => {
         await ctx.reply(
@@ -259,7 +297,7 @@ export class TelegramAdapter {
     });
 
     // #148: /validate command for Stellar asset verification
-    this.bot.command('validate', async (ctx: any) => {
+    this.bot.command('validate', async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
       const commandName = extractCommandName(ctx.message.text, 'telegram');
       await withPerformanceProfiling(commandName, 'telegram', userId, async () => {
@@ -290,7 +328,7 @@ export class TelegramAdapter {
     });
 
     // #125: Multisig wizard command
-    this.bot.command('multisig', async (ctx: any) => {
+    this.bot.command('multisig', async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
       if (!isDM(ctx)) {
         await rejectPublicChannel(ctx);
@@ -302,7 +340,7 @@ export class TelegramAdapter {
     });
 
     // #125: Handle wizard input (for active wizard sessions)
-    this.bot.use(async (ctx: any, next: () => Promise<void>) => {
+    this.bot.use(async (ctx: Context, next: () => Promise<void>) => {
       const userId = String(ctx.from?.id || 'unknown');
       const text = ctx.message?.text || '';
       const command = text.split(' ')[0];
@@ -371,6 +409,74 @@ export class TelegramAdapter {
       })();
     });
 
+    // #109: Swap command
+    this.bot.command('swap', async (ctx: any) => {
+      const userId = String(ctx.from?.id || 'unknown');
+      await withPerformanceProfiling('/swap', 'telegram', userId, async () => {
+        if (!isDM(ctx)) {
+          await rejectPublicChannel(ctx);
+          return;
+        }
+
+        const args = ctx.message.text.split(' ').slice(1);
+        if (args.length < 3) {
+          return ctx.replyWithHTML('Usage: <code>/swap &lt;fromAsset&gt; &lt;toAsset&gt; &lt;amount&gt;</code>\nExample: <code>/swap XLM USDC 100</code>');
+        }
+
+        const [fromAsset, toAsset, amountStr] = args;
+        const amount = parseFloat(amountStr);
+
+        if (isNaN(amount) || amount <= 0) {
+          return ctx.replyWithHTML('❌ Amount must be a positive number.');
+        }
+
+        try {
+          await ctx.replyWithHTML('🔄 Initiating swap...');
+          const response = await this.agentClient.query({
+            userId,
+            query: `swap ${amount} ${fromAsset} to ${toAsset}`
+          });
+
+          const result = response.result;
+          if (typeof result === 'string') {
+            await ctx.replyWithHTML(result);
+          } else if ((result as any).successful) {
+            let reply = '✅ <b>Swap Successful!</b>\n\n';
+            reply += `<b>From:</b> ${(result as any).from} ${(result as any).amount}\n`;
+            reply += `<b>To:</b> ${(result as any).to}\n`;
+            reply += `<b>Estimated Output:</b> ${(result as any).estimatedOutput}\n`;
+            reply += `<b>Tx Hash:</b> <code>${(result as any).txHash}</code>`;
+            await ctx.replyWithHTML(reply);
+          } else {
+            await ctx.replyWithHTML(`❌ Swap failed: ${(result as any).message || 'Unknown error'}`);
+          }
+        } catch (error) {
+          console.error('Swap command error:', error);
+          await ctx.replyWithHTML('❌ Could not complete the swap. Please try again later.');
+        }
+      })();
+    });
+
+    // #115: Settings command with WebApp
+    this.bot.command('settings', async (ctx: any) => {
+      const userId = String(ctx.from?.id || 'unknown');
+      await withPerformanceProfiling('/settings', 'telegram', userId, async () => {
+        const settingsUrl = `${BACKEND_URL}/settings`;
+        await ctx.replyWithHTML('⚙️ <b>Open Settings</b>', {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: 'Open Settings',
+                  web_app: { url: settingsUrl }
+                }
+              ]
+            ]
+          }
+        });
+      })();
+    });
+
     // Set bot commands for mobile menu
     await this.bot.telegram.setMyCommands([
       { command: "start", description: "Start the bot" },
@@ -379,6 +485,7 @@ export class TelegramAdapter {
       { command: "trustline", description: "Add trustline" },
       { command: "multisig", description: "Setup multisig wallet" },
       { command: "feedback", description: "Send feedback or report bugs" },
+      { command: "settings", description: "Open settings" },
       { command: "help", description: "Show help" },
     ]);
 
