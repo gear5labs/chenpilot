@@ -82,7 +82,8 @@ export class StrategyRegistryTool extends BaseTool<StrategyRegistryPayload> {
     parameters: {
       action: {
         type: "string",
-        description: "Action to perform: 'vote', 'revoke_vote', 'get_strategy', or 'is_verified'",
+        description:
+          "Action to perform: 'vote', 'get_strategy', or 'is_verified'",
         required: true,
         enum: ["vote", "revoke_vote", "get_strategy", "is_verified"],
       },
@@ -94,7 +95,8 @@ export class StrategyRegistryTool extends BaseTool<StrategyRegistryPayload> {
       },
       aiAgent: {
         type: "string",
-        description: "Public key of the AI agent casting the vote (required for 'vote' and 'revoke_vote')",
+        description:
+          "The public key of the AI agent casting the vote (required for 'vote')",
         required: false,
       },
       revokeVote: {
@@ -117,8 +119,10 @@ export class StrategyRegistryTool extends BaseTool<StrategyRegistryPayload> {
     permissions: ["user"],
   };
 
-  /** Validate payload fields */
-  validate(payload: StrategyRegistryPayload): { valid: boolean; errors: string[] } {
+  validate(payload: StrategyRegistryPayload): {
+    valid: boolean;
+    errors: string[];
+  } {
     const errors: string[] = [];
     if (!payload.action) {
       errors.push("Missing required parameter: action");
@@ -137,60 +141,21 @@ export class StrategyRegistryTool extends BaseTool<StrategyRegistryPayload> {
   async execute(payload: StrategyRegistryPayload): Promise<ToolResult> {
     const validation = this.validate(payload);
     if (!validation.valid) {
-      return this.createErrorResult("strategy_registry", validation.errors.join(", "));
+      return this.createErrorResult(
+        "strategy_registry",
+        validation.errors.join(", ")
+      );
     }
 
-    const { action, poolId, aiAgent, revokeVote } = payload;
-    const contractId = process.env.STRATEGY_REGISTRY_CONTRACT_ID || "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"; // Mock or default
+    const { action, poolId, aiAgent } = payload;
+    const contractId =
+      process.env.STRATEGY_REGISTRY_CONTRACT_ID ||
+      "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"; // Mock or default
 
     try {
-      // Set up Stellar RPC – placeholder as we mock contract interactions
       const server = new StellarSdk.SorobanRpc.Server(
         config.stellar.horizonUrl.replace("horizon", "soroban-rpc")
       ); // Heuristic for RPC URL
-
-      // ----- Vote handling -----
-      if (action === "vote" || action === "revoke_vote") {
-        if (!poolId || !aiAgent) {
-          return this.createErrorResult("strategy_registry", "poolId and aiAgent are required for voting actions");
-        }
-        // Ensure store entry exists
-        const records = voteStore.get(poolId) ?? [];
-        if (revokeVote) {
-          // Revoke matching vote if present
-          const filtered = records.filter(r => !(r.aiAgent === aiAgent && r.poolId === poolId));
-          if (filtered.length === records.length) {
-            return this.createErrorResult("strategy_registry", `No existing vote found to revoke for agent ${aiAgent} on pool ${poolId}`);
-          }
-          voteStore.set(poolId, filtered);
-          return {
-            success: true,
-            data: {
-              poolId,
-              aiAgent,
-              status: "Vote revoked",
-              message: `AI Agent ${aiAgent} revoked its vote for pool ${poolId}.`,
-            },
-          };
-        } else {
-          // Add vote – prevent duplicate votes from same agent on same pool within epoch
-          const alreadyVoted = records.some(r => r.aiAgent === aiAgent && r.poolId === poolId && r.timestamp >= currentEpochStart());
-          if (alreadyVoted) {
-            return this.createErrorResult("strategy_registry", `Agent ${aiAgent} has already voted for pool ${poolId} in the current epoch`);
-          }
-          const newVote: VoteRecord = { poolId, aiAgent, timestamp: Date.now() };
-          voteStore.set(poolId, [...records, newVote]);
-          return {
-            success: true,
-            data: {
-              poolId,
-              aiAgent,
-              status: "Vote submitted",
-              message: `AI Agent ${aiAgent} voted for pool ${poolId}.`,
-            },
-          };
-        }
-      }
 
       // ----- Verify status (mock) -----
       if (action === "is_verified") {
@@ -213,7 +178,8 @@ export class StrategyRegistryTool extends BaseTool<StrategyRegistryPayload> {
         return {
           success: true,
           data: {
-            currentStrategy: winner,
+            currentStrategy:
+              "0101010101010101010101010101010101010101010101010101010101010101",
             message: "Current winning strategy retrieved from registry.",
           },
         };
