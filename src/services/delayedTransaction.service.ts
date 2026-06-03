@@ -1,17 +1,46 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 import config from "../config/config";
 import logger from "../config/logger";
-import { QueueJob } from "../jobs/job.entity";
-import { jobQueueService } from "../jobs/jobQueue.service";
-import { TransactionEventBridge } from "../Gateway/eventBridges";
+import { durableOperationService } from "../Reliability/DurableOperationService";
 
+/**
+ * Delay strategy for transaction submission
+ */
 export type DelayStrategy =
+  /**
+   * Submit at a specific time
+   */
+export type DelayStrategy = 
   | "scheduled"
   | "fee_based"
   | "congestion_based";
 
 export interface DelayedTransactionConfig {
   strategy: DelayStrategy;
+
+  /**
+   * Unix timestamp (in milliseconds) to submit at (for 'scheduled' strategy)
+   */
+  scheduledAt?: number;
+
+  /**
+   * Maximum fee willing to pay (in stroops) for 'fee_based' strategy
+   */
+  maxFee?: number;
+
+  /**
+   * Target fee (stroops) for 'fee_based' strategy
+   */
+  targetFee?: number;
+
+  /**
+   * Maximum number of retries
+   */
+  maxRetries?: number;
+
+  /**
+   * Retry delay in milliseconds
+   */
   scheduledAt?: number;
   maxFee?: number;
   targetFee?: number;
@@ -19,6 +48,9 @@ export interface DelayedTransactionConfig {
   retryDelay?: number;
 }
 
+/**
+ * Status of a delayed transaction
+ */
 export type DelayedTransactionStatus =
   | "pending"
   | "waiting_for_fee"
@@ -41,28 +73,90 @@ export interface DelayedTransaction {
   retries: number;
 }
 
+/**
+ * Network fee info
+ */
+export interface NetworkFeeInfo {
+  /**
+   * Current fee in stroops per operation
+   */
+  fee: number;
+
+  /**
+   * Last updated timestamp
+   */
+  lastUpdated: number;
+
+  /**
+   * Number of pending transactions in the network
+   */
+  pendingTxCount?: number;
+}
+
+/**
+ * Service for managing delayed transaction submission
+ * Service for managing delayed transaction submission using Durable Operations
+ */
 export class DelayedTransactionService {
+  private server: StellarSdk.Horizon.Server;
+  private readonly DEFAULT_MAX_FEE = 100000;
+  private readonly DEFAULT_TARGET_FEE = 5000;
+
+  constructor() {
+    this.server = new StellarSdk.Horizon.Server(config.stellar.horizonUrl);
+    
+    // Register handler for delayed transactions
+    durableOperationService.registerHandler("delayed_transaction", async (payload) => {
+      return this.executeTransaction(payload.transactionXdr);
+    });
+  }
+
+  /**
+   * Initialize the delayed transaction service
+   */
   async initialize(): Promise<void> {
-    logger.info("Delayed transaction service initialized with durable job queue");
+    // Start background checking for delayed transactions
+    this.startChecking();
+
+    logger.info("Delayed transaction service initialized");
+  }
+
+  /**
+   * Start periodic checking of delayed transactions
+   */
+  private startChecking(): void {
+    this.checkInterval = setInterval(async () => {
+      await this.processDelayedTransactions();
+    }, 10000); // Check every 10 seconds
+  }
+
+  /**
+   * Stop periodic checking
+   */
+  stopChecking(): void {
+    if (this.checkInterval) {
+      clearInterval(this.checkInterval);
+      this.checkInterval = null;
+    }
+    logger.info("Delayed transaction service initialized with durable framework");
   }
 
   async createDelayedTransaction(
     userId: string,
     transactionXdr: string,
-    delayedConfig: DelayedTransactionConfig,
-  ): Promise<DelayedTransaction> {
-    this.validateConfig(delayedConfig);
+    config: DelayedTransactionConfig
+  ): Promise<any> {
+    this.validateConfig(config);
 
     try {
-      StellarSdk.Transaction.fromXDR(
+      const _tx = StellarSdk.Transaction.fromXDR(
         transactionXdr,
-        config.stellar.networkPassphrase,
+        "Test SDF Network ; September 2015"
       );
+      StellarSdk.Transaction.fromXDR(transactionXdr, StellarSdk.Networks.TESTNET);
     } catch (error) {
       throw new Error(
-        `Invalid transaction XDR: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`,
+        `Invalid transaction XDR: ${error instanceof Error ? error.message : "Unknown error"}`
       );
     }
 
@@ -85,63 +179,249 @@ export class DelayedTransactionService {
       },
     });
 
-    TransactionEventBridge.notifyTransactionCreated(job.id, job.id, userId);
+    this.pendingDelayedTxs.set(delayedTx.id, delayedTx);
 
-    return this.mapJobToDelayedTransaction(job);
+    logger.info(
+      `Created delayed transaction ${delayedTx.id} with strategy ${config.strategy}`
+    );
+
+    // If already ready to submit, try immediately
+    if (delayedTx.status === "submitting") {
+      this.submitTransaction(delayedTx.id);
+    }
+    return durableOperationService.execute({
+      category: "delayed_transaction",
+      payload: { userId, transactionXdr },
+      scheduledAt: config.strategy === "scheduled" ? new Date(config.scheduledAt!) : undefined,
+      conditions: config.strategy !== "scheduled" ? config : undefined,
+      maxRetries: config.maxRetries,
+    });
   }
 
-  async cancelTransaction(id: string, userId: string): Promise<boolean> {
-    const cancelled = await jobQueueService.cancelJob(id, userId);
-    if (cancelled) {
-      logger.info("Cancelled delayed transaction", { id, userId });
+  private async executeTransaction(xdr: string): Promise<any> {
+    const tx = StellarSdk.Transaction.fromXDR(xdr, StellarSdk.Networks.TESTNET);
+    const result = await this.server.submitTransaction(tx);
+    return {
+      hash: result.hash,
+      ledger: result.ledger,
+      envelopeXdr: result.envelope_xdr,
+    };
+  }
+
+  private validateConfig(config: DelayedTransactionConfig): void {
+    if (!config.strategy) {
+      throw new Error("Delay strategy is required");
+    }
+
+    switch (config.strategy) {
+      case "scheduled":
+        if (!config.scheduledAt) {
+          throw new Error("scheduledAt is required for 'scheduled' strategy");
+        }
+        if (config.scheduledAt < Date.now()) {
+          throw new Error("scheduledAt must be in the future");
+        }
+        break;
+
+      case "fee_based":
+        if (!config.targetFee && !config.maxFee) {
+          config.targetFee = this.DEFAULT_TARGET_FEE;
+          config.maxFee = this.DEFAULT_MAX_FEE;
+        }
+        break;
+
+      case "congestion_based":
+        // No specific validation needed
+        break;
     }
     return cancelled;
   }
 
-  async getTransaction(id: string): Promise<DelayedTransaction | undefined> {
-    const job = await jobQueueService.getJob(id);
-    if (!job || job.jobType !== "delayed_transaction.submit") {
-      return undefined;
+  /**
+   * Process all pending delayed transactions
+   */
+  private async processDelayedTransactions(): Promise<void> {
+    const txsToRemove: string[] = [];
+
+    for (const [id, delayedTx] of this.pendingDelayedTxs.entries()) {
+      if (
+        delayedTx.status === "submitted" ||
+        delayedTx.status === "failed" ||
+        delayedTx.status === "cancelled"
+      ) {
+        txsToRemove.push(id);
+        continue;
+      }
+
+      // Check if ready to submit based on strategy
+      const shouldSubmit = await this.checkShouldSubmit(delayedTx);
+
+      if (shouldSubmit) {
+        await this.submitTransaction(id);
+      }
     }
 
     return this.mapJobToDelayedTransaction(job);
   }
 
-  async getUserTransactions(userId: string): Promise<DelayedTransaction[]> {
-    const jobs = await jobQueueService.getJobsForUser(
-      userId,
-      "delayed_transaction.submit",
-    );
+  /**
+   * Check if a delayed transaction should be submitted
+   */
+  private async checkShouldSubmit(
+    delayedTx: DelayedTransaction
+  ): Promise<boolean> {
+    const { config } = delayedTx;
 
-    return jobs
-      .map((job) => this.mapJobToDelayedTransaction(job))
-      .filter(
-        (transaction) =>
-          !["submitted", "failed", "cancelled"].includes(transaction.status),
-      );
+    switch (config.strategy) {
+      case "scheduled":
+        // Submit if scheduled time has passed
+        return config.scheduledAt ? Date.now() >= config.scheduledAt : false;
+
+      case "fee_based":
+        // Submit if current fee is below target
+        return await this.isFeeAcceptable(config);
+
+      case "congestion_based":
+        // Submit if network is not congested
+        return await this.isNetworkCongestionAcceptable();
+
+      default:
+        return false;
+    if (config.strategy === "scheduled") {
+      if (!config.scheduledAt) throw new Error("scheduledAt is required for 'scheduled' strategy");
+      if (config.scheduledAt < Date.now()) throw new Error("scheduledAt must be in the future");
+    }
+  }
+}
+
+  /**
+   * Check if current fee is acceptable
+   */
+  private async isFeeAcceptable(
+    config: DelayedTransactionConfig
+  ): Promise<boolean> {
+    const feeInfo = await this.getCurrentFee();
+
+    const targetFee = config.targetFee || this.DEFAULT_TARGET_FEE;
+    const maxFee = config.maxFee || this.DEFAULT_MAX_FEE;
+export const delayedTransactionService = new DelayedTransactionService();
+
+
+  /**
+   * Check if network congestion is acceptable
+   */
+  private async isNetworkCongestionAcceptable(): Promise<boolean> {
+    // Simple congestion check - can be enhanced with more sophisticated logic
+    const feeInfo = await this.getCurrentFee();
+
+    // Consider network uncongested if fee is below 10000 stroops (0.001 XLM)
+    return feeInfo.fee <= 10000;
   }
 
-  async rescheduleTransaction(
-    id: string,
-    userId: string,
-    newScheduledAt: number,
-  ): Promise<boolean> {
-    if (newScheduledAt < Date.now()) {
-      return false;
+  /**
+   * Get current network fee
+   */
+  private async getCurrentFee(): Promise<NetworkFeeInfo> {
+    // Check cache
+    if (
+      this.lastFeeInfo &&
+      Date.now() - this.lastFeeInfo.lastUpdated < this.FEE_CACHE_TTL
+    ) {
+      return this.lastFeeInfo;
     }
 
-    const job = await jobQueueService.getJob(id);
-    if (!job || job.userId !== userId) {
-      return false;
+    try {
+      // Get latest fee from Horizon
+      const response = await this.server.feeStats().call();
+
+      this.lastFeeInfo = {
+        fee: response.fee_charged.max_fee || 100,
+        lastUpdated: Date.now(),
+        pendingTxCount: response.operations_in_queue_total || 0,
+      };
+
+      return this.lastFeeInfo;
+    } catch (error) {
+      logger.error("Error fetching fee stats:", error);
+
+      // Return default fee if unable to fetch
+      return {
+        fee: 100,
+        lastUpdated: Date.now(),
+      };
     }
 
-    const payload = job.payload as {
-      userId: string;
-      transactionXdr: string;
-      config: DelayedTransactionConfig;
-    };
+  /**
+   * Submit a delayed transaction
+   */
+  private async submitTransaction(
+    id: string
+  ): Promise<{ success: boolean; txHash?: string; error?: string }> {
+    const delayedTx = this.pendingDelayedTxs.get(id);
+    if (!delayedTx) {
+      return { success: false, error: "Transaction not found" };
+    }
 
-    if (payload.config.strategy !== "scheduled") {
+    delayedTx.status = "submitting";
+
+    try {
+      const networkPassphrase = config.stellar.networkPassphrase;
+      const tx = StellarSdk.Transaction.fromXDR(
+        delayedTx.transactionXdr,
+        networkPassphrase
+      );
+
+      const response = await this.server.submitTransaction(tx);
+
+      delayedTx.status = "submitted";
+      delayedTx.submittedAt = Date.now();
+      delayedTx.txHash = response.hash;
+
+      logger.info(
+        `Successfully submitted delayed transaction ${id}: ${response.hash}`
+      );
+
+      return { success: true, txHash: response.hash };
+    } catch (error) {
+      delayedTx.retries++;
+      const maxRetries = delayedTx.config.maxRetries || 3;
+
+      if (delayedTx.retries >= maxRetries) {
+        delayedTx.status = "failed";
+        delayedTx.error =
+          error instanceof Error ? error.message : "Unknown error";
+        logger.error(
+          `Delayed transaction ${id} failed after ${maxRetries} retries`
+        );
+      } else {
+        // Reset status based on strategy
+        if (delayedTx.config.strategy === "fee_based") {
+          delayedTx.status = "waiting_for_fee";
+        } else if (delayedTx.config.strategy === "congestion_based") {
+          delayedTx.status = "waiting_for_congestion";
+        } else {
+          delayedTx.status = "pending";
+        }
+
+        logger.warn(
+          `Delayed transaction ${id} failed, retry ${delayedTx.retries}/${maxRetries}`
+        );
+      }
+
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+
+  /**
+   * Cancel a delayed transaction
+   */
+  cancelTransaction(id: string, userId: string): boolean {
+    const delayedTx = this.pendingDelayedTxs.get(id);
+
+    if (!delayedTx) {
       return false;
     }
 
@@ -156,12 +436,9 @@ export class DelayedTransactionService {
     job.leaseExpiresAt = null;
     job.leasedBy = null;
 
-    await jobQueueService.saveJob(job);
-    logger.info("Rescheduled delayed transaction", {
-      id,
-      userId,
-      newScheduledAt,
-    });
+    delayedTx.status = "cancelled";
+    logger.info(`Cancelled delayed transaction ${id}`);
+
     return true;
   }
 
@@ -169,43 +446,31 @@ export class DelayedTransactionService {
     logger.info("Delayed transaction service shutdown complete");
   }
 
-  private validateConfig(delayedConfig: DelayedTransactionConfig): void {
-    if (!delayedConfig.strategy) {
-      throw new Error("Delay strategy is required");
-    }
-
-    if (
-      delayedConfig.strategy === "scheduled" &&
-      (!delayedConfig.scheduledAt || delayedConfig.scheduledAt < Date.now())
-    ) {
-      throw new Error("scheduledAt must be provided in the future");
-    }
+  /**
+   * Get all pending delayed transactions for a user
+   */
+  getUserTransactions(userId: string): DelayedTransaction[] {
+    return Array.from(this.pendingDelayedTxs.values()).filter(
+      (tx) =>
+        tx.userId === userId &&
+        tx.status !== "submitted" &&
+        tx.status !== "failed" &&
+        tx.status !== "cancelled"
+    );
   }
 
-  private mapJobToDelayedTransaction(job: QueueJob): DelayedTransaction {
-    const payload = job.payload as {
-      userId: string;
-      transactionXdr: string;
-      config: DelayedTransactionConfig;
-    };
+  /**
+   * Update a scheduled transaction time
+   */
+  rescheduleTransaction(
+    id: string,
+    userId: string,
+    newScheduledAt: number
+  ): boolean {
+    const delayedTx = this.pendingDelayedTxs.get(id);
 
-    return {
-      id: job.id,
-      userId: payload.userId,
-      transactionXdr: payload.transactionXdr,
-      config: payload.config,
-      status: this.mapStatus(job),
-      createdAt: job.createdAt.getTime(),
-      submittedAt: job.completedAt?.getTime(),
-      txHash: job.result?.txHash as string | undefined,
-      error: job.lastError ?? undefined,
-      retries: job.attempts,
-    };
-  }
-
-  private mapStatus(job: QueueJob): DelayedTransactionStatus {
-    if (job.status === "completed") {
-      return "submitted";
+    if (!delayedTx) {
+      return false;
     }
 
     if (job.status === "dead_letter") {
@@ -220,10 +485,15 @@ export class DelayedTransactionService {
       return "submitting";
     }
 
-    const strategy = (job.payload as { config?: DelayedTransactionConfig }).config?.strategy;
-    if (strategy === "fee_based") {
-      return "waiting_for_fee";
-    }
+    delayedTx.config.scheduledAt = newScheduledAt;
+    delayedTx.status = "pending";
+
+    logger.info(
+      `Rescheduled delayed transaction ${id} to ${new Date(newScheduledAt).toISOString()}`
+    );
+
+    return true;
+  }
 
     if (strategy === "congestion_based") {
       return "waiting_for_congestion";

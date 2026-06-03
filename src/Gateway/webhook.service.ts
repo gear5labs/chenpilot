@@ -49,7 +49,7 @@ export class StellarWebhookService {
     this.WEBHOOK_SECRET = process.env.STELLAR_WEBHOOK_SECRET || "";
     if (!this.WEBHOOK_SECRET) {
       console.warn(
-        "STELLAR_WEBHOOK_SECRET not set. Signature verification will be disabled.",
+        "STELLAR_WEBHOOK_SECRET not set. Signature verification will be disabled."
       );
     }
   }
@@ -61,12 +61,12 @@ export class StellarWebhookService {
   private verifySignature(
     payload: string,
     signature: string,
-    timestamp: string,
+    timestamp: string
   ): boolean {
     if (!this.WEBHOOK_SECRET) {
       // If no secret is configured, skip verification (not recommended for production)
       console.warn(
-        "Signature verification skipped - no webhook secret configured",
+        "Signature verification skipped - no webhook secret configured"
       );
       return true;
     }
@@ -81,7 +81,7 @@ export class StellarWebhookService {
       // Use constant-time comparison to prevent timing attacks
       return crypto.timingSafeEqual(
         Buffer.from(signature),
-        Buffer.from(expectedSignature),
+        Buffer.from(expectedSignature)
       );
     } catch (error) {
       console.error("Signature verification error:", error);
@@ -179,7 +179,7 @@ export class StellarWebhookService {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _amount: string,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _transactionHash: string,
+    _transactionHash: string
   ): Promise<User> {
     user.isFunded = true;
     user.updatedAt = new Date();
@@ -210,7 +210,7 @@ export class StellarWebhookService {
         const isValid = this.verifySignature(
           JSON.stringify(rawBody),
           signature,
-          timestamp,
+          timestamp
         );
 
         if (!isValid) {
@@ -271,7 +271,7 @@ export class StellarWebhookService {
       const updatedUser = await this.updateUserFundingStatus(
         user,
         payload.data.amount,
-        payload.data.transaction_hash,
+        payload.data.transaction_hash
       );
 
       await jobQueueService.enqueue({

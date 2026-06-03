@@ -1,16 +1,14 @@
 // chenpilot/src/Agents/agents/intentagent.ts
 import { validateQuery } from "../validationService";
-import { executionAgent } from "./exectutionagent";
-import { agentLLM } from "../agent";
-import { promptGenerator } from "../registry/PromptGenerator";
+import { agentPlanner } from "../planner/AgentPlanner";
+import { planExecutor } from "../planner/PlanExecutor";
 import { toolAutoDiscovery } from "../registry/ToolAutoDiscovery";
-import { WorkflowPlan, WorkflowStep } from "../types";
-import { memoryStore } from "../memory/memory";
-import { parseSorobanIntent } from "../planner/sorobanIntent";
 import logger from "../../config/logger";
 import { randomUUID } from "crypto";
 import { userPreferencesService } from "../../Auth/userPreferences.service";
 import { RiskLevel } from "../../Auth/userPreferences.entity";
+import { experimentService } from "../experiment/experiment.service";
+import { ExperimentType } from "../experiment/experiment.entity";
 
 export class IntentAgent {
   private initialized = false;
@@ -30,15 +28,11 @@ export class IntentAgent {
       return { success: false, error: "Invalid request format" };
     }
 
-    // Fetch user preferences and include in context
+    // Fetch user preferences
     let userPreferences;
     try {
       userPreferences =
         await userPreferencesService.getPreferencesForAgent(userId);
-      logger.debug("User preferences loaded", {
-        userId,
-        riskLevel: userPreferences.riskLevel,
-      });
     } catch (error) {
       logger.warn("Failed to load user preferences, using defaults", {
         userId,
@@ -74,6 +68,8 @@ export class IntentAgent {
   ): Promise<WorkflowPlan> {
     const startTime = Date.now();
     let promptVersionId: string | undefined;
+    let experimentId: string | undefined;
+    let variantId: string | undefined;
 
     try {
       const sorobanWorkflow = parseSorobanIntent(input);
@@ -83,7 +79,29 @@ export class IntentAgent {
         return sorobanWorkflow;
       }
 
-      const promptVersion = await promptGenerator.generateIntentPrompt();
+      // Check for active experiments
+      const activeExperiments = await experimentService.getActiveExperiments(
+        ExperimentType.AB_PROMPT
+      );
+      let selectedPrompt;
+
+      if (activeExperiments.length > 0) {
+        const experiment = activeExperiments[0];
+        experimentId = experiment.id;
+        variantId =
+          (await experimentService.selectVariant(experimentId, userId)) ||
+          undefined;
+
+        const variant = experiment.variants.find((v) => v.id === variantId);
+        if (variant?.promptVersionId) {
+          selectedPrompt = await AppDataSource.getRepository(
+            PromptVersion
+          ).findOne({ where: { id: variant.promptVersionId } });
+        }
+      }
+
+      const promptVersion =
+        selectedPrompt || (await promptGenerator.generateIntentPrompt());
       promptVersionId = (promptVersion as Record<string, unknown>).id as string;
 
       // Build user preferences context for the prompt
@@ -99,18 +117,13 @@ export class IntentAgent {
         .replace("{{USER_CONSTRAINTS}}", userConstraints);
 
       const parsed = await agentLLM.callLLM(
+    try {
+      // Use the new durable planner and executor
+      const plan = await agentPlanner.createPlan({
         userId,
-        prompt,
-        "",
-        true,
-        undefined,
-        traceId
-      );
-      const steps: WorkflowStep[] = Array.isArray(
-        (parsed as Record<string, unknown>)?.workflow
-      )
-        ? ((parsed as Record<string, unknown>).workflow as WorkflowStep[])
-        : [];
+        userInput: input,
+        userPreferences,
+      });
 
       if (promptVersionId) {
         const { promptVersionService } =
@@ -121,17 +134,41 @@ export class IntentAgent {
           userId,
           Date.now() - startTime
         );
-      }
 
-      memoryStore.add(userId, `User: ${input}`);
-      return { workflow: steps };
-    } catch (err) {
-      logger.error("LLM workflow parsing failed", {
-        traceId,
-        error: err,
-        userId,
+        // Record experiment metric if applicable
+        if (experimentId && variantId) {
+          await experimentService.recordMetric({
+            experimentId,
+            variantId,
+            userId,
+            traceId,
+            success: steps.length > 0,
+            responseTimeMs: Date.now() - startTime,
+            metrics: { stepsCount: steps.length },
+          });
+        }
+      }
+      logger.info("Plan created", { traceId, planId: plan.planId, userId });
+
+      const result = await planExecutor.executePlan(plan, userId, {
+        durable: true,
       });
-      return { workflow: [] };
+
+      return {
+        success: true,
+        data: {
+          message: "Execution started",
+          executionId: result.executionId,
+          planId: result.planId,
+          status: result.status,
+        },
+      };
+    } catch (error) {
+      logger.error("Failed to handle intent", { traceId, error, userId });
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to process request",
+      };
     }
   }
 }

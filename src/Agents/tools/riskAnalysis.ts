@@ -51,9 +51,15 @@ export class RiskAnalysisTool extends BaseTool<RiskAnalysisPayload> {
     ],
     category: "security",
     version: "1.0.0",
+    riskLevel: "low",
+    capabilities: ["risk_analysis"],
+    permissions: [],
   };
 
-  async execute(payload: RiskAnalysisPayload, userId: string): Promise<ToolResult> {
+  async execute(
+    payload: RiskAnalysisPayload,
+    userId: string
+  ): Promise<ToolResult> {
     try {
       const sourceAsset = STELLAR_ASSETS[payload.from];
       const destAsset = STELLAR_ASSETS[payload.to];
@@ -89,8 +95,12 @@ export class RiskAnalysisTool extends BaseTool<RiskAnalysisPayload> {
         },
       });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      return this.createErrorResult("risk_analysis", `Risk analysis failed: ${errorMessage}`);
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      return this.createErrorResult(
+        "risk_analysis",
+        `Risk analysis failed: ${errorMessage}`
+      );
     }
   }
 }

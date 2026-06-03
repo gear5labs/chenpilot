@@ -4,9 +4,211 @@ import { requireAdmin } from "../../Gateway/middleware/rbac.middleware";
 import { agentMetricsService } from "../agentMetrics.service";
 import { AgentType, ExecutionStatus } from "../agentExecutionMetrics.entity";
 import { PromptVersion } from "../registry/PromptVersion.entity";
+import { promptRolloutService } from "../registry/PromptRolloutService";
+import { durableExecutor } from "../planner/DurableExecutor";
+import { durableOperationService } from "../../Reliability/DurableOperationService";
+import { OperationStatus } from "../../Reliability/DurableOperation.entity";
 import AppDataSource from "../../config/Datasource";
 
 const router = Router();
+
+/**
+ * GET /api/admin/reliability/operations
+ * Get all durable operations for monitoring
+ */
+router.get(
+  "/reliability/operations",
+  authenticateToken,
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const { status, category, limit, offset } = req.query;
+      const [operations, total] = await durableOperationService.getAllOperations({
+        status: status as OperationStatus,
+        category: category as string,
+        limit: limit ? parseInt(limit as string, 10) : 50,
+        offset: offset ? parseInt(offset as string, 10) : 0,
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: operations,
+        total,
+      });
+    } catch (error) {
+      console.error("Error fetching durable operations:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch operations",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/admin/reliability/operations/:id/replay
+ * Manually replay a failed operation
+ */
+router.post(
+  "/reliability/operations/:id/replay",
+  authenticateToken,
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      await durableOperationService.replay(id);
+      return res.status(200).json({
+        success: true,
+        message: `Operation ${id} replayed`,
+      });
+    } catch (error) {
+      console.error("Error replaying operation:", error);
+      return res.status(500).json({
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to replay operation",
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/admin/agents/executions/active
+ * Get active (running/failed/paused) durable executions
+ * Requires admin role
+ */
+router.get(
+  "/executions/active",
+  authenticateToken,
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const executions = await durableExecutor.getActiveExecutions();
+      return res.status(200).json({
+        success: true,
+        data: executions,
+      });
+    } catch (error) {
+      console.error("Error fetching active executions:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch active executions",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/admin/agents/executions/:id/retry/:step
+ * Manually retry a failed step
+ * Requires admin role
+ */
+router.post(
+  "/executions/:id/retry/:step",
+  authenticateToken,
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const { id, step } = req.params;
+      await durableExecutor.repairRetryStep(id, parseInt(step, 10));
+      return res.status(200).json({
+        success: true,
+        message: `Retrying step ${step} for execution ${id}`,
+      });
+    } catch (error) {
+      console.error("Error retrying step:", error);
+      return res.status(500).json({
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to retry step",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/admin/agents/executions/:id/skip/:step
+ * Skip a failed step
+ * Requires admin role
+ */
+router.post(
+  "/executions/:id/skip/:step",
+  authenticateToken,
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const { id, step } = req.params;
+      const { resultOverride } = req.body;
+      await durableExecutor.repairSkipStep(id, parseInt(step, 10), resultOverride);
+      return res.status(200).json({
+        success: true,
+        message: `Skipped step ${step} for execution ${id}`,
+      });
+    } catch (error) {
+      console.error("Error skipping step:", error);
+      return res.status(500).json({
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to skip step",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/admin/agents/executions/:id/update/:step
+ * Update step payload and retry
+ * Requires admin role
+ */
+router.post(
+  "/executions/:id/update/:step",
+  authenticateToken,
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const { id, step } = req.params;
+      const { newPayload } = req.body;
+      await durableExecutor.repairUpdateAndRetry(id, parseInt(step, 10), newPayload);
+      return res.status(200).json({
+        success: true,
+        message: `Updated and retrying step ${step} for execution ${id}`,
+      });
+    } catch (error) {
+      console.error("Error updating and retrying step:", error);
+      return res.status(500).json({
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to update and retry step",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/admin/agents/executions/:id/approve
+ * Approve a pending execution or step
+ * Requires admin role
+ */
+router.post(
+  "/executions/:id/approve",
+  authenticateToken,
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const adminId = (req as any).user?.id;
+      
+      await durableExecutor.resumeExecution(id, adminId);
+      
+      return res.status(200).json({
+        success: true,
+        message: `Execution ${id} approved and resumed`,
+      });
+    } catch (error) {
+      console.error("Error approving execution:", error);
+      return res.status(500).json({
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to approve execution",
+      });
+    }
+  }
+);
 
 /**
  * GET /api/admin/agents/metrics
@@ -169,6 +371,12 @@ router.put(
       if (version !== undefined) prompt.version = version;
       if (isActive !== undefined) prompt.isActive = isActive;
       if (weight !== undefined) prompt.weight = weight;
+      if (req.body.compatibility !== undefined)
+        prompt.compatibility = req.body.compatibility;
+      if (req.body.rolloutPolicy !== undefined)
+        prompt.rolloutPolicy = req.body.rolloutPolicy;
+      if (req.body.rollbackVersionId !== undefined)
+        prompt.rollbackVersionId = req.body.rollbackVersionId;
 
       const updatedPrompt = await promptRepository.save(prompt);
 
@@ -182,6 +390,69 @@ router.put(
       return res.status(500).json({
         success: false,
         message: "Failed to update prompt",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/admin/agents/prompts/:promptId/activate
+ * Activate a prompt version with safety checks
+ * Requires admin role
+ */
+router.post(
+  "/prompts/:promptId/activate",
+  authenticateToken,
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const { promptId } = req.params;
+      const { rollbackVersionId } = req.body;
+
+      await promptRolloutService.activateWithPolicy(
+        promptId,
+        rollbackVersionId
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: "Prompt version activated safely",
+      });
+    } catch (error) {
+      console.error("Error activating prompt rollout:", error);
+      return res.status(400).json({
+        success: false,
+        message:
+          error instanceof Error ? error.message : "Failed to activate prompt",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/admin/agents/prompts/:promptId/validate
+ * Validate prompt compatibility
+ * Requires admin role
+ */
+router.get(
+  "/prompts/:promptId/validate",
+  authenticateToken,
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const { promptId } = req.params;
+      const validation =
+        await promptRolloutService.validateCompatibility(promptId);
+
+      return res.status(200).json({
+        success: true,
+        data: validation,
+      });
+    } catch (error) {
+      console.error("Error validating prompt:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to validate prompt",
       });
     }
   }
