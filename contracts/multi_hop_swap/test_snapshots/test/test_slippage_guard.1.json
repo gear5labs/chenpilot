@@ -3,6 +3,7 @@
     "address": 6,
     "nonce": 0
   },
+  "auth": [[], [], []],
   "auth": [
     [
       [
@@ -775,6 +776,8 @@
       ]
     ]
   },
+  "events": []
+}
   "events": [
     {
       "event": {
