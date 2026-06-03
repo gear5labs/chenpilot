@@ -72,10 +72,13 @@ export class SorobanTool extends BaseTool<SorobanInvokePayload> {
     examples: [
       "Invoke soroban contract CABC... method stake args [100] on testnet",
       "Call contract method claim on mainnet for CXYZ...",
-      "Borrow from contract CABC... method borrow args [\"USDC\", 50]",
+      'Borrow from contract CABC... method borrow args ["USDC", 50]',
     ],
     category: "soroban",
     version: "1.0.0",
+    riskLevel: "high",
+    capabilities: ["soroban_invocation"],
+    permissions: ["user"],
   };
 
   async execute(payload: SorobanInvokePayload): Promise<ToolResult> {

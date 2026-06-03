@@ -1,4 +1,3 @@
-
 # Chen Pilot SDK - SignatureProvider System
 
 A comprehensive TypeScript SDK for managing signature providers across multiple blockchain networks including Bitcoin, Stellar, and Starknet.
@@ -20,12 +19,13 @@ Core SDK for Chen Pilot cross-chain operations with Stellar/Soroban support.
 
 ## Features
 
+- **Contract Client**: Stable query, simulation, execution, idempotency, and typed binding surface
+- **Simulation Approvals**: First-class fee estimates, auth entries, warnings, and approval checkpoints
 - **Network Status Checks**: Monitor Stellar network health, latency, and protocol version
 - **Event Subscriptions**: Subscribe to Soroban contract events
 - **Recovery Engine**: Handle cross-chain transaction failures and retries
 - **Plan Verification**: Verify and validate transaction plans
 - **TypeScript Support**: Full type definitions included
-
 
 ## Installation
 
@@ -34,7 +34,6 @@ npm install @chen-pilot/sdk-core
 ```
 
 ## Quick Start
-
 
 ### Basic Usage
 
@@ -107,6 +106,68 @@ const health = await SDKUtils.performSystemHealthCheck();
 console.log(
   `${health.healthyProviders}/${health.totalProviders} providers healthy`
 );
+```
+
+### Contract Client
+
+Use `ContractClient` for external Soroban integrations. It keeps raw RPC payloads
+available while returning decoded models and workflow metadata that callers can
+present as approvals.
+
+```typescript
+import {
+  ContractClient,
+  createContractBinding,
+  decodeObject,
+} from "@chen-pilot/sdk-core";
+
+type VaultState = {
+  admin: string;
+  paused: boolean;
+};
+
+const client = new ContractClient({
+  network: "testnet",
+  compatibility: {
+    supportedNetworks: ["testnet"],
+    minProtocolVersion: 20,
+  },
+});
+
+const vault = createContractBinding(client, {
+  state: {
+    contractId: "CCONTRACT...",
+    method: "state",
+    kind: "query",
+    decoder: decodeObject<VaultState>(["admin", "paused"]),
+  },
+  previewWithdraw: {
+    contractId: "CCONTRACT...",
+    method: "withdraw",
+    kind: "simulate",
+    decoder: (value) => String(value),
+  },
+} as const);
+
+const state = await vault.state();
+const preview = await vault.previewWithdraw("100");
+
+for (const approval of preview.approvalRequirements) {
+  console.log(approval.checkpoint, approval.reason);
+}
+```
+
+Submit signed transactions with idempotency:
+
+```typescript
+const execution = await client.execute({
+  contractId: "CCONTRACT...",
+  method: "withdraw",
+  signedTransactionXdr: signedEnvelope,
+  idempotencyKey: "withdraw:user-123:request-456",
+});
+
+console.log(execution.status, execution.hash);
 ```
 
 ## Provider Types
@@ -616,4 +677,3 @@ ISC
 ## Contributing
 
 See [CONTRIBUTING.md](../../CONTRIBUTING.md) for contribution guidelines.
-
