@@ -1,6 +1,10 @@
 #![no_std]
 use soroban_sdk::{contract, contractimpl, contracttype, contractclient, symbol_short, vec, Env, Address, Vec, token};
 
+// TTL for pool state (price and reserve): ~30 days (6_048_000 ledgers at 5s/ledger)
+// Pool state is extended on each swap to remain active; inactive pools expire and reset.
+const POOL_STATE_TTL_LEDGERS: u32 = 6_048_000;
+
 /// One leg of a swap route.
 #[contracttype]
 #[derive(Clone)]

@@ -4,6 +4,10 @@ use soroban_sdk::{
     Address, Env, token,
 };
 
+// TTL for active positions: ~30 days (6_048_000 ledgers at 5s/ledger)
+// Positions are extended on each activity to remain fresh; inactive positions eventually expire
+const POSITION_TTL_LEDGERS: u32 = 6_048_000;
+
 // ---------------------------------------------------------------------------
 // Oracle interface
 // ---------------------------------------------------------------------------
@@ -118,7 +122,8 @@ impl LendingLiquidationContract {
             panic!("borrow exceeds LTV");
         }
 
-        env.storage().persistent().set(&DataKey::Position(borrower), &pos);
+        // Store position with TTL to keep active positions fresh
+        env.storage().persistent().set_with_ttl(&DataKey::Position(borrower), &pos, POSITION_TTL_LEDGERS);
     }
 
     /// Liquidate an under-water position.
@@ -191,7 +196,9 @@ impl LendingLiquidationContract {
 
         pos.debt_amount -= actual_repay;
         pos.collateral_amount -= collateral_seized;
-        env.storage().persistent().set(&DataKey::Position(borrower.clone()), &pos);
+        
+        // Extend TTL for updated position to keep it fresh
+        env.storage().persistent().set_with_ttl(&DataKey::Position(borrower.clone()), &pos, POSITION_TTL_LEDGERS);
 
         env.events().publish(
             (symbol_short!("Liquidate"),),
