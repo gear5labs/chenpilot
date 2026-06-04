@@ -79,6 +79,10 @@ export class MultiHopTradeTool extends BaseTool<MultiHopTradePayload> {
         description: "Maximum intermediate hops (default: 5)",
         required: false,
       },
+      executeOptimal: {
+        type: "boolean",
+        description:
+          "Whether to execute the optimal path (default: false, only evaluate)",
       policy: {
         type: "object",
         description:
@@ -265,6 +269,12 @@ export class MultiHopTradeTool extends BaseTool<MultiHopTradePayload> {
     }
   }
 
+      return {
+        action: "multi_hop_trade",
+        status: "error",
+        error:
+          error instanceof Error ? error.message : "Unknown error occurred",
+      };
   private handlePathError(err: unknown, action: string): ToolResult {
     if (err instanceof RoutePolicyViolationError) {
       logger.warn("Route policy violation", { reason: err.message });
