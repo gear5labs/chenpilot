@@ -1,6 +1,7 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 import config from "../config/config";
 import logger from "../config/logger";
+import { transactionLifecycleService } from "../transactions/TransactionLifecycle.service";
 import { durableOperationService } from "../Reliability/DurableOperationService";
 
 /**
@@ -411,7 +412,6 @@ export const delayedTransactionService = new DelayedTransactionService();
           `Delayed transaction ${id} failed after ${maxRetries} retries`
         );
       } else {
-        // Reset status based on strategy
         if (delayedTx.config.strategy === "fee_based") {
           delayedTx.status = "waiting_for_fee";
         } else if (delayedTx.config.strategy === "congestion_based") {
@@ -451,6 +451,13 @@ export const delayedTransactionService = new DelayedTransactionService();
     }
 
     delayedTx.status = "cancelled";
+
+    if (delayedTx.lifecycleId) {
+      transactionLifecycleService.cancel(delayedTx.lifecycleId, "Cancelled by user").catch((err) => {
+        logger.warn("Failed to cancel lifecycle for delayed transaction", { id, err });
+      });
+    }
+
     logger.info(`Cancelled delayed transaction ${id}`);
 
     return true;
