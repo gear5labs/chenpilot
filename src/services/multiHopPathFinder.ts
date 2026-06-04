@@ -123,6 +123,10 @@ export class MultiHopPathFinder {
         .call();
 
       for (const record of strictSendPaths.records) {
+        if (record.path.length <= maxHops) {
+          paths.push(
+            this.convertStrictSendPath(record, sourceAsset, destinationAsset)
+          );
         if (record.path.length < maxHops) {
           paths.push(this.convertRecord(record, sourceAsset, destinationAsset));
         }
@@ -138,6 +142,10 @@ export class MultiHopPathFinder {
         .call();
 
       for (const record of strictReceivePaths.records) {
+        if (record.path.length <= maxHops) {
+          paths.push(
+            this.convertStrictReceivePath(record, sourceAsset, destinationAsset)
+          );
         if (record.path.length < maxHops) {
           paths.push(this.convertRecord(record, sourceAsset, destinationAsset));
         }
@@ -162,7 +170,13 @@ export class MultiHopPathFinder {
     sourceAsset: StellarSdk.Asset,
     destinationAsset: StellarSdk.Asset
   ): TradePath {
-    const midAssets = record.path.map((a) => parseStellarAsset(a));
+    const path = [
+      sourceAsset,
+      ...record.path.map(this.parseAsset),
+      destinationAsset,
+    ];
+    const route = path.map((asset) => this.assetToString(asset));
+    const midAssets = record.path.map((a) => this.parseAsset(a));
     const fullPath = [sourceAsset, ...midAssets, destinationAsset];
     const hops = record.path.length + 1;
 
@@ -185,11 +199,81 @@ export class MultiHopPathFinder {
    *
    * Dimensionless and comparable across all paths for the same trade.
    */
+  private convertStrictReceivePath(
+    record: any,
+    sourceAsset: StellarSdk.Asset,
+    destinationAsset: StellarSdk.Asset
+  ): TradePath {
+    const path = [
+      sourceAsset,
+      ...record.path.map(this.parseAsset),
+      destinationAsset,
+    ];
+    const route = path.map((asset) => this.assetToString(asset));
+
+    return {
+      path,
+      sourceAmount: record.source_amount,
+      destinationAmount: record.destination_amount,
+      priceImpact: 0,
+      estimatedSlippage: 0,
+      hops: record.path.length + 1,
+      route,
+      efficiency: 0,
+    };
+  }
+
+  /**
+   * Evaluate paths for efficiency and risk
+   */
+  private async evaluatePaths(paths: TradePath[]): Promise<TradePath[]> {
+    return Promise.all(
+      paths.map(async (path) => {
+        const priceImpact = this.calculatePriceImpact(path);
+        const estimatedSlippage = this.estimateSlippage(path);
+        const efficiency = this.calculateEfficiency(
+          path,
+          priceImpact,
+          estimatedSlippage
+        );
+
+        return {
+          ...path,
+          priceImpact,
+          estimatedSlippage,
+          efficiency,
+        };
+      })
   private evaluatePaths(paths: TradePath[]): TradePath[] {
     const maxDest = Math.max(
       ...paths.map((p) => parseFloat(p.destinationAmount))
     );
 
+  /**
+   * Calculate price impact for a path
+   */
+  private calculatePriceImpact(path: TradePath): number {
+    const sourceAmount = parseFloat(path.sourceAmount);
+    const destinationAmount = parseFloat(path.destinationAmount);
+
+    if (sourceAmount === 0 || destinationAmount === 0) {
+      return 100;
+    }
+
+    const effectiveRate = destinationAmount / sourceAmount;
+    const hopPenalty = path.hops * 0.003;
+
+    return hopPenalty * 100;
+  }
+
+  /**
+   * Estimate slippage based on path characteristics
+   */
+  private estimateSlippage(path: TradePath): number {
+    const baseSlippage = 0.001;
+    const hopMultiplier = Math.pow(1.5, path.hops - 1);
+
+    return baseSlippage * hopMultiplier;
     return paths.map((path) => {
       const destAmount = parseFloat(path.destinationAmount);
       const slippage = HOP_SLIPPAGE_RATE * path.hops;
@@ -213,6 +297,20 @@ export class MultiHopPathFinder {
    * 2. Equal efficiency → fewer hops wins.
    * 3. Equal hops → lexicographically smaller route string wins.
    */
+  private calculateEfficiency(
+    path: TradePath,
+    priceImpact: number,
+    slippage: number
+  ): number {
+    const destinationAmount = parseFloat(path.destinationAmount);
+    const hopPenalty = path.hops * 0.1;
+    const impactPenalty = priceImpact / 100;
+    const slippagePenalty = slippage * 10;
+
+    const efficiency =
+      destinationAmount * (1 - hopPenalty - impactPenalty - slippagePenalty);
+
+    return Math.max(0, efficiency);
   private selectBestPath(paths: TradePath[]): TradePath {
     return [...paths].sort((a, b) => {
       if (b.efficiency !== a.efficiency) return b.efficiency - a.efficiency;
