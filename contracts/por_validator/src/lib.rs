@@ -1,6 +1,11 @@
 #![no_std]
 use soroban_sdk::{contract, contractimpl, contracttype, contractclient, Address, Env, symbol_short};
 
+// TTL for validator status: ~1 day (172_800 ledgers at 5s/ledger)
+// Validator status is instance storage (rarely-changed config), but with TTL
+// to ensure stale status records are refreshed periodically for accuracy
+const VALIDATOR_STATUS_TTL_LEDGERS: u32 = 172_800;
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReserveData {
@@ -53,7 +58,9 @@ impl PoRValidatorContract {
             tolerance_bps,
         };
         env.storage().instance().set(&DataKey::Config, &config);
-        env.storage().instance().set(&DataKey::IsValid, &true);
+        
+        // Store initial IsValid status with TTL to force periodic re-validation
+        env.storage().instance().set_with_ttl(&DataKey::IsValid, &true, VALIDATOR_STATUS_TTL_LEDGERS);
     }
 
     /// Updates the configuration. Only the admin can call this.
@@ -86,7 +93,8 @@ impl PoRValidatorContract {
         // 4. Compare supply vs reserves
         let is_valid = supply <= allowed_supply;
         
-        env.storage().instance().set(&DataKey::IsValid, &is_valid);
+        // Store validation result with TTL to force re-validation periodically
+        env.storage().instance().set_with_ttl(&DataKey::IsValid, &is_valid, VALIDATOR_STATUS_TTL_LEDGERS);
 
         if !is_valid {
             // Discrepancy detected: Supply exceeds reserves + tolerance

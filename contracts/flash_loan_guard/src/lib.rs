@@ -4,6 +4,10 @@ use soroban_sdk::{
     Address, Env,
 };
 
+// TTL for price snapshot: ~1 day (172_800 ledgers at 5s/ledger)
+// Snapshots must be refreshed regularly to maintain price safety
+const PRICE_SNAPSHOT_TTL_LEDGERS: u32 = 172_800;
+
 // ---------------------------------------------------------------------------
 // Oracle interface — same pattern as liquidity_vault
 // ---------------------------------------------------------------------------
@@ -164,7 +168,8 @@ impl FlashLoanGuardContract {
             }
         }
 
-        env.storage().instance().set(
+        // Store snapshot with TTL to ensure it must be refreshed regularly
+        env.storage().instance().set_with_ttl(
             &DataKey::PriceSnapshot,
             &PriceSnapshot {
                 price,
