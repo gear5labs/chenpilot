@@ -1,6 +1,10 @@
 #![no_std]
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, token, symbol_short};
 
+// TTL for relayer info: ~30 days (6_048_000 ledgers at 5s/ledger)
+// Active relayer records are extended on each activity; inactive ones eventually expire
+const RELAYER_INFO_TTL_LEDGERS: u32 = 6_048_000;
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RelayerStatus {
@@ -78,7 +82,9 @@ impl RelayerSlashingContract {
         // Ensure previously slashed relayers are reset to Active if they restake
         info.status = RelayerStatus::Active;
         info.stake_amount += amount;
-        env.storage().persistent().set(&DataKey::Relayer(relayer), &info);
+        
+        // Store relayer info with TTL to keep active relayers fresh
+        env.storage().persistent().set_with_ttl(&DataKey::Relayer(relayer), &info, RELAYER_INFO_TTL_LEDGERS);
     }
 
     /// Slashes a malicious relayer. Only the admin can call this.
@@ -102,7 +108,8 @@ impl RelayerSlashingContract {
         let token_client = token::Client::new(&env, &config.staking_token);
         token_client.transfer(&env.current_contract_address(), &config.treasury, &slash_amount);
 
-        env.storage().persistent().set(&DataKey::Relayer(relayer.clone()), &info);
+        // Extend TTL for slashed relayer record to maintain audit trail
+        env.storage().persistent().set_with_ttl(&DataKey::Relayer(relayer.clone()), &info, RELAYER_INFO_TTL_LEDGERS);
         
         env.events().publish((symbol_short!("Slashed"), relayer), slash_amount);
     }
@@ -115,7 +122,9 @@ impl RelayerSlashingContract {
             .expect("Relayer not found");
 
         info.unstake_requested_at = env.ledger().timestamp();
-        env.storage().persistent().set(&DataKey::Relayer(relayer), &info);
+        
+        // Extend TTL for relayer during unbonding period
+        env.storage().persistent().set_with_ttl(&DataKey::Relayer(relayer), &info, RELAYER_INFO_TTL_LEDGERS);
     }
 
     /// Withdraws the staked collateral after the unbonding period has passed.

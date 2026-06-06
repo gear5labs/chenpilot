@@ -2,6 +2,7 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 import { Server as HTTPServer } from "http";
 import logger from "../config/logger";
 import { EventEmitter } from "events";
+import { evaluateRealtimeAbusePolicy } from "../Security";
 
 /**
  * Represents a connected client with metadata
@@ -25,6 +26,11 @@ export enum RealtimeEventType {
   BOT_ERROR = "bot:error",
   DEPLOYMENT_STATUS = "deployment:status",
   SWAP_STATUS = "swap:status",
+  AGENT_EXECUTION_STARTED = "agent:execution-started",
+  AGENT_STEP_COMPLETED = "agent:step-completed",
+  AGENT_EXECUTION_COMPLETED = "agent:execution-completed",
+  AGENT_EXECUTION_FAILED = "agent:execution-failed",
+  AGENT_APPROVAL_REQUIRED = "agent:approval-required",
 }
 
 /**
@@ -39,6 +45,21 @@ export interface TransactionStatusUpdate {
   feeUsed?: number;
   memo?: string;
   userId?: string;
+}
+
+/**
+ * Agent execution payload
+ */
+export interface AgentExecutionUpdate {
+  executionId: string;
+  planId: string;
+  userId: string;
+  status: string;
+  currentStep?: number;
+  totalSteps?: number;
+  result?: any;
+  error?: string;
+  timestamp: Date;
 }
 
 /**
@@ -148,6 +169,16 @@ export class RealtimeEventEmitter extends EventEmitter {
   emitSwapStatus(update: TransactionStatusUpdate): void {
     this.emit(RealtimeEventType.SWAP_STATUS, update);
   }
+
+  /**
+   * Emit agent execution update
+   */
+  emitAgentExecutionUpdate(
+    type: RealtimeEventType,
+    update: AgentExecutionUpdate
+  ): void {
+    this.emit(type, update);
+  }
 }
 
 /**
@@ -212,10 +243,31 @@ export class SocketManager {
       });
 
       // Handle subscription to transaction updates — requires prior authentication
-      socket.on("subscribe:transactions", (transactionId?: string) => {
+      socket.on("subscribe:transactions", async (transactionId?: string) => {
         if (!client.userId) {
-          socket.emit("error", { message: "Authentication required before subscribing." });
-          logger.warn(`Unauthenticated client ${socket.id} attempted to subscribe to transactions`);
+          socket.emit("error", {
+            message: "Authentication required before subscribing.",
+          });
+          logger.warn(
+            `Unauthenticated client ${socket.id} attempted to subscribe to transactions`
+          );
+          return;
+        }
+        const abuseDecision = await evaluateRealtimeAbusePolicy(
+          "subscribe:transactions",
+          {
+            userId: client.userId,
+            sessionId: socket.id,
+            ipAddress: socket.handshake.address,
+          },
+          { transactionId }
+        );
+        if (!abuseDecision.allowed) {
+          socket.emit("error", {
+            message: abuseDecision.reason,
+            code: abuseDecision.policyId,
+            retryAfterMs: abuseDecision.retryAfterMs,
+          });
           return;
         }
         if (transactionId) {
@@ -227,10 +279,31 @@ export class SocketManager {
       });
 
       // Handle subscription to bot updates — requires prior authentication
-      socket.on("subscribe:bot-alerts", (botId?: string) => {
+      socket.on("subscribe:bot-alerts", async (botId?: string) => {
         if (!client.userId) {
-          socket.emit("error", { message: "Authentication required before subscribing." });
-          logger.warn(`Unauthenticated client ${socket.id} attempted to subscribe to bot alerts`);
+          socket.emit("error", {
+            message: "Authentication required before subscribing.",
+          });
+          logger.warn(
+            `Unauthenticated client ${socket.id} attempted to subscribe to bot alerts`
+          );
+          return;
+        }
+        const abuseDecision = await evaluateRealtimeAbusePolicy(
+          "subscribe:bot-alerts",
+          {
+            userId: client.userId,
+            sessionId: socket.id,
+            ipAddress: socket.handshake.address,
+          },
+          { botId }
+        );
+        if (!abuseDecision.allowed) {
+          socket.emit("error", {
+            message: abuseDecision.reason,
+            code: abuseDecision.policyId,
+            retryAfterMs: abuseDecision.retryAfterMs,
+          });
           return;
         }
         if (botId) {
@@ -260,7 +333,9 @@ export class SocketManager {
 
       // Handle errors
       socket.on("error", (error: Error) => {
-        logger.error(`Socket error for ${socket.id}:`, { error: error.message });
+        logger.error(`Socket error for ${socket.id}:`, {
+          error: error.message,
+        });
       });
     });
   }
@@ -306,12 +381,9 @@ export class SocketManager {
     );
 
     // Bot alerts
-    this.eventEmitter.on(
-      RealtimeEventType.BOT_ALERT,
-      (alert: BotAlert) => {
-        this.broadcastBotAlert(alert);
-      }
-    );
+    this.eventEmitter.on(RealtimeEventType.BOT_ALERT, (alert: BotAlert) => {
+      this.broadcastBotAlert(alert);
+    });
 
     this.eventEmitter.on(
       RealtimeEventType.BOT_STATUS_CHANGE,
@@ -320,12 +392,9 @@ export class SocketManager {
       }
     );
 
-    this.eventEmitter.on(
-      RealtimeEventType.BOT_ERROR,
-      (alert: BotAlert) => {
-        this.broadcastBotError(alert);
-      }
-    );
+    this.eventEmitter.on(RealtimeEventType.BOT_ERROR, (alert: BotAlert) => {
+      this.broadcastBotError(alert);
+    });
 
     // Deployment status
     this.eventEmitter.on(
@@ -334,6 +403,19 @@ export class SocketManager {
         this.broadcastDeploymentStatus(status);
       }
     );
+
+    // Agent execution updates
+    [
+      RealtimeEventType.AGENT_EXECUTION_STARTED,
+      RealtimeEventType.AGENT_STEP_COMPLETED,
+      RealtimeEventType.AGENT_EXECUTION_COMPLETED,
+    RealtimeEventType.AGENT_EXECUTION_FAILED,
+    RealtimeEventType.AGENT_APPROVAL_REQUIRED,
+  ].forEach((eventType) => {
+    this.eventEmitter.on(eventType, (update: AgentExecutionUpdate) => {
+      this.broadcastAgentUpdate(eventType, update);
+    });
+  });
   }
 
   /**
@@ -343,7 +425,9 @@ export class SocketManager {
     if (update.userId) {
       this.io.to(`user:${update.userId}`).emit("transaction:update", update);
     }
-    this.io.to(`transaction:${update.transactionId}`).emit("transaction:update", update);
+    this.io
+      .to(`transaction:${update.transactionId}`)
+      .emit("transaction:update", update);
   }
 
   /**
@@ -367,7 +451,9 @@ export class SocketManager {
     if (update.userId) {
       this.io.to(`user:${update.userId}`).emit("swap:status", update);
     }
-    this.io.to(`transaction:${update.transactionId}`).emit("swap:status", update);
+    this.io
+      .to(`transaction:${update.transactionId}`)
+      .emit("swap:status", update);
   }
 
   /**
@@ -388,9 +474,13 @@ export class SocketManager {
    */
   private broadcastBotStatusChange(statusChange: BotStatusChange): void {
     if (statusChange.userId) {
-      this.io.to(`user:${statusChange.userId}`).emit("bot:status-change", statusChange);
+      this.io
+        .to(`user:${statusChange.userId}`)
+        .emit("bot:status-change", statusChange);
     }
-    this.io.to(`bot:${statusChange.botId}`).emit("bot:status-change", statusChange);
+    this.io
+      .to(`bot:${statusChange.botId}`)
+      .emit("bot:status-change", statusChange);
     this.io.to("bot:all").emit("bot:status-change", statusChange);
   }
 
@@ -415,6 +505,19 @@ export class SocketManager {
       this.io.to(`user:${status.userId}`).emit("deployment:status", status);
     }
     this.io.emit("deployment:status", status);
+  }
+
+  /**
+   * Broadcast agent execution update
+   */
+  private broadcastAgentUpdate(
+    eventType: string,
+    update: AgentExecutionUpdate
+  ): void {
+    if (update.userId) {
+      this.io.to(`user:${update.userId}`).emit(eventType, update);
+    }
+    this.io.to(`execution:${update.executionId}`).emit(eventType, update);
   }
 
   /**

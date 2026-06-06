@@ -4,6 +4,7 @@ import { toolRegistry } from "../registry/ToolRegistry";
 import { WorkflowPlan, WorkflowStep } from "../types";
 import { parseSorobanIntent } from "./sorobanIntent";
 import { HashedPlan, planHashService } from "./planHash";
+import { riskEngine, RiskEngine } from "../risk/RiskEngine";
 import logger from "../../config/logger";
 import { RiskLevel } from "../../Auth/userPreferences.entity";
 
@@ -35,6 +36,7 @@ export interface PlanStep extends WorkflowStep {
   dependencies?: number[];
   estimatedDuration?: number;
   rollbackAction?: WorkflowStep;
+  requiresApproval?: boolean;
 }
 
 export interface ExecutionPlan {
@@ -151,24 +153,41 @@ Output JSON format:
     context: PlannerContext
   ): ExecutionPlan {
     const planId = `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const steps: PlanStep[] = workflowPlan.workflow.map((step, index) => ({
-      stepNumber: index + 1,
-      action: step.action,
-      payload: step.payload,
-      description: this.generateStepDescription(step),
-      estimatedDuration: 3000,
-      dependencies: [],
-    }));
+    const steps: PlanStep[] = workflowPlan.workflow.map((step, index) => {
+      const isHighRisk = this.isHighRiskAction(step);
+      return {
+        stepNumber: index + 1,
+        action: step.action,
+        payload: step.payload,
+        description: this.generateStepDescription(step),
+        estimatedDuration: 3000,
+        dependencies: [],
+        requiresApproval: isHighRisk,
+      };
+    });
+
+    const riskLevel = this.assessRiskLevel(steps);
 
     return {
       planId,
       steps,
       totalSteps: steps.length,
       estimatedDuration: steps.length * 3000,
-      riskLevel: this.assessRiskLevel(steps),
-      requiresApproval: steps.length > 3,
+      riskLevel,
+      requiresApproval: riskLevel === "high" || steps.some(s => s.requiresApproval),
       summary: `Plan for "${context.userInput}"`,
     };
+  }
+
+  private isHighRiskAction(step: WorkflowStep): boolean {
+    const highRiskActions = ["swap", "transfer", "withdraw", "approve"];
+    if (highRiskActions.includes(step.action.toLowerCase())) {
+      // Check for large amounts if available
+      const amount = (step.payload as any)?.amount;
+      if (amount && parseFloat(amount) > 1000) return true;
+      return true; // Default high risk for these actions for now
+    }
+    return false;
   }
 
   private generateStepDescription(step: WorkflowStep): string {
@@ -176,9 +195,24 @@ Output JSON format:
   }
 
   private assessRiskLevel(steps: PlanStep[]): "low" | "medium" | "high" {
-    if (steps.length >= 5) return "high";
-    if (steps.length >= 2) return "medium";
-    return "low";
+    if (steps.length === 0) return "low";
+
+    // Score each step and take the highest tier across the plan
+    let maxScore = 0;
+    for (const step of steps) {
+      const assessment = riskEngine.assess({
+        userId: "planner", // no userId at plan-build time; prefs injected via context
+        action: step.action,
+        payload: step.payload,
+        // marketData not available at planning time — engine uses conservative defaults
+      });
+      if (assessment.score > maxScore) maxScore = assessment.score;
+    }
+
+    // Map composite score to the 3-level scale used by ExecutionPlan
+    return RiskEngine.toPreferenceTier(
+      maxScore >= 70 ? "critical" : maxScore >= 50 ? "high" : maxScore >= 30 ? "medium" : "low"
+    );
   }
 
   private validatePlan(plan: ExecutionPlan): PlanValidation {

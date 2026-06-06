@@ -3,11 +3,15 @@ import { toolRegistry } from "../registry/ToolRegistry";
 import { ToolResult } from "../registry/ToolMetadata";
 import { ExecutionPlan, PlanStep } from "./AgentPlanner";
 import { HashedPlan, planHashService } from "./planHash";
+import { policyEnforcer } from "../policy/PolicyEnforcer";
+import { durableExecutor } from "./DurableExecutor";
+import { ExecutionStatus } from "./DurableExecution.entity";
 import logger from "../../config/logger";
 
 export interface ExecutionResult {
   planId: string;
-  status: "success" | "partial" | "failed";
+  executionId?: string;
+  status: "success" | "partial" | "failed" | "running";
   completedSteps: number;
   totalSteps: number;
   stepResults: StepResult[];
@@ -34,6 +38,7 @@ export interface ExecutionOptions {
   verifyHash?: boolean;
   publicKey?: string;
   strictMode?: boolean;
+  durable?: boolean;
 }
 
 export class PlanExecutor {
@@ -45,15 +50,14 @@ export class PlanExecutor {
     options: ExecutionOptions = {}
   ): Promise<ExecutionResult> {
     const startTime = Date.now();
-    const stepResults: StepResult[] = [];
-    let completedSteps = 0;
-
+    
     logger.info("Starting plan execution", {
       planId: plan.planId,
       userId,
       totalSteps: plan.totalSteps,
       dryRun: options.dryRun || false,
       hashVerification: options.verifyHash || false,
+      durable: options.durable || true,
     });
 
     // Verify plan hash before execution if enabled
@@ -68,6 +72,23 @@ export class PlanExecutor {
         );
       }
     }
+
+    // Use durable execution by default unless dryRun is requested
+    if (options.durable !== false && !options.dryRun) {
+      const execution = await durableExecutor.startExecution(plan, userId);
+      return {
+        planId: plan.planId,
+        executionId: execution.id,
+        status: "running",
+        completedSteps: 0,
+        totalSteps: plan.totalSteps,
+        stepResults: [],
+        duration: 0,
+      };
+    }
+
+    const stepResults: StepResult[] = [];
+    let completedSteps = 0;
 
     try {
       for (const step of plan.steps) {
@@ -148,6 +169,23 @@ export class PlanExecutor {
             message: "Dry run - not executed",
             data: { dryRun: true },
           },
+          duration: Date.now() - startTime,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Hard policy gate — LLM output is untrusted; every step must pass before execution
+      const policy = await policyEnforcer.enforce({
+        userId,
+        action: step.action,
+        payload: step.payload,
+      });
+      if (!policy.allowed) {
+        return {
+          stepNumber: step.stepNumber,
+          action: step.action,
+          status: "failed",
+          error: `Policy denied: ${policy.reason}`,
           duration: Date.now() - startTime,
           timestamp: new Date().toISOString(),
         };

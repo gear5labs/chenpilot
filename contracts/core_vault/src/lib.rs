@@ -7,6 +7,12 @@ const TIMELOCK_LEDGERS: u32 = 720;
 // 48 hours at 5s/ledger
 const FORCE_EXIT_DELAY: u64 = 172_800;
 
+// TTL for force-exit requests: ~50 hours (360000 ledgers at 5s/ledger)
+const FORCE_EXIT_TTL_LEDGERS: u32 = 360_000;
+
+// TTL for deposit records: ~7 days (persistent, but with TTL extension for active accounts)
+const DEPOSIT_TTL_LEDGERS: u32 = 1_209_600;
+
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -76,7 +82,10 @@ impl CoreVaultContract {
         let current: i128 = env.storage().persistent()
             .get(&DataKey::Deposit(user.clone()))
             .unwrap_or(0);
-        env.storage().persistent().set(&DataKey::Deposit(user), &(current + amount));
+        let new_balance = current + amount;
+        
+        // Store deposit with TTL extension to keep active accounts fresh
+        env.storage().persistent().set_with_ttl(&DataKey::Deposit(user), &new_balance, DEPOSIT_TTL_LEDGERS);
     }
 
     // ── Force Exit ────────────────────────────────────────────────────────────
@@ -103,7 +112,10 @@ impl CoreVaultContract {
 
         let eligible_at = env.ledger().timestamp() + FORCE_EXIT_DELAY;
         let req = ForceExitRequest { amount: balance, eligible_at };
-        env.storage().persistent().set(&DataKey::ForceExit(user), &req);
+        
+        // Store force-exit with TTL to auto-expire unclaimed requests after ~50 hours
+        // This prevents stale requests from accumulating indefinitely
+        env.storage().persistent().set_with_ttl(&DataKey::ForceExit(user), &req, FORCE_EXIT_TTL_LEDGERS);
     }
 
     /// Complete the force-exit after the 48-hour challenge period has passed.

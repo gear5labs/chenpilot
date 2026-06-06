@@ -1,6 +1,10 @@
 #![no_std]
 use soroban_sdk::{contract, contractimpl, contracttype, Env, Address, BytesN, Vec};
 
+// TTL for vote data: ~7 days (1_209_600 ledgers at 5s/ledger)
+// Votes decay over time to encourage fresh strategy voting and prevent stale governance
+const VOTE_TTL_LEDGERS: u32 = 1_209_600;
+
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -66,10 +70,10 @@ impl StrategyRegistryContract {
             panic!("Pool is not verified");
         }
 
-        // Cast vote
+        // Cast vote with TTL to decay old votes naturally
         let mut votes: u32 = env.storage().instance().get(&DataKey::Votes(pool_id.clone())).unwrap_or(0);
         votes += 1;
-        env.storage().instance().set(&DataKey::Votes(pool_id.clone()), &votes);
+        env.storage().instance().set_with_ttl(&DataKey::Votes(pool_id.clone()), &votes, VOTE_TTL_LEDGERS);
 
         // Keep track of voted pools to determine the winner
         let mut voted_pools: Vec<BytesN<32>> = env.storage().instance().get(&DataKey::VotedPools).unwrap_or(Vec::new(&env));
