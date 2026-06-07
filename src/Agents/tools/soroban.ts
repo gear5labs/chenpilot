@@ -5,6 +5,7 @@ import {
   InvokeContractParams,
   SorobanNetwork,
 } from "../../services/sorobanService";
+import { transactionLifecycleService } from "../../transactions/TransactionLifecycle.service";
 
 interface SorobanInvokePayload extends Record<string, unknown> {
   network?: SorobanNetwork;
@@ -72,7 +73,7 @@ export class SorobanTool extends BaseTool<SorobanInvokePayload> {
     examples: [
       "Invoke soroban contract CABC... method stake args [100] on testnet",
       "Call contract method claim on mainnet for CXYZ...",
-      "Borrow from contract CABC... method borrow args [\"USDC\", 50]",
+      'Borrow from contract CABC... method borrow args ["USDC", 50]',
     ],
     category: "soroban",
     version: "1.0.0",
@@ -81,7 +82,13 @@ export class SorobanTool extends BaseTool<SorobanInvokePayload> {
     permissions: ["user"],
   };
 
-  async execute(payload: SorobanInvokePayload): Promise<ToolResult> {
+  async execute(payload: SorobanInvokePayload, userId: string): Promise<ToolResult> {
+    const lifecycle = await transactionLifecycleService.create(
+      userId,
+      "soroban",
+      { contractId: payload.contractId, method: payload.method, network: payload.network }
+    );
+
     try {
       const params: InvokeContractParams = {
         network: payload.network || "testnet",
@@ -94,13 +101,28 @@ export class SorobanTool extends BaseTool<SorobanInvokePayload> {
         timeoutMs: payload.timeoutMs,
       };
 
+      // Simulation phase
+      await transactionLifecycleService.transition(lifecycle.id, "simulating");
+
+      // Execution phase (invokeContract runs simulation + optional signing)
+      await transactionLifecycleService.transition(lifecycle.id, "executing");
+
       const result = await invokeContract(params);
+
+      await transactionLifecycleService.transition(lifecycle.id, "confirmed", {
+        metadata: { contractId: params.contractId, method: params.method },
+      });
 
       return this.createSuccessResult("soroban_invoke", {
         payload: params,
         result,
+        lifecycleId: lifecycle.id,
       });
     } catch (error) {
+      await transactionLifecycleService.fail(
+        lifecycle.id,
+        error instanceof Error ? error.message : "Unknown error"
+      );
       return this.createErrorResult(
         "soroban_invoke",
         `Soroban invocation failed: ${

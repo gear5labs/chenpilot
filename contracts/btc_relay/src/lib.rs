@@ -4,6 +4,10 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, Vec,
 };
 
+// TTL for claimed transaction records: ~30 days (6_048_000 ledgers at 5s/ledger)
+// Keeps transaction history available for audit while allowing old records to expire
+const CLAIMED_TX_TTL_LEDGERS: u32 = 6_048_000;
+
 // ---------------------------------------------------------------------------
 // BtcCrypto sub-contract client
 // Heavy crypto helpers (double-SHA256, Merkle, PoW) live in btc_relay_crypto
@@ -150,8 +154,9 @@ impl BtcRelayContract {
             panic!("merkle proof invalid: tx not in block");
         }
 
-        // --- 6. Mark as claimed ---
-        env.storage().persistent().set(&claimed_key, &true);
+        // --- 6. Mark as claimed with TTL ---
+        // Store claimed record with TTL to maintain audit trail while expiring old records
+        env.storage().persistent().set_with_ttl(&claimed_key, &true, CLAIMED_TX_TTL_LEDGERS);
 
         // --- 7. Emit success event ---
         env.events().publish(

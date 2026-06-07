@@ -6,52 +6,52 @@ export interface TransactionNotificationData {
    * Transaction hash
    */
   hash: string;
-  
+
   /**
    * Whether the transaction was successful
    */
   successful: boolean;
-  
+
   /**
    * Amount transferred
    */
   amount: string;
-  
+
   /**
    * Asset code (e.g., "USDC", "XLM")
    */
   asset: string;
-  
+
   /**
    * Source account address
    */
   from: string;
-  
+
   /**
    * Destination account address
    */
   to: string;
-  
+
   /**
    * Transaction timestamp (ISO string or Unix timestamp)
    */
   timestamp: string | number;
-  
+
   /**
    * Transaction fee in XLM
    */
   fee?: string;
-  
+
   /**
    * Transaction memo
    */
   memo?: string;
-  
+
   /**
    * User ID for the notification
    */
   userId?: string;
-  
+
   /**
    * Ledger number when transaction was confirmed
    */
@@ -101,21 +101,21 @@ export interface BotNotificationConfig {
    * Enable Telegram notifications
    */
   telegramEnabled: boolean;
-  
+
   /**
    * Enable Discord notifications
    */
   discordEnabled: boolean;
-  
+
   /**
    * Minimum confirmations before sending notification
    */
   minConfirmations: number;
-  
+
   /**
    * Notification template
    */
-  template?: 'minimal' | 'standard' | 'detailed';
+  template?: "minimal" | "standard" | "detailed";
 }
 
 /**
@@ -123,41 +123,41 @@ export interface BotNotificationConfig {
  */
 export interface UserNotificationPreferences {
   userId: string;
-  
+
   /**
    * User's Telegram chat ID
    */
   telegramChatId?: string;
-  
+
   /**
    * User's Discord user ID
    */
   discordUserId?: string;
-  
+
   /**
    * Enable transaction notifications
    */
   transactionNotifications: boolean;
-  
+
   /**
    * Enable price alerts
    */
   priceAlerts: boolean;
-  
+
   /**
    * Enable general announcements
    */
   announcements: boolean;
-  
+
   /**
    * Minimum transaction value to notify (in USD)
    */
   minTransactionValue?: number;
-  
+
   /**
    * Preferred currency for reports (USD, XLM, BTC)
    */
-  preferredCurrency?: 'USD' | 'XLM' | 'BTC';
+  preferredCurrency?: "USD" | "XLM" | "BTC";
 }
 
 /**
@@ -168,8 +168,8 @@ export interface PriceAlert {
   userId: string;
   assetCode: string;
   targetPrice: number;
-  currency: 'USD' | 'XLM' | 'BTC';
-  condition: 'above' | 'below';
+  currency: "USD" | "XLM" | "BTC";
+  condition: "above" | "below";
   createdAt: string;
   triggered: boolean;
 }
@@ -195,3 +195,60 @@ export interface TrendingAsset {
   holders: number;
   trustlines: number;
 }
+
+/**
+ * Generic button definition that works for both Telegram and Discord
+ */
+export interface Button {
+  /**
+   * Button text label
+   */
+  label: string;
+  /**
+   * Unique action ID used to identify the button when pressed
+   */
+  id: string;
+  /**
+   * Button style (used by Discord, ignored by Telegram)
+   */
+  style?: 'primary' | 'secondary' | 'success' | 'danger' | 'link';
+  /**
+   * URL for link buttons
+   */
+  url?: string;
+}
+
+/**
+ * Generic button interaction context
+ */
+export interface ButtonInteraction {
+  /**
+   * The platform ('discord' or 'telegram')
+   */
+  platform: 'discord' | 'telegram';
+  /**
+   * User ID of the person who pressed the button
+   */
+  userId: string;
+  /**
+   * The ID of the pressed button
+   */
+  buttonId: string;
+  /**
+   * The chat/channel ID where the button was pressed
+   */
+  chatId: string;
+  /**
+   * Platform-specific interaction object
+   */
+  raw: any;
+  /**
+   * Reply to the button interaction
+   */
+  reply: (message: string) => Promise<void>;
+}
+
+/**
+ * Handler function type for button interactions
+ */
+export type ButtonHandler = (interaction: ButtonInteraction) => Promise<void>;
