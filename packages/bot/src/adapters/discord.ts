@@ -1064,22 +1064,23 @@ export class DiscordAdapter {
         if (!arg || !(SUPPORTED_CURRENCIES as readonly string[]).includes(arg)) {
           return message.reply(`Usage: !currency <USD|XLM|BTC>\nCurrent: **${this.userCurrency.get(userId) ?? 'USD'}**`);
         }
-        this.userCurrency.set(userId, arg);
-        return message.reply(`✅ Report currency set to **${arg}**`);
-      }
 
-      // #118: !report command — portfolio report in preferred currency
-      if (message.content.startsWith('!report')) {
-        const currency = this.userCurrency.get(userId) ?? 'USD';
-        await message.reply(`⏳ Fetching portfolio report in **${currency}**...`);
-        try {
-          const res = await fetch(`${BACKEND_URL}/api/portfolio/${userId}?currency=${currency}`);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = await res.json() as { totalValue: number; assets: { code: string; balance: number; value: number }[] };
-          let reply = `📊 **Portfolio Report (${currency})**\n\n`;
-          reply += `**Total Value:** ${data.totalValue.toFixed(4)} ${currency}\n\n`;
-          for (const a of data.assets) {
-            reply += `• **${a.code}**: ${a.balance} ≈ ${a.value.toFixed(4)} ${currency}\n`;
+        // #118: !report command — portfolio report in preferred currency
+        if (message.content.startsWith('!report')) {
+          const currency = this.userCurrency.get(userId) ?? 'USD';
+          await message.reply(`⏳ Fetching portfolio report in **${currency}**...`);
+          try {
+            const res = await fetch(`${BACKEND_URL}/api/portfolio/${userId}?currency=${currency}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json() as { totalValue: number; assets: { code: string; balance: number; value: number }[] };
+            let reply = `📊 **Portfolio Report (${currency})**\n\n`;
+            reply += `**Total Value:** ${data.totalValue.toFixed(4)} ${currency}\n\n`;
+            for (const a of data.assets) {
+              reply += `• **${a.code}**: ${a.balance} ≈ ${a.value.toFixed(4)} ${currency}\n`;
+            }
+            return message.reply(reply);
+          } catch {
+            return message.reply(`❌ Could not fetch portfolio. Make sure your account is registered.`);
           }
 
           // #120: !advanced — role-gated command example
@@ -1112,32 +1113,44 @@ export class DiscordAdapter {
         if (!(SUPPORTED_CURRENCIES as readonly string[]).includes(currency)) {
           return message.reply(`❌ Currency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`);
         }
-        const alertId = `${userId}-${assetCode}-${Date.now()}`;
-        const alert: PriceAlert = { id: alertId, userId, assetCode: assetCode.toUpperCase(), targetPrice, currency, condition, createdAt: new Date().toISOString(), triggered: false };
-        this.priceAlerts.set(alertId, alert);
-        // Register channel for DM delivery
-        if (!this.userChannels.has(userId)) this.userChannels.set(userId, message.channelId);
-        return message.reply(`🔔 Alert set: notify me when **${assetCode.toUpperCase()}** is ${condition} **${targetPrice} ${currency}**`);
-      }
 
-      // #119: !alerts — list active alerts
-      if (message.content === '!alerts') {
-        const userAlerts = [...this.priceAlerts.values()].filter(a => a.userId === userId && !a.triggered);
-        if (userAlerts.length === 0) return message.reply('📭 You have no active price alerts. Use `!alert` to set one.');
-        let reply = `🔔 **Your Active Alerts**\n\n`;
-        for (const a of userAlerts) {
-          reply += `• **${a.assetCode}** ${a.condition} ${a.targetPrice} ${a.currency} (ID: \`${a.id.slice(-6)}\`)\n`;
+        // #119: !alert command — set a price alert
+        if (message.content.startsWith('!alert')) {
+          const args = message.content.split(' ').slice(1);
+          if (args.length < 3) {
+            return message.reply('Usage: !alert <assetCode> <above|below> <price> [USD|XLM|BTC]\nExample: !alert XLM above 0.15 USD');
+          }
+          const [assetCode, conditionRaw, priceRaw, currencyRaw] = args;
+          const condition = conditionRaw.toLowerCase() as 'above' | 'below';
+          if (condition !== 'above' && condition !== 'below') {
+            return message.reply('❌ Condition must be `above` or `below`.');
+          }
+          const targetPrice = parseFloat(priceRaw);
+          if (isNaN(targetPrice) || targetPrice <= 0) {
+            return message.reply('❌ Price must be a positive number.');
+          }
+          const currency = (currencyRaw?.toUpperCase() ?? this.userCurrency.get(userId) ?? 'USD') as 'USD' | 'XLM' | 'BTC';
+          if (!SUPPORTED_CURRENCIES.includes(currency as any)) {
+            return message.reply(`❌ Currency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`);
+          }
+          const alertId = `${userId}-${assetCode}-${Date.now()}`;
+          const alert: PriceAlert = { id: alertId, userId, assetCode: assetCode.toUpperCase(), targetPrice, currency, condition, createdAt: new Date().toISOString(), triggered: false };
+          this.priceAlerts.set(alertId, alert);
+          // Register channel for DM delivery
+          if (!this.userChannels.has(userId)) this.userChannels.set(userId, message.channelId);
+          return message.reply(`🔔 Alert set: notify me when **${assetCode.toUpperCase()}** is ${condition} **${targetPrice} ${currency}**`);
         }
-        return message.reply(reply);
-      }
 
-      // #120: !advanced — role-gated command example
-      if (message.content.startsWith('!advanced')) {
-        if (!this.hasAdvancedRole(message)) {
-          return message.reply(`🔒 This command requires one of the following roles: **${ADVANCED_ROLE_NAMES.join(', ')}**`);
+        // #119: !alerts — list active alerts
+        if (message.content === '!alerts') {
+          const userAlerts = [...this.priceAlerts.values()].filter(a => a.userId === userId && !a.triggered);
+          if (userAlerts.length === 0) return message.reply('📭 You have no active price alerts. Use `!alert` to set one.');
+          let reply = `🔔 **Your Active Alerts**\n\n`;
+          for (const a of userAlerts) {
+            reply += `• **${a.assetCode}** ${a.condition} ${a.targetPrice} ${a.currency} (ID: \`${a.id.slice(-6)}\`)\n`;
+          }
+          return message.reply(reply);
         }
-        return message.reply('✅ Advanced command executed. (Role check passed)');
-      }
 
           // #121: !discover — suggest trending Stellar assets
           if (message.content === "!discover") {
