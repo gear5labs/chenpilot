@@ -4,6 +4,10 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, token,
 };
 
+// TTL for swap state: swaps auto-expire after the expiry ledger + grace period
+// Add 7 days (1_209_600 ledgers at 5s/ledger) beyond expiry for post-claim/refund records
+const SWAP_TTL_GRACE_LEDGERS: u32 = 1_209_600;
+
 // ---------------------------------------------------------------------------
 // Storage keys
 // ---------------------------------------------------------------------------
@@ -95,7 +99,10 @@ impl HtlcContract {
             expiry_ledger,
             status: SwapStatus::Active,
         };
-        env.storage().persistent().set(&DataKey::Swap(swap_id.clone()), &swap);
+        
+        // Calculate TTL: expiry + grace period for post-completion records
+        let ttl_ledgers = expiry_ledger.saturating_add(SWAP_TTL_GRACE_LEDGERS);
+        env.storage().persistent().set_with_ttl(&DataKey::Swap(swap_id.clone()), &swap, ttl_ledgers);
 
         env.events().publish((symbol_short!("SwapInit"),), swap_id.clone());
         swap_id
@@ -134,7 +141,10 @@ impl HtlcContract {
         }
 
         swap.status = SwapStatus::Claimed;
-        env.storage().persistent().set(&DataKey::Swap(swap_id.clone()), &swap);
+        
+        // Extend TTL to keep claimed record queryable for grace period
+        let ttl_ledgers = swap.expiry_ledger.saturating_add(SWAP_TTL_GRACE_LEDGERS);
+        env.storage().persistent().set_with_ttl(&DataKey::Swap(swap_id.clone()), &swap, ttl_ledgers);
 
         // Release funds to recipient
         let token_client = token::Client::new(&env, &swap.token);
@@ -161,7 +171,10 @@ impl HtlcContract {
         swap.initiator.require_auth();
 
         swap.status = SwapStatus::Refunded;
-        env.storage().persistent().set(&DataKey::Swap(swap_id.clone()), &swap);
+        
+        // Extend TTL to keep refunded record queryable for grace period
+        let ttl_ledgers = swap.expiry_ledger.saturating_add(SWAP_TTL_GRACE_LEDGERS);
+        env.storage().persistent().set_with_ttl(&DataKey::Swap(swap_id.clone()), &swap, ttl_ledgers);
 
         // Return funds to initiator
         let token_client = token::Client::new(&env, &swap.token);

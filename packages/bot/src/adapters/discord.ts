@@ -6,6 +6,12 @@ import {
   ChannelType,
   ActivityType,
   GuildMember,
+  ButtonBuilder,
+  ButtonStyle,
+  ActionRowBuilder,
+  Interaction,
+} from "discord.js";
+import { TransactionNotificationData, PriceAlert, TrendingAsset, Button, ButtonInteraction as GenericButtonInteraction, ButtonHandler } from "../types";
   ChatInputCommandInteraction,
   Interaction,
   REST,
@@ -130,6 +136,8 @@ export class DiscordAdapter {
   private alertCheckInterval?: ReturnType<typeof setInterval>;
   // #128: Market overview digest interval
   private marketOverviewInterval?: ReturnType<typeof setInterval>;
+  // Button handlers map: buttonId -> ButtonHandler
+  private buttonHandlers: Map<string, ButtonHandler> = new Map();
   // #114: AI agent client
   private agentClient: AgentClient;
 
@@ -369,6 +377,42 @@ export class DiscordAdapter {
       });
     });
 
+    // Handle button interactions
+    this.client.on("interactionCreate", async (interaction: Interaction) => {
+      if (!interaction.isButton()) return;
+
+      const buttonId = interaction.customId;
+      const handler = this.buttonHandlers.get(buttonId);
+
+      const genericInteraction: GenericButtonInteraction = {
+        platform: 'discord',
+        userId: interaction.user.id,
+        buttonId: buttonId,
+        chatId: interaction.channelId || '',
+        raw: interaction,
+        reply: async (message: string) => {
+          if (interaction.deferred || interaction.replied) {
+            await interaction.followUp(message);
+          } else {
+            await interaction.reply(message);
+          }
+        }
+      };
+
+      if (handler) {
+        try {
+          await handler(genericInteraction);
+        } catch (error) {
+          console.error('Error handling button interaction:', error);
+          if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply('❌ An error occurred while processing your button click.');
+          }
+        }
+      } else {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply('⚠️ No handler found for this button.');
+        }
+      }
     this.client.on(
       "messageCreate",
       withPerformanceProfiling(
@@ -867,6 +911,30 @@ export class DiscordAdapter {
               return;
             }
 
+        if (message.content === '!buttons') {
+          await withPerformanceProfiling('!buttons', 'discord', userId, async () => {
+            // Example buttons
+            const buttons: Button[] = [
+              { label: 'Primary', id: 'primary-btn', style: 'primary' },
+              { label: 'Success', id: 'success-btn', style: 'success' },
+              { label: 'Open Dashboard', id: 'dashboard-btn', url: DASHBOARD_URL }
+            ];
+
+            // Register example handlers
+            this.registerButtonHandler('primary-btn', async (interaction) => {
+              await interaction.reply('Primary button pressed!');
+            });
+            this.registerButtonHandler('success-btn', async (interaction) => {
+              await interaction.reply('Success button pressed!');
+            });
+
+            await this.sendWithButtons(message.channelId, 'Try pressing these buttons!', buttons);
+          })();
+        }
+
+        // #148: /validate command for Stellar asset verification
+        if (message.content.startsWith('!validate')) {
+          await withPerformanceProfiling(commandName, 'discord', userId, async () => {
             const args = message.content.split(' ').slice(1);
             if (args.length < 3) {
               return message.reply('Usage: !swap <fromAsset> <toAsset> <amount>\nExample: !swap XLM USDC 100');
@@ -996,22 +1064,23 @@ export class DiscordAdapter {
         if (!arg || !(SUPPORTED_CURRENCIES as readonly string[]).includes(arg)) {
           return message.reply(`Usage: !currency <USD|XLM|BTC>\nCurrent: **${this.userCurrency.get(userId) ?? 'USD'}**`);
         }
-        this.userCurrency.set(userId, arg);
-        return message.reply(`✅ Report currency set to **${arg}**`);
-      }
 
-      // #118: !report command — portfolio report in preferred currency
-      if (message.content.startsWith('!report')) {
-        const currency = this.userCurrency.get(userId) ?? 'USD';
-        await message.reply(`⏳ Fetching portfolio report in **${currency}**...`);
-        try {
-          const res = await fetch(`${BACKEND_URL}/api/portfolio/${userId}?currency=${currency}`);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = await res.json() as { totalValue: number; assets: { code: string; balance: number; value: number }[] };
-          let reply = `📊 **Portfolio Report (${currency})**\n\n`;
-          reply += `**Total Value:** ${data.totalValue.toFixed(4)} ${currency}\n\n`;
-          for (const a of data.assets) {
-            reply += `• **${a.code}**: ${a.balance} ≈ ${a.value.toFixed(4)} ${currency}\n`;
+        // #118: !report command — portfolio report in preferred currency
+        if (message.content.startsWith('!report')) {
+          const currency = this.userCurrency.get(userId) ?? 'USD';
+          await message.reply(`⏳ Fetching portfolio report in **${currency}**...`);
+          try {
+            const res = await fetch(`${BACKEND_URL}/api/portfolio/${userId}?currency=${currency}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json() as { totalValue: number; assets: { code: string; balance: number; value: number }[] };
+            let reply = `📊 **Portfolio Report (${currency})**\n\n`;
+            reply += `**Total Value:** ${data.totalValue.toFixed(4)} ${currency}\n\n`;
+            for (const a of data.assets) {
+              reply += `• **${a.code}**: ${a.balance} ≈ ${a.value.toFixed(4)} ${currency}\n`;
+            }
+            return message.reply(reply);
+          } catch {
+            return message.reply(`❌ Could not fetch portfolio. Make sure your account is registered.`);
           }
 
           // #120: !advanced — role-gated command example
@@ -1044,32 +1113,44 @@ export class DiscordAdapter {
         if (!(SUPPORTED_CURRENCIES as readonly string[]).includes(currency)) {
           return message.reply(`❌ Currency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`);
         }
-        const alertId = `${userId}-${assetCode}-${Date.now()}`;
-        const alert: PriceAlert = { id: alertId, userId, assetCode: assetCode.toUpperCase(), targetPrice, currency, condition, createdAt: new Date().toISOString(), triggered: false };
-        this.priceAlerts.set(alertId, alert);
-        // Register channel for DM delivery
-        if (!this.userChannels.has(userId)) this.userChannels.set(userId, message.channelId);
-        return message.reply(`🔔 Alert set: notify me when **${assetCode.toUpperCase()}** is ${condition} **${targetPrice} ${currency}**`);
-      }
 
-      // #119: !alerts — list active alerts
-      if (message.content === '!alerts') {
-        const userAlerts = [...this.priceAlerts.values()].filter(a => a.userId === userId && !a.triggered);
-        if (userAlerts.length === 0) return message.reply('📭 You have no active price alerts. Use `!alert` to set one.');
-        let reply = `🔔 **Your Active Alerts**\n\n`;
-        for (const a of userAlerts) {
-          reply += `• **${a.assetCode}** ${a.condition} ${a.targetPrice} ${a.currency} (ID: \`${a.id.slice(-6)}\`)\n`;
+        // #119: !alert command — set a price alert
+        if (message.content.startsWith('!alert')) {
+          const args = message.content.split(' ').slice(1);
+          if (args.length < 3) {
+            return message.reply('Usage: !alert <assetCode> <above|below> <price> [USD|XLM|BTC]\nExample: !alert XLM above 0.15 USD');
+          }
+          const [assetCode, conditionRaw, priceRaw, currencyRaw] = args;
+          const condition = conditionRaw.toLowerCase() as 'above' | 'below';
+          if (condition !== 'above' && condition !== 'below') {
+            return message.reply('❌ Condition must be `above` or `below`.');
+          }
+          const targetPrice = parseFloat(priceRaw);
+          if (isNaN(targetPrice) || targetPrice <= 0) {
+            return message.reply('❌ Price must be a positive number.');
+          }
+          const currency = (currencyRaw?.toUpperCase() ?? this.userCurrency.get(userId) ?? 'USD') as 'USD' | 'XLM' | 'BTC';
+          if (!SUPPORTED_CURRENCIES.includes(currency as any)) {
+            return message.reply(`❌ Currency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`);
+          }
+          const alertId = `${userId}-${assetCode}-${Date.now()}`;
+          const alert: PriceAlert = { id: alertId, userId, assetCode: assetCode.toUpperCase(), targetPrice, currency, condition, createdAt: new Date().toISOString(), triggered: false };
+          this.priceAlerts.set(alertId, alert);
+          // Register channel for DM delivery
+          if (!this.userChannels.has(userId)) this.userChannels.set(userId, message.channelId);
+          return message.reply(`🔔 Alert set: notify me when **${assetCode.toUpperCase()}** is ${condition} **${targetPrice} ${currency}**`);
         }
-        return message.reply(reply);
-      }
 
-      // #120: !advanced — role-gated command example
-      if (message.content.startsWith('!advanced')) {
-        if (!this.hasAdvancedRole(message)) {
-          return message.reply(`🔒 This command requires one of the following roles: **${ADVANCED_ROLE_NAMES.join(', ')}**`);
+        // #119: !alerts — list active alerts
+        if (message.content === '!alerts') {
+          const userAlerts = [...this.priceAlerts.values()].filter(a => a.userId === userId && !a.triggered);
+          if (userAlerts.length === 0) return message.reply('📭 You have no active price alerts. Use `!alert` to set one.');
+          let reply = `🔔 **Your Active Alerts**\n\n`;
+          for (const a of userAlerts) {
+            reply += `• **${a.assetCode}** ${a.condition} ${a.targetPrice} ${a.currency} (ID: \`${a.id.slice(-6)}\`)\n`;
+          }
+          return message.reply(reply);
         }
-        return message.reply('✅ Advanced command executed. (Role check passed)');
-      }
 
           // #121: !discover — suggest trending Stellar assets
           if (message.content === "!discover") {
@@ -1865,5 +1946,74 @@ If you ever need help, just send \`!help\` or type \`!thread\` to start a suppor
 — *Chen Pilot Team*`;
 
     await sendMessage(finalTips);
+  }
+
+  /**
+   * Register a handler for button interactions
+   */
+  registerButtonHandler(buttonId: string, handler: ButtonHandler): void {
+    this.buttonHandlers.set(buttonId, handler);
+  }
+
+  /**
+   * Send a message with buttons to a specific channel
+   */
+  async sendWithButtons(channelId: string, content: string, buttons: Button[]): Promise<boolean> {
+    if (!this.client) {
+      console.warn("⚠️ Discord bot not initialized");
+      return false;
+    }
+
+    try {
+      const channel = this.client.channels.cache.get(channelId) as TextChannel;
+      if (!channel) {
+        console.warn(`⚠️ Channel ${channelId} not found`);
+        return false;
+      }
+
+      // Build the button components
+      const row = new ActionRowBuilder<ButtonBuilder>();
+
+      for (const btn of buttons) {
+        const button = new ButtonBuilder();
+
+        if (btn.url) {
+          button.setStyle(ButtonStyle.Link).setURL(btn.url);
+        } else {
+          button.setCustomId(btn.id);
+
+          // Map our generic style to Discord's ButtonStyle
+          switch (btn.style) {
+            case 'primary':
+              button.setStyle(ButtonStyle.Primary);
+              break;
+            case 'secondary':
+              button.setStyle(ButtonStyle.Secondary);
+              break;
+            case 'success':
+              button.setStyle(ButtonStyle.Success);
+              break;
+            case 'danger':
+              button.setStyle(ButtonStyle.Danger);
+              break;
+            default:
+              button.setStyle(ButtonStyle.Primary);
+          }
+        }
+
+        button.setLabel(btn.label);
+        row.addComponents(button);
+      }
+
+      await channel.send({
+        content: content,
+        components: [row]
+      });
+
+      return true;
+    } catch (error) {
+      console.error("Error sending message with buttons:", error);
+      return false;
+    }
   }
 }

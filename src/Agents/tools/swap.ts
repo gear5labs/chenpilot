@@ -7,6 +7,7 @@ import logger from "../../config/logger";
 import stellarPriceService from "../../services/stellarPrice.service";
 import { flashSwapRiskAnalyzer } from "../../services/flashSwapRiskAnalyzer";
 import { RedisLockService } from "../../services/lock";
+import { transactionLifecycleService } from "../../transactions/TransactionLifecycle.service";
 
 interface SwapPayload extends Record<string, unknown> {
   from: string;
@@ -91,6 +92,13 @@ export class SwapTool extends BaseTool<SwapPayload> {
   }
 
   async execute(payload: SwapPayload, userId: string): Promise<ToolResult> {
+    // Create lifecycle record at intent state
+    const lifecycle = await transactionLifecycleService.create(
+      userId,
+      "swap",
+      { from: payload.from, to: payload.to, amount: payload.amount }
+    );
+
     // Create a unique lock key for this user's trading operations
     const lockKey = `trade:${userId}`;
 
@@ -108,7 +116,7 @@ export class SwapTool extends BaseTool<SwapPayload> {
           lockKey,
           error: lockResult.error,
         });
-
+        await transactionLifecycleService.fail(lifecycle.id, "Trade lock not acquired — another trade in progress");
         return this.createErrorResult(
           "swap",
           "Another trade is currently in progress for your account. Please wait a moment and try again."
@@ -122,7 +130,7 @@ export class SwapTool extends BaseTool<SwapPayload> {
       });
 
       // Ensure lock is released when function completes or throws
-      const lockReleased = await this.executeWithLock(payload, userId, lockKey);
+      const lockReleased = await this.executeWithLock(payload, userId, lockKey, lifecycle.id);
 
       return lockReleased;
     } catch (error) {
@@ -130,6 +138,11 @@ export class SwapTool extends BaseTool<SwapPayload> {
         userId,
         error,
       });
+
+      await transactionLifecycleService.fail(
+        lifecycle.id,
+        error instanceof Error ? error.message : "Unknown error during swap"
+      );
 
       // Try to release lock if something went wrong
       try {
@@ -154,11 +167,13 @@ export class SwapTool extends BaseTool<SwapPayload> {
   private async executeWithLock(
     payload: SwapPayload,
     userId: string,
-    lockKey: string
+    lockKey: string,
+    lifecycleId: string
   ): Promise<ToolResult> {
     try {
       // Validate tokens
       if (payload.from === payload.to) {
+        await transactionLifecycleService.fail(lifecycleId, "Source and destination tokens must be different");
         return this.createErrorResult(
           "swap",
           "Source and destination tokens must be different"
@@ -169,13 +184,16 @@ export class SwapTool extends BaseTool<SwapPayload> {
       const destAsset = STELLAR_ASSETS[payload.to];
 
       if (!sourceAsset || !destAsset) {
+        await transactionLifecycleService.fail(lifecycleId, "Invalid token symbol");
         return this.createErrorResult(
           "swap",
           "Invalid token symbol. Supported: XLM, USDC, USDT"
         );
       }
 
-      // Get price quote (with caching)
+      // Simulation phase — price quote + risk analysis
+      await transactionLifecycleService.transition(lifecycleId, "simulating");
+
       const priceQuote = await stellarPriceService.getPrice(
         payload.from,
         payload.to,
@@ -199,6 +217,11 @@ export class SwapTool extends BaseTool<SwapPayload> {
 
       // Notify user of risks
       if (riskAnalysis.riskLevel === "critical") {
+        await transactionLifecycleService.fail(
+          lifecycleId,
+          `Critical sandwich attack risk: ${riskAnalysis.sandwichAttackRisk}`,
+          { riskAnalysis }
+        );
         return this.createErrorResult(
           "swap",
           `CRITICAL RISK: Swap blocked due to high sandwich attack risk (${(riskAnalysis.sandwichAttackRisk * 100).toFixed(1)}%). ${riskAnalysis.warnings.join(". ")}. Recommendations: ${riskAnalysis.recommendations.join(". ")}`
@@ -209,7 +232,11 @@ export class SwapTool extends BaseTool<SwapPayload> {
         logger.warn("High risk swap detected", { userId, riskAnalysis });
       }
 
-      // Get user's Stellar keypair
+      // Execution phase — build and sign transaction
+      await transactionLifecycleService.transition(lifecycleId, "executing", {
+        metadata: { estimatedOutput: priceQuote.estimatedOutput, riskLevel: riskAnalysis.riskLevel },
+      });
+
       const sourceKeypair = this.getStellarAccount(userId);
       const sourcePublicKey = sourceKeypair.publicKey();
 
@@ -221,17 +248,10 @@ export class SwapTool extends BaseTool<SwapPayload> {
         riskLevel: riskAnalysis.riskLevel,
       });
 
-      // Load source account to get sequence number
       const sourceAccount = await this.server.loadAccount(sourcePublicKey);
-
-      // Convert amount to Stellar format (7 decimal places)
       const sendAmount = payload.amount.toFixed(7);
-
-      // Calculate minimum destination amount with 1% slippage tolerance
       const minDestAmount = (priceQuote.estimatedOutput * 0.99).toFixed(7);
 
-      // Build transaction with path payment strict send
-      // This automatically finds the best path through Stellar's DEX
       const transaction = new StellarSdk.TransactionBuilder(sourceAccount, {
         fee: StellarSdk.BASE_FEE,
         networkPassphrase: config.stellar.networkPassphrase,
@@ -240,19 +260,29 @@ export class SwapTool extends BaseTool<SwapPayload> {
           StellarSdk.Operation.pathPaymentStrictSend({
             sendAsset: sourceAsset,
             sendAmount: sendAmount,
-            destination: sourcePublicKey, // Send to self (swap)
+            destination: sourcePublicKey,
             destAsset: destAsset,
-            destMin: minDestAmount, // Minimum acceptable amount with slippage
+            destMin: minDestAmount,
           })
         )
         .setTimeout(30)
         .build();
 
-      // Sign transaction
       transaction.sign(sourceKeypair);
 
-      // Submit to Stellar network
+      // Submission phase
+      await transactionLifecycleService.transition(lifecycleId, "submitting");
+
       const result = await this.server.submitTransaction(transaction);
+
+      // Confirmed
+      await transactionLifecycleService.transition(lifecycleId, "submitted", {
+        correlationId: result.hash,
+        metadata: { txHash: result.hash, ledger: result.ledger },
+      });
+      await transactionLifecycleService.transition(lifecycleId, "confirmed", {
+        metadata: { successful: result.successful },
+      });
 
       return this.createSuccessResult("swap", {
         from: payload.from,
@@ -264,6 +294,7 @@ export class SwapTool extends BaseTool<SwapPayload> {
         timestamp: new Date().toISOString(),
         ledger: result.ledger,
         successful: result.successful,
+        lifecycleId: lifecycleId,
         riskAnalysis: {
           level: riskAnalysis.riskLevel,
           sandwichAttackRisk: riskAnalysis.sandwichAttackRisk,
@@ -272,11 +303,11 @@ export class SwapTool extends BaseTool<SwapPayload> {
         },
       });
     } catch (error) {
-      logger.error("Error during swap execution with lock", {
-        userId,
-        error,
-      });
-
+      logger.error("Error during swap execution with lock", { userId, error });
+      await transactionLifecycleService.fail(
+        lifecycleId,
+        error instanceof Error ? error.message : "Unknown error"
+      );
       return this.createErrorResult(
         "swap",
         error instanceof Error
@@ -287,24 +318,13 @@ export class SwapTool extends BaseTool<SwapPayload> {
       // Always release the lock when done
       try {
         const released = await this.lockService.releaseLock(lockKey, userId);
-
         if (released) {
-          logger.info("Trade lock released successfully", {
-            userId,
-            lockKey,
-          });
+          logger.info("Trade lock released successfully", { userId, lockKey });
         } else {
-          logger.warn("Failed to release trade lock", {
-            userId,
-            lockKey,
-          });
+          logger.warn("Failed to release trade lock", { userId, lockKey });
         }
       } catch (releaseError) {
-        logger.error("Error releasing trade lock", {
-          userId,
-          lockKey,
-          error: releaseError,
-        });
+        logger.error("Error releasing trade lock", { userId, lockKey, error: releaseError });
       }
     }
   }

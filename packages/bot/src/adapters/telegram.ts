@@ -1,5 +1,5 @@
-import { Telegraf, Context } from "telegraf";
-import { TransactionNotificationData } from "../types";
+import { Telegraf } from "telegraf";
+import { TransactionNotificationData, Button, ButtonInteraction as GenericButtonInteraction, ButtonHandler } from "../types";
 import { createTrustlineOperation } from "@chen-pilot/sdk-core";
 import { searchFeatures, formatHelpMessage } from "../services/helpProvider";
 import { AssetVerificationService } from "../assetVerification";
@@ -62,6 +62,8 @@ export class TelegramAdapter {
   private defaultRateLimiter: RateLimiter;
   private strictRateLimiter: RateLimiter;
   private verificationService: AssetVerificationService;
+  // Button handlers map: buttonId -> ButtonHandler
+  private buttonHandlers: Map<string, ButtonHandler> = new Map();
   // #114: AI agent client
   private agentClient: AgentClient;
 
@@ -142,6 +144,38 @@ export class TelegramAdapter {
       return next();
     });
 
+    // Handle callback queries (button presses)
+    this.bot.on('callback_query', async (ctx: any) => {
+      const buttonId = ctx.callbackQuery.data;
+      const userId = String(ctx.from?.id || 'unknown');
+      const chatId = String(ctx.chat?.id || '');
+
+      const genericInteraction: GenericButtonInteraction = {
+        platform: 'telegram',
+        userId: userId,
+        buttonId: buttonId,
+        chatId: chatId,
+        raw: ctx,
+        reply: async (message: string) => {
+          await ctx.answerCbQuery(); // Acknowledge the callback query
+          await ctx.reply(message);
+        }
+      };
+
+      const handler = this.buttonHandlers.get(buttonId);
+      if (handler) {
+        try {
+          await handler(genericInteraction);
+        } catch (error) {
+          console.error('Error handling button interaction:', error);
+          await ctx.answerCbQuery('❌ An error occurred while processing your button click.');
+        }
+      } else {
+        await ctx.answerCbQuery('⚠️ No handler found for this button.');
+      }
+    });
+
+    this.bot.start(async (ctx: any) => {
     this.bot.start(async (ctx: Context) => {
       const userId = String(ctx.from?.id || "unknown");
       await withPerformanceProfiling("/start", "telegram", userId, () =>
@@ -359,6 +393,27 @@ export class TelegramAdapter {
       })();
     });
 
+    // Example buttons command
+    this.bot.command('buttons', async (ctx: any) => {
+      const userId = String(ctx.from?.id || 'unknown');
+      await withPerformanceProfiling('/buttons', 'telegram', userId, async () => {
+        // Example buttons
+        const buttons: Button[] = [
+          { label: 'Primary', id: 'primary-btn', style: 'primary' },
+          { label: 'Success', id: 'success-btn', style: 'success' },
+          { label: 'Open Dashboard', id: 'dashboard-btn', url: DASHBOARD_URL }
+        ];
+
+        // Register example handlers
+        this.registerButtonHandler('primary-btn', async (interaction) => {
+          await interaction.reply('Primary button pressed!');
+        });
+        this.registerButtonHandler('success-btn', async (interaction) => {
+          await interaction.reply('Success button pressed!');
+        });
+
+        const chatId = String(ctx.chat?.id || '');
+        await this.sendWithButtons(chatId, 'Try pressing these buttons!', buttons);
     // #122: Feedback command for automated bug reporting
     this.bot.command('feedback', async (ctx: any) => {
       const userId = String(ctx.from?.id || 'unknown');
@@ -475,6 +530,84 @@ export class TelegramAdapter {
       const userId = String(ctx.from?.id || "unknown");
     this.bot.command('multisig', async (ctx: Context) => {
       const userId = String(ctx.from?.id || 'unknown');
+      const commandName = extractCommandName(ctx.message.text, 'telegram');
+
+      if (!isDM(ctx)) {
+        await rejectPublicChannel(ctx);
+        return;
+      }
+
+      await withPerformanceProfiling(commandName, 'telegram', userId, async () => {
+        const SUPPORTED = ['USD', 'XLM', 'BTC'];
+        const args = ctx.message.text.split(' ').slice(1);
+        const currency = (args[0]?.toUpperCase() ?? 'USD');
+
+        if (!SUPPORTED.includes(currency)) {
+          return ctx.reply(
+            `❌ Unsupported currency <b>${currency}</b>. Choose one of: ${SUPPORTED.join(', ')}\nExample: <code>/portfolio USD</code>`,
+            { parse_mode: 'HTML' }
+          );
+        }
+
+        await ctx.reply(
+          `⏳ Fetching your Stellar portfolio in <b>${currency}</b>...`,
+          { parse_mode: 'HTML' }
+        );
+
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/portfolio/${userId}?currency=${currency}`);
+          if (!res.ok) {
+            const err = await res.json() as { message?: string };
+            throw new Error(err.message ?? `HTTP ${res.status}`);
+          }
+
+          const data = await res.json() as {
+            address: string;
+            currency: string;
+            totalValue: number | null;
+            assets: { code: string; issuer: string; balance: number; value: number | null }[];
+            fetchedAt: string;
+          };
+
+          const shortAddr = `<code>${data.address.slice(0, 4)}...${data.address.slice(-4)}</code>`;
+          const netWorth = data.totalValue !== null
+            ? `<b>${data.totalValue.toFixed(4)} ${data.currency}</b>`
+            : '<i>price data unavailable</i>';
+
+          let reply = `💼 <b>Stellar Portfolio Summary</b>\n`;
+          reply += `📬 Account: ${shortAddr}\n`;
+          reply += `💰 <b>Net Worth:</b> ${netWorth}\n`;
+          reply += `🕐 <i>${new Date(data.fetchedAt).toUTCString()}</i>\n\n`;
+          reply += `<b>Assets</b>\n`;
+
+          if (data.assets.length === 0) {
+            reply += '<i>No assets found on this account.</i>\n';
+          } else {
+            for (const a of data.assets) {
+              const valueStr = a.value !== null
+                ? ` ≈ ${a.value.toFixed(4)} ${data.currency}`
+                : '';
+              const issuerStr = a.issuer
+                ? ` (<code>${a.issuer.slice(0, 6)}...</code>)`
+                : '';
+              reply += `• <b>${a.code}</b>${issuerStr}: ${a.balance.toFixed(7)}${valueStr}\n`;
+            }
+          }
+
+          reply += `\n<i>Tip: use /portfolio &lt;USD|XLM|BTC&gt; to choose a currency.</i>`;
+          return ctx.reply(reply, { parse_mode: 'HTML' });
+        } catch (err) {
+          return ctx.reply(
+            `❌ Could not fetch portfolio: ${err instanceof Error ? err.message : String(err)}\n` +
+            `Make sure your account is registered — use /sponsor to get started.`,
+            { parse_mode: 'HTML' }
+          );
+        }
+      })();
+    });
+
+    // #125: Multisig wizard command
+    this.bot.command('multisig', async (ctx: any) => {      const userId = String(ctx.from?.id || 'unknown');
       if (!isDM(ctx)) {
         await rejectPublicChannel(ctx);
         return;
@@ -657,6 +790,7 @@ export class TelegramAdapter {
     await this.bot.telegram.setMyCommands([
       { command: "start", description: "Start the bot" },
       { command: "balance", description: "Check wallet balance" },
+      { command: "portfolio", description: "Portfolio summary & net worth" },
       { command: "swap", description: "Swap assets" },
       { command: "trustline", description: "Add trustline" },
       { command: "multisig", description: "Setup multisig wallet" },
@@ -796,6 +930,46 @@ export class TelegramAdapter {
       return true;
     } catch (error) {
       console.error("Error sending Telegram notification:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Register a handler for button interactions
+   */
+  registerButtonHandler(buttonId: string, handler: ButtonHandler): void {
+    this.buttonHandlers.set(buttonId, handler);
+  }
+
+  /**
+   * Send a message with buttons to a specific chat
+   */
+  async sendWithButtons(chatId: string, content: string, buttons: Button[]): Promise<boolean> {
+    if (!this.bot) {
+      console.warn("⚠️ Telegram bot not initialized");
+      return false;
+    }
+
+    try {
+      // Build inline keyboard
+      const keyboard = buttons.map(btn => {
+        if (btn.url) {
+          return [{ text: btn.label, url: btn.url }];
+        } else {
+          return [{ text: btn.label, callback_data: btn.id }];
+        }
+      });
+
+      await this.bot.telegram.sendMessage(chatId, content, {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: keyboard
+        }
+      });
+
+      return true;
+    } catch (error) {
+      console.error("Error sending message with buttons:", error);
       return false;
     }
   }

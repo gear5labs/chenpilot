@@ -1,70 +1,16 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 import config from "../config/config";
 import logger from "../config/logger";
-
-export interface TradePath {
-  path: StellarSdk.Asset[];
-  sourceAmount: string;
-  destinationAmount: string;
-  priceImpact: number;
-  estimatedSlippage: number;
-  hops: number;
-  route: string[];
-  /**
-   * Normalized efficiency score in [0, 1].
-   * Computed as: (destAmount / bestDestAmount) * hopDiscount * slippageDiscount
-   * Scores are dimensionless and comparable across paths for the same trade.
-   */
-  efficiency: number;
-}
-
-export interface PathEvaluationResult {
-  bestPath: TradePath;
-  allPaths: TradePath[];
-  evaluationTime: number;
-  timestamp: number;
-}
-
-export interface PathFinderOptions {
-  maxHops?: number;
-  minDestinationAmount?: string;
-  includeAssets?: StellarSdk.Asset[];
-  /** Hard timeout in ms. Defaults to 10 000. */
-  timeout?: number;
-  /** Route policy to enforce. Defaults to DEFAULT_ROUTE_POLICY. */
-  policy?: RoutePolicy;
-}
-
-/**
- * RoutePolicy defines the minimum quality bar a path must meet to be
- * considered executable. Paths that fail policy are still returned in
- * `allPaths` but `bestPath` is guaranteed to satisfy the policy, or
- * findOptimalPath throws `RoutePolicyViolationError`.
- */
-export interface RoutePolicy {
-  /** Minimum normalized efficiency score [0, 1]. */
-  minEfficiency: number;
-  /** Maximum estimated slippage as a fraction (e.g. 0.05 = 5%). */
-  maxSlippage: number;
-  /** Maximum number of hops allowed. */
-  maxHops: number;
-}
-
-export class RoutePolicyViolationError extends Error {
-  constructor(
-    public readonly reason: string,
-    public readonly bestAvailable: TradePath
-  ) {
-    super(`Route policy violation: ${reason}`);
-    this.name = "RoutePolicyViolationError";
-  }
-}
-
-export const DEFAULT_ROUTE_POLICY: RoutePolicy = {
-  minEfficiency: 0.7,
-  maxSlippage: 0.05,
-  maxHops: 5,
-};
+import {
+  TradePath,
+  PathEvaluationResult,
+  PathFinderOptions,
+  RoutePolicy,
+  RoutePolicyViolationError,
+  DEFAULT_ROUTE_POLICY,
+  parseStellarAsset,
+  stellarAssetToString,
+} from "../domain";
 
 /** Per-hop slippage penalty factor (0.3% per hop). */
 const HOP_SLIPPAGE_RATE = 0.003;
@@ -98,8 +44,8 @@ export class MultiHopPathFinder {
     const policy = options.policy ?? DEFAULT_ROUTE_POLICY;
 
     logger.info("Starting multi-hop path evaluation", {
-      source: this.assetToString(sourceAsset),
-      destination: this.assetToString(destinationAsset),
+      source: stellarAssetToString(sourceAsset),
+      destination: stellarAssetToString(destinationAsset),
       amount,
       maxHops,
       timeout,
@@ -112,7 +58,7 @@ export class MultiHopPathFinder {
 
     if (rawPaths.length === 0) {
       throw new Error(
-        `No valid trading paths found for ${this.assetToString(sourceAsset)} → ${this.assetToString(destinationAsset)}`
+        `No valid trading paths found for ${stellarAssetToString(sourceAsset)} → ${stellarAssetToString(destinationAsset)}`
       );
     }
 
@@ -241,7 +187,7 @@ export class MultiHopPathFinder {
       priceImpact: 0,
       estimatedSlippage: 0,
       hops,
-      route: fullPath.map((a) => this.assetToString(a)),
+      route: fullPath.map((a) => stellarAssetToString(a)),
       efficiency: 0,
     };
   }
@@ -383,20 +329,6 @@ export class MultiHopPathFinder {
         )
       ),
     ]);
-  }
-
-  private parseAsset(assetData: {
-    asset_type: string;
-    asset_code?: string;
-    asset_issuer?: string;
-  }): StellarSdk.Asset {
-    if (assetData.asset_type === "native") return StellarSdk.Asset.native();
-    return new StellarSdk.Asset(assetData.asset_code!, assetData.asset_issuer!);
-  }
-
-  private assetToString(asset: StellarSdk.Asset): string {
-    if (asset.isNative()) return "XLM";
-    return `${asset.getCode()}:${asset.getIssuer().substring(0, 8)}...`;
   }
 
   comparePaths(path1: TradePath, path2: TradePath): TradePath {
