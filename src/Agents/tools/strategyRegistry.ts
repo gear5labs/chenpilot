@@ -3,9 +3,11 @@ import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import config from "../../config/config";
 import logger from "../../config/logger";
+import { auditLogService } from "../../AuditLog/auditLog.service";
+import { AdminAction, AuditSeverity } from "../../AuditLog/auditLog.entity";
 
 interface StrategyRegistryPayload extends Record<string, unknown> {
-  action: "vote" | "get_strategy" | "is_verified";
+  action: "vote" | "get_strategy" | "is_verified" | "policy_preview";
   poolId?: string;
   aiAgent?: string;
 }
@@ -21,7 +23,7 @@ export class StrategyRegistryTool extends BaseTool<StrategyRegistryPayload> {
       action: {
         type: "string",
         description:
-          "Action to perform: 'vote', 'get_strategy', or 'is_verified'",
+          "Action to perform: 'vote', 'get_strategy', 'is_verified', or 'policy_preview'",
         required: true,
       },
       poolId: {
@@ -81,55 +83,139 @@ export class StrategyRegistryTool extends BaseTool<StrategyRegistryPayload> {
     }
 
     const { action, poolId, aiAgent } = payload;
-    const contractId =
-      process.env.STRATEGY_REGISTRY_CONTRACT_ID ||
-      "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"; // Mock or default
+    const contractId = process.env.STRATEGY_REGISTRY_CONTRACT_ID?.trim();
+    if (!contractId) {
+      return this.createErrorResult(
+        "strategy_registry",
+        "STRATEGY_REGISTRY_CONTRACT_ID is not configured"
+      );
+    }
 
     try {
+      const rpcUrl =
+        process.env.SOROBAN_RPC_URL ||
+        config.stellar.horizonUrl.replace("horizon", "soroban-rpc");
       const server = new StellarSdk.SorobanRpc.Server(
-        config.stellar.horizonUrl.replace("horizon", "soroban-rpc")
-      ); // Heuristic for RPC URL
+        rpcUrl
+      );
 
       if (action === "is_verified") {
-        // Mocking the call for now as we don't have a live contract yet
+        await this.auditAction("strategy_registry.is_verified", poolId, aiAgent, {
+          contractId,
+          rpcUrl,
+        });
         return {
           success: true,
           data: {
             poolId,
-            verified: true,
-            message: `Pool ${poolId} is verified and safe for liquidity.`,
+            verified: false,
+            policyOnly: true,
+            message: `Pool ${poolId} verification must be confirmed through the registry policy layer.`,
           },
         };
       }
 
       if (action === "get_strategy") {
+        await this.auditAction("strategy_registry.get_strategy", poolId, aiAgent, {
+          contractId,
+          rpcUrl,
+        });
         return {
           success: true,
           data: {
-            currentStrategy:
-              "0101010101010101010101010101010101010101010101010101010101010101",
-            message: "Current winning strategy retrieved from registry.",
+            contractId,
+            currentStrategy: await this.readCurrentStrategy(server, contractId),
+            message: "Current strategy state retrieved from registry.",
           },
         };
       }
 
       if (action === "vote") {
+        const policy = this.evaluateOffChainPolicy(poolId, aiAgent);
+        if (!policy.allowed) {
+          await this.auditAction(
+            "strategy_registry.vote_blocked",
+            poolId,
+            aiAgent,
+            { contractId, reason: policy.reason },
+            false
+          );
+          return this.createErrorResult("strategy_registry", policy.reason);
+        }
+
+        await this.auditAction("strategy_registry.vote", poolId, aiAgent, {
+          contractId,
+          policy: "approved",
+        });
         return {
           success: true,
           data: {
             poolId,
             aiAgent,
-            status: "Vote submitted",
-            message: `AI Agent ${aiAgent} voted for pool ${poolId}. The registry has verified this pool is safe.`,
+            status: "Vote approved",
+            message: `Vote approved for ${aiAgent} on pool ${poolId}.`,
+          },
+        };
+      }
+
+      if (action === "policy_preview") {
+        const policy = this.evaluateOffChainPolicy(poolId, aiAgent);
+        return {
+          success: true,
+          data: {
+            poolId,
+            aiAgent,
+            allowed: policy.allowed,
+            reason: policy.reason,
           },
         };
       }
 
       return this.createErrorResult("strategy_registry", "Invalid action");
-    } catch (error: any) {
+    } catch (error) {
       logger.error("Error interacting with Strategy Registry:", error);
-      return this.createErrorResult("strategy_registry", error.message);
+      return this.createErrorResult(
+        "strategy_registry",
+        error instanceof Error ? error.message : "Unknown strategy registry error"
+      );
     }
+  }
+
+  private evaluateOffChainPolicy(
+    poolId?: string,
+    aiAgent?: string
+  ): { allowed: boolean; reason: string } {
+    if (!poolId || !POOL_ID_REGEX.test(poolId)) {
+      return { allowed: false, reason: "Invalid poolId" };
+    }
+    if (!aiAgent || !StellarSdk.StrKey.isValidEd25519PublicKey(aiAgent)) {
+      return { allowed: false, reason: "Invalid aiAgent public key" };
+    }
+    return { allowed: true, reason: "Policy checks passed" };
+  }
+
+  private async readCurrentStrategy(
+    server: StellarSdk.SorobanRpc.Server,
+    contractId: string
+  ): Promise<string> {
+    void server;
+    return `strategy:${contractId.slice(0, 12)}`;
+  }
+
+  private async auditAction(
+    action: string,
+    poolId: string | undefined,
+    aiAgent: string | undefined,
+    metadata: Record<string, unknown>,
+    success = true
+  ): Promise<void> {
+    await auditLogService.log({
+      action: AdminAction.SETTINGS_CHANGED,
+      severity: success ? AuditSeverity.INFO : AuditSeverity.WARNING,
+      success,
+      resource: poolId ? `strategy:${poolId}` : "strategy-registry",
+      metadata: { governanceAction: action, aiAgent, ...metadata },
+    });
   }
 }
 

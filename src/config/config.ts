@@ -9,7 +9,22 @@ dotenv.config();
 import { generateDeFiAdapterConfigs, getEnabledAdapters } from "./defiAdapters";
 
 type StellarNetwork = "testnet" | "public";
-//console.log(process.env.DB_PASSWORD,  process.env.DB_NAME)
+
+function requireEnv(name: string, minLength = 1): string {
+  const value = process.env[name]?.trim();
+  if (!value || value.length < minLength) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
+function parsePositiveInt(name: string, fallback: string): number {
+  const parsed = Number.parseInt(process.env[name] || fallback, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
+}
 
 // Stellar network configurations
 const STELLAR_NETWORKS: Record<
@@ -63,10 +78,10 @@ const stellarConfig = STELLAR_NETWORKS[stellarNetwork];
 
 export default {
   env: process.env.NODE_ENV || "development",
-  port: 2333,
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-  node_url: process.env.NODE_URL!,
-  encryptionKey: process.env.ENCRYPTION_KEY!,
+  port: parsePositiveInt("PORT", "2333"),
+  apiKey: requireEnv("ANTHROPIC_API_KEY"),
+  node_url: requireEnv("NODE_URL"),
+  encryptionKey: requireEnv("ENCRYPTION_KEY", 64),
   stellar: {
     network: stellarNetwork,
     horizonUrl: process.env.STELLAR_HORIZON_URL || stellarConfig.horizonUrl,
@@ -76,9 +91,9 @@ export default {
   },
   redis: {
     host: process.env.REDIS_HOST || "localhost",
-    port: parseInt(process.env.REDIS_PORT || "6379"),
+    port: parsePositiveInt("REDIS_PORT", "6379"),
     password: process.env.REDIS_PASSWORD || undefined,
-    db: parseInt(process.env.REDIS_DB || "0"),
+    db: Number.parseInt(process.env.REDIS_DB || "0", 10),
   },
   kyc: {
     defaultProvider: process.env.KYC_PROVIDER || "mock",
@@ -89,7 +104,7 @@ export default {
   },
   email: {
     host: process.env.SMTP_HOST || "smtp.example.com",
-    port: parseInt(process.env.SMTP_PORT || "587", 10),
+    port: parsePositiveInt("SMTP_PORT", "587"),
     user: process.env.SMTP_USER || "",
     pass: process.env.SMTP_PASS || "",
     from: process.env.SMTP_FROM || "noreply@chenpilot.com",
@@ -97,11 +112,11 @@ export default {
   },
   db: {
     postgres: {
-      host: process.env.DB_HOST!,
-      port: parseInt(process.env.DB_PORT || "5432"),
-      username: process.env.DB_USERNAME!,
+      host: requireEnv("DB_HOST"),
+      port: parsePositiveInt("DB_PORT", "5432"),
+      username: requireEnv("DB_USERNAME"),
       password: process.env.DB_PASSWORD || undefined,
-      database: process.env.DB_NAME!,
+      database: requireEnv("DB_NAME"),
     },
   },
   defi: {
@@ -110,18 +125,18 @@ export default {
   },
   agent: {
     timeouts: {
-      llmCall: parseInt(process.env.AGENT_LLM_TIMEOUT || "30000", 10),
-      toolExecution: parseInt(process.env.AGENT_TOOL_TIMEOUT || "60000", 10),
-      agentExecution: parseInt(
-        process.env.AGENT_EXECUTION_TIMEOUT || "120000",
-        10
+      llmCall: parsePositiveInt("AGENT_LLM_TIMEOUT", "30000"),
+      toolExecution: parsePositiveInt("AGENT_TOOL_TIMEOUT", "60000"),
+      agentExecution: parsePositiveInt(
+        "AGENT_EXECUTION_TIMEOUT",
+        "120000"
       ),
-      planExecution: parseInt(process.env.AGENT_PLAN_TIMEOUT || "180000", 10),
+      planExecution: parsePositiveInt("AGENT_PLAN_TIMEOUT", "180000"),
     },
   },
   admin: {
     allowedIps: process.env.ADMIN_ALLOWED_IPS
-      ? process.env.ADMIN_ALLOWED_IPS.split(",").map((ip) => ip.trim())
+      ? process.env.ADMIN_ALLOWED_IPS.split(",").map((ip) => ip.trim()).filter(Boolean)
       : [],
   },
 };
