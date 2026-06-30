@@ -66,7 +66,7 @@ fn test_single_hop_swap() {
         amount_in: 100,
         min_amount_out: 199,
     }];
-    let results = multi_hop_client.swap(&caller, &hops);
+    let (swap_id, results) = multi_hop_client.swap(&caller, &hops);
 
     // Check results
     assert_eq!(results.len(), 1);
@@ -78,6 +78,11 @@ fn test_single_hop_swap() {
 
     // Check last out
     assert_eq!(multi_hop_client.get_last_out(), Some(200));
+
+    // Check get_swap returns correct data
+    let swap = multi_hop_client.get_swap(&swap_id).unwrap();
+    assert_eq!(swap.caller, caller);
+    assert_eq!(swap.status, SwapStatus::Completed);
 }
 
 #[test]
@@ -128,7 +133,7 @@ fn test_multi_hop_swap() {
             min_amount_out: 599,
         },
     ];
-    let results = multi_hop_client.swap(&caller, &hops);
+    let (swap_id, results) = multi_hop_client.swap(&caller, &hops);
 
     // Check results
     assert_eq!(results.len(), 2);
@@ -137,6 +142,10 @@ fn test_multi_hop_swap() {
 
     // Check caller has received tokens
     assert_eq!(TokenClient::new(&env, &token_c).balance(&caller), 600);
+
+    // Check get_swap returns correct data
+    let swap = multi_hop_client.get_swap(&swap_id).unwrap();
+    assert_eq!(swap.caller, caller);
 }
 
 #[test]
@@ -179,5 +188,42 @@ fn test_slippage_guard() {
         amount_in: 100,
         min_amount_out: 999, // Too high
     }];
+    multi_hop_client.swap(&caller, &hops);
+}
+
+#[test]
+#[should_panic(expected = "swap already executed (replay attempt)")]
+fn test_replay_attack_blocked() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let token_a = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
+    let token_b = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
+
+    let pool_id = env.register(MockPool, ());
+    let pool_client = MockPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&2, &1);
+    StellarAssetClient::new(&env, &token_b).mint(&pool_id, &1000);
+
+    let multi_hop_id = env.register(MultiHopSwap, ());
+    let multi_hop_client = MultiHopSwapClient::new(&env, &multi_hop_id);
+
+    let caller = Address::generate(&env);
+    StellarAssetClient::new(&env, &token_a).mint(&caller, &200); // Mint enough for 2 swaps
+
+    let hops = vec![&env, Hop {
+        pool: pool_id,
+        token_in: token_a.clone(),
+        token_out: token_b.clone(),
+        amount_in: 100,
+        min_amount_out: 199,
+    }];
+
+    // First swap (ok)
+    multi_hop_client.swap(&caller, &hops);
+
+    // Second swap with same hops (replay attempt, should panic)
+    // Need to bump ledger to get different swap_id? Wait no, same ledger would have same swap_id
     multi_hop_client.swap(&caller, &hops);
 }

@@ -104,7 +104,10 @@ impl HtlcContract {
         let ttl_ledgers = expiry_ledger.saturating_add(SWAP_TTL_GRACE_LEDGERS);
         env.storage().persistent().set_with_ttl(&DataKey::Swap(swap_id.clone()), &swap, ttl_ledgers);
 
-        env.events().publish((symbol_short!("SwapInit"),), swap_id.clone());
+        env.events().publish(
+            (symbol_short!("SwapInit"),),
+            (swap_id.clone(), initiator.clone(), recipient.clone(), token.clone(), amount, expiry_ledger),
+        );
         swap_id
     }
 
@@ -150,7 +153,10 @@ impl HtlcContract {
         let token_client = token::Client::new(&env, &swap.token);
         token_client.transfer(&env.current_contract_address(), &swap.recipient, &swap.amount);
 
-        env.events().publish((symbol_short!("Claimed"),), swap_id);
+        env.events().publish(
+            (symbol_short!("Claimed"),),
+            (swap_id.clone(), swap.recipient.clone(), swap.token.clone(), swap.amount),
+        );
     }
 
     /// Refund the locked funds back to the initiator after expiry.
@@ -180,7 +186,10 @@ impl HtlcContract {
         let token_client = token::Client::new(&env, &swap.token);
         token_client.transfer(&env.current_contract_address(), &swap.initiator, &swap.amount);
 
-        env.events().publish((symbol_short!("Refunded"),), swap_id);
+        env.events().publish(
+            (symbol_short!("Refunded"),),
+            (swap_id.clone(), swap.initiator.clone(), swap.token.clone(), swap.amount),
+        );
     }
 
     /// Returns the swap details for a given swap_id.
@@ -201,14 +210,12 @@ impl HtlcContract {
     ) -> BytesN<32> {
         let mut data = Bytes::new(env);
         data.extend_from_slice(secret_hash.to_array().as_ref());
+        data.extend_from_slice(&initiator.to_array());
         // Encode expiry as 4 little-endian bytes
         data.push_back((expiry_ledger & 0xff) as u8);
         data.push_back(((expiry_ledger >> 8) & 0xff) as u8);
         data.push_back(((expiry_ledger >> 16) & 0xff) as u8);
         data.push_back(((expiry_ledger >> 24) & 0xff) as u8);
-        // Include initiator address bytes via its string representation length as entropy
-        // We use the secret_hash + expiry as the primary uniqueness factor
-        let _ = initiator; // initiator auth already enforced above
         env.crypto().sha256(&data).into()
     }
 }
