@@ -281,14 +281,17 @@ function str(v) {
 function num(v) {
   return typeof v === "number" ? v : Number(v !== null && v !== void 0 ? v : 0);
 }
+function bool(v) {
+  return typeof v === "boolean" ? v : Boolean(v !== null && v !== void 0 ? v : false);
+}
 /**
  * Parse a raw SorobanEvent from core_vault into a typed VaultEvent.
- * topics[0] = symbol, topics[1] = contract_id, data = named struct.
+ * topics[0] = "vault", topics[1] = action, topics[2] = contract_id, data = named struct.
  * Returns null for unrecognised topics.
  */
 function parseVaultEvent(event) {
-  const topic = event.topics[0];
-  const contractId = str(event.topics[1]);
+  const topic = event.topics[1];
+  const contractId = str(event.topics[2]);
   const { ledger, transactionHash: txHash } = event;
   const d = event.data;
   switch (topic) {
@@ -297,8 +300,11 @@ function parseVaultEvent(event) {
       return {
         topic,
         contractId,
-        admin: str(data === null || data === void 0 ? void 0 : data.admin),
+        version: num(data === null || data === void 0 ? void 0 : data.version),
         ledger,
+        actor: str(data === null || data === void 0 ? void 0 : data.actor),
+        admin: str(data === null || data === void 0 ? void 0 : data.admin),
+        vaultToken: str(data === null || data === void 0 ? void 0 : data.vault_token),
         txHash,
       };
     }
@@ -307,14 +313,16 @@ function parseVaultEvent(event) {
       return {
         topic,
         contractId,
-        admin: str(data === null || data === void 0 ? void 0 : data.admin),
+        version: num(data === null || data === void 0 ? void 0 : data.version),
+        ledger,
+        actor: str(data === null || data === void 0 ? void 0 : data.actor),
+        admin: str(data === null || data === void 0 ? void 0 : data.actor),
         newWasmHash: str(
           data === null || data === void 0 ? void 0 : data.new_wasm_hash
         ),
         unlockLedger: num(
           data === null || data === void 0 ? void 0 : data.unlock_ledger
         ),
-        ledger,
         txHash,
       };
     }
@@ -323,8 +331,10 @@ function parseVaultEvent(event) {
       return {
         topic,
         contractId,
-        admin: str(data === null || data === void 0 ? void 0 : data.admin),
+        version: num(data === null || data === void 0 ? void 0 : data.version),
         ledger,
+        actor: str(data === null || data === void 0 ? void 0 : data.actor),
+        admin: str(data === null || data === void 0 ? void 0 : data.actor),
         txHash,
       };
     }
@@ -333,10 +343,12 @@ function parseVaultEvent(event) {
       return {
         topic,
         contractId,
+        version: num(data === null || data === void 0 ? void 0 : data.version),
+        ledger,
+        actor: str(data === null || data === void 0 ? void 0 : data.actor),
         newWasmHash: str(
           data === null || data === void 0 ? void 0 : data.new_wasm_hash
         ),
-        ledger,
         txHash,
       };
     }
@@ -345,13 +357,69 @@ function parseVaultEvent(event) {
       return {
         topic,
         contractId,
+        version: num(data === null || data === void 0 ? void 0 : data.version),
+        ledger,
+        actor: str(data === null || data === void 0 ? void 0 : data.actor),
         oldAdmin: str(
           data === null || data === void 0 ? void 0 : data.old_admin
         ),
         newAdmin: str(
           data === null || data === void 0 ? void 0 : data.new_admin
         ),
+        txHash,
+      };
+    }
+    case "deposit": {
+      const data = d;
+      return {
+        topic,
+        contractId,
+        version: num(data === null || data === void 0 ? void 0 : data.version),
         ledger,
+        actor: str(data === null || data === void 0 ? void 0 : data.actor),
+        user: str(data === null || data === void 0 ? void 0 : data.user),
+        amount: num(data === null || data === void 0 ? void 0 : data.amount),
+        txHash,
+      };
+    }
+    case "force_exit_req": {
+      const data = d;
+      return {
+        topic,
+        contractId,
+        version: num(data === null || data === void 0 ? void 0 : data.version),
+        ledger,
+        actor: str(data === null || data === void 0 ? void 0 : data.actor),
+        user: str(data === null || data === void 0 ? void 0 : data.user),
+        amount: num(data === null || data === void 0 ? void 0 : data.amount),
+        eligibleAt: num(
+          data === null || data === void 0 ? void 0 : data.eligible_at
+        ),
+        txHash,
+      };
+    }
+    case "force_exit_done": {
+      const data = d;
+      return {
+        topic,
+        contractId,
+        version: num(data === null || data === void 0 ? void 0 : data.version),
+        ledger,
+        actor: str(data === null || data === void 0 ? void 0 : data.actor),
+        user: str(data === null || data === void 0 ? void 0 : data.user),
+        amount: num(data === null || data === void 0 ? void 0 : data.amount),
+        txHash,
+      };
+    }
+    case "backend_status": {
+      const data = d;
+      return {
+        topic,
+        contractId,
+        version: num(data === null || data === void 0 ? void 0 : data.version),
+        ledger,
+        actor: str(data === null || data === void 0 ? void 0 : data.actor),
+        online: bool(data === null || data === void 0 ? void 0 : data.online),
         txHash,
       };
     }
@@ -364,7 +432,14 @@ function parseVaultEvent(event) {
  * No ledger queries needed — the event stream is the source of truth.
  */
 function reconstructVaultState(events) {
-  const state = { admin: null, pendingUpgrade: null, currentWasmHash: null };
+  const state = {
+    admin: null,
+    pendingUpgrade: null,
+    currentWasmHash: null,
+    backendOnline: true,
+    deposits: {},
+    forceExits: {},
+  };
   for (const e of events) {
     switch (e.topic) {
       case "init":
@@ -385,6 +460,19 @@ function reconstructVaultState(events) {
         break;
       case "adm_xfer":
         state.admin = e.newAdmin;
+        break;
+      case "deposit":
+        state.deposits[e.user] = (state.deposits[e.user] || 0) + e.amount;
+        break;
+      case "force_exit_req":
+        state.forceExits[e.user] = { amount: e.amount, eligibleAt: e.eligibleAt };
+        break;
+      case "force_exit_done":
+        delete state.deposits[e.user];
+        state.forceExits[e.user] = null;
+        break;
+      case "backend_status":
+        state.backendOnline = e.online;
         break;
     }
   }
