@@ -2,44 +2,45 @@ import { Request, Response, NextFunction } from "express";
 import { validate, ValidationError, ValidatorOptions } from "class-validator";
 import { plainToInstance, ClassTransformOptions } from "class-transformer";
 import logger from "../../config/logger";
+import {
+  ApiError,
+  ApiValidationFieldError,
+} from "../../contracts/errorContract";
+
+export type { ApiValidationFieldError };
 
 /**
- * Standardized validation error response format
+ * Legacy shape — kept exported so SDK consumers / docs that referenced
+ * it continue to compile. Failures are now rendered by the central
+ * `ErrorHandler` after the middleware throws `ApiError.validationFailed`.
  */
-export interface ValidationErrorItem {
-  field: string;
-  message: string;
-  constraints?: Record<string, string>;
-  value?: unknown;
-}
-
 export interface ValidationErrorResponse {
   success: false;
   error: {
     message: string;
     code: string;
-    details: ValidationErrorItem[];
+    details: ApiValidationFieldError[];
   };
 }
 
 /**
- * Options for the validation middleware
+ * Options for the validation middleware.
  */
 export interface ValidationOptions {
-  /** The DTO class to validate against */
+  /** The DTO class to validate against. */
   dtoClass: new () => object;
-  /** Where to read data from (body, query, params) */
+  /** Where to read data from (body, query, params). */
   source?: "body" | "query" | "params";
-  /** Additional validator options */
+  /** Additional validator options. */
   validatorOptions?: ValidatorOptions;
-  /** Additional class-transformer options */
+  /** Additional class-transformer options. */
   transformOptions?: ClassTransformOptions;
-  /** Custom error message prefix */
+  /** Prefix prepended to the thrown error message. */
   messagePrefix?: string;
 }
 
 /**
- * Default validator options
+ * Default validator options.
  */
 const DEFAULT_VALIDATOR_OPTIONS: ValidatorOptions = {
   whitelist: true,
@@ -49,30 +50,25 @@ const DEFAULT_VALIDATOR_OPTIONS: ValidatorOptions = {
 };
 
 /**
- * Default transform options
+ * Default transform options.
+ *
+ * `enableImplicitConversion` is intentionally `false`: when it was `true`,
+ * class-transformer truthy-coerced strings like `"garbage"` to `true`
+ * BEFORE custom validators ran, silently accepting invalid input (the
+ * `?activeOnly=garbage` footgun). Every numeric DTO already uses an
+ * explicit `@Type(() => Number)` and every boolean DTO uses
+ * `@IsOptionalBooleanString()`, so implicit conversion is redundant.
  */
 const DEFAULT_TRANSFORM_OPTIONS: ClassTransformOptions = {
-  excludeExtraneousValues: true,
-  enableImplicitConversion: true,
+  excludeExtraneousValues: false,
+  enableImplicitConversion: false,
 };
 
 /**
- * Create validation middleware for a specific DTO
+ * `validateBody(DTO)` — validate `req.body` against a class-validator DTO.
  *
- * @example
- * ```typescript
- * // Create a DTO class
- * class LoginDto {
- *   @IsString()
- *   @MinLength(1)
- *   name: string;
- * }
- *
- * // Use in route
- * router.post('/login', validateBody(LoginDto), async (req, res) => {
- *   // req.body is now typed as LoginDto with validated values
- * });
- * ```
+ * On failure the middleware throws `ApiError.validationFailed(errors)`,
+ * which the central `ErrorHandler` renders to the canonical envelope.
  */
 export function validateBody<T extends object>(
   dtoClass: new () => T,
@@ -85,6 +81,11 @@ export function validateBody<T extends object>(
   });
 }
 
+/**
+ * `validateQuery(DTO)` — validate `req.query` (a record of strings) against
+ * a class-validator DTO. Use `@Type(() => Number)` and
+ * `@Transform(...)` in the DTO for type coercion off query strings.
+ */
 export function validateQuery<T extends object>(
   dtoClass: new () => T,
   options?: Partial<Omit<ValidationOptions, "source" | "dtoClass">>
@@ -96,6 +97,9 @@ export function validateQuery<T extends object>(
   });
 }
 
+/**
+ * `validateParams(DTO)` — validate `req.params` (URL path segments).
+ */
 export function validateParams<T extends object>(
   dtoClass: new () => T,
   options?: Partial<Omit<ValidationOptions, "source" | "dtoClass">>
@@ -108,7 +112,7 @@ export function validateParams<T extends object>(
 }
 
 /**
- * Create validation middleware with custom configuration
+ * Factory that builds the middleware closure.
  */
 export function createValidationMiddleware(
   config: ValidationOptions
@@ -121,198 +125,196 @@ export function createValidationMiddleware(
     messagePrefix,
   } = config;
 
-  return async (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, _res: Response, next: NextFunction) => {
     try {
-      // Get the data to validate based on source
-      const dataToValidate =
+      // Pass each slot straight through. `req.body` may legitimately
+      // be a top-level array (and is normally JSON-parsed with a normal
+      // prototype); `req.query` / `req.params` are plain Records.
+      const data =
         source === "query"
           ? req.query
           : source === "params"
             ? req.params
             : req.body;
 
-      // Transform plain object to DTO instance with class-transformer
-      const dtoInstance = plainToInstance(dtoClass, dataToValidate, {
+      const dtoInstance = plainToInstance(dtoClass, data as object, {
         ...DEFAULT_TRANSFORM_OPTIONS,
         ...transformOptions,
       });
 
-      // Validate the DTO
       const validationErrors = await validate(dtoInstance, {
         ...DEFAULT_VALIDATOR_OPTIONS,
         ...validatorOptions,
       });
 
-      // If there are validation errors, return standardized error response
       if (validationErrors.length > 0) {
-        const errorResponse = formatValidationErrors(
-          validationErrors,
-          messagePrefix
-        );
+        const details = formatValidationErrors(validationErrors, messagePrefix);
 
         logger.warn("Validation failed", {
           path: req.path,
           method: req.method,
           source,
           errorCount: validationErrors.length,
-          errors: errorResponse.error.details,
+          details,
         });
 
-        return res.status(400).json(errorResponse);
+        // Throwing here defers rendering to ErrorHandler so the
+        // response uses the *same* envelope as every other error.
+        const prefixPart = messagePrefix ? `${messagePrefix}: ` : "";
+        const message =
+          details.length === 1
+            ? `${prefixPart}${details[0].message}`
+            : `${prefixPart}Validation failed with ${details.length} error(s)`;
+
+        return next(ApiError.validationFailed(details, message));
       }
 
-      // Replace the original data with the validated DTO instance
-      if (source === "query") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        req.query = dtoInstance as any;
-      } else if (source === "params") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        req.params = dtoInstance as any;
+      // Replace the slot on `req` with the validated instance so the
+      // downstream handler sees the *typed* and *coerced* value.
+      //
+      // Express 5 makes `req.query` a getter-only property on
+      // `IncomingMessage`. A plain `req.query = dto` therefore throws
+      // `TypeError: Cannot set property query of #<Request> which has
+      // only a getter`. We work around this by redefining the property
+      // via `Object.defineProperty`, which shadows the getter and
+      // installs our value as a plain data property. `req.params` is
+      // normal-assignable but redefining is harmless.
+      if (source === "query" || source === "params") {
+        Object.defineProperty(req, source, {
+          value: dtoInstance,
+          enumerable: true,
+          configurable: true,
+        });
       } else {
         req.body = dtoInstance;
       }
 
       next();
     } catch (error) {
-      logger.error("Validation middleware error", {
+      // Re-thrown to ErrorHandler — keep as ApiError for consistency.
+      logger.error("Validation middleware crashed", {
         error,
         path: req.path,
         method: req.method,
       });
-
-      // Handle transformation errors
-      if (error instanceof Error) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            message: `Invalid ${source} format: ${error.message}`,
-            code: "INVALID_FORMAT",
-            details: [],
-          },
-        } as ValidationErrorResponse);
+      if (error instanceof ApiError) {
+        return next(error);
       }
-
+      if (error instanceof Error) {
+        return next(
+          ApiError.badRequest(`Invalid ${source} format: ${error.message}`, [])
+        );
+      }
       next(error);
     }
   };
 }
 
 /**
- * Format class-validator errors into standardized response
+ * Flatten class-validator `ValidationError[]` into a stable list of
+ * `{ field, message, constraints?, value? }` items. Recurses into nested
+ * object errors using dot-notation paths.
  */
 export function formatValidationErrors(
   errors: ValidationError[],
   messagePrefix?: string
-): ValidationErrorResponse {
-  const formattedErrors: ValidationErrorItem[] = errors.flatMap((error) => {
-    // For nested objects, recurse
-    if (error.children && error.children.length > 0) {
-      return formatNestedErrors(error.property, error.children);
+): ApiValidationFieldError[] {
+  const out: ApiValidationFieldError[] = [];
+  const prefix = messagePrefix ? `${messagePrefix}: ` : "";
+
+  for (const err of errors) {
+    if (err.children && err.children.length > 0) {
+      const nested = formatNestedErrors(err.property, err.children);
+      for (const item of nested) {
+        out.push({
+          ...item,
+          message: `${prefix}${item.message}`,
+        });
+      }
+      continue;
     }
 
-    // Get constraints and format them
-    const constraints = error.constraints
-      ? Object.entries(error.constraints).reduce(
-          (acc, [key, value]) => {
-            acc[key] = value;
+    const constraints = err.constraints
+      ? Object.entries(err.constraints).reduce(
+          (acc, [k, v]) => {
+            acc[k] = String(v);
             return acc;
           },
           {} as Record<string, string>
         )
       : undefined;
 
-    return [
-      {
-        field: error.property,
-        message:
-          Object.values(error.constraints || {}).join(", ") || "Invalid value",
-        constraints,
-        value: error.value,
-      },
-    ];
-  });
+    out.push({
+      field: err.property,
+      message: `${prefix}${
+        Object.values(err.constraints || {}).join(", ") || "Invalid value"
+      }`,
+      constraints,
+      value: err.value as unknown,
+    });
+  }
 
-  const prefix = messagePrefix ? `${messagePrefix}: ` : "";
-  const primaryMessage =
-    formattedErrors.length === 1
-      ? `${prefix}${formattedErrors[0].message}`
-      : `${prefix}Validation failed with ${formattedErrors.length} error(s)`;
-
-  return {
-    success: false,
-    error: {
-      message: primaryMessage,
-      code: "VALIDATION_ERROR",
-      details: formattedErrors,
-    },
-  };
+  return out;
 }
 
-/**
- * Recursively format nested validation errors
- */
 function formatNestedErrors(
   parentProperty: string,
   children: ValidationError[]
-): ValidationErrorItem[] {
-  return children.flatMap((error) => {
-    const fullPath = `${parentProperty}.${error.property}`;
-
-    if (error.children && error.children.length > 0) {
-      return formatNestedErrors(fullPath, error.children);
+): ApiValidationFieldError[] {
+  const out: ApiValidationFieldError[] = [];
+  for (const err of children) {
+    const fullPath = `${parentProperty}.${err.property}`;
+    if (err.children && err.children.length > 0) {
+      out.push(...formatNestedErrors(fullPath, err.children));
+      continue;
     }
-
-    const constraints = error.constraints
-      ? Object.entries(error.constraints).reduce(
-          (acc, [key, value]) => {
-            acc[key] = value;
+    const constraints = err.constraints
+      ? Object.entries(err.constraints).reduce(
+          (acc, [k, v]) => {
+            acc[k] = String(v);
             return acc;
           },
           {} as Record<string, string>
         )
       : undefined;
-
-    return [
-      {
-        field: fullPath,
-        message:
-          Object.values(error.constraints || {}).join(", ") || "Invalid value",
-        constraints,
-        value: error.value,
-      },
-    ];
-  });
+    out.push({
+      field: fullPath,
+      message:
+        Object.values(err.constraints || {}).join(", ") || "Invalid value",
+      constraints,
+      value: err.value as unknown,
+    });
+  }
+  return out;
 }
 
 /**
- * Utility to validate a DTO and return errors without middleware
+ * Utility to validate a DTO without using it as middleware — useful in
+ * services that need to gate inputs to internal calls.
  */
 export async function validateDto<T extends object>(
   dtoClass: new () => T,
   data: unknown,
   options?: Partial<ValidationOptions>
-): Promise<{ valid: boolean; errors?: ValidationErrorItem[]; instance?: T }> {
+): Promise<{
+  valid: boolean;
+  errors?: ApiValidationFieldError[];
+  instance?: T;
+}> {
   const dtoInstance = plainToInstance(
     dtoClass,
     data as object,
     DEFAULT_TRANSFORM_OPTIONS
   );
-
   const validationErrors = await validate(dtoInstance, {
     ...DEFAULT_VALIDATOR_OPTIONS,
     ...options?.validatorOptions,
   });
-
   if (validationErrors.length > 0) {
-    const formattedErrors = formatValidationErrors(validationErrors);
     return {
       valid: false,
-      errors: formattedErrors.error.details,
+      errors: formatValidationErrors(validationErrors),
     };
   }
-
-  return {
-    valid: true,
-    instance: dtoInstance,
-  };
+  return { valid: true, instance: dtoInstance };
 }

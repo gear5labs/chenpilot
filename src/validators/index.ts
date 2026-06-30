@@ -14,6 +14,7 @@ import {
   IsArray,
   ArrayMinSize,
   ArrayMaxSize,
+  IsObject,
   registerDecorator,
   ValidationOptions,
   ValidatorConstraint,

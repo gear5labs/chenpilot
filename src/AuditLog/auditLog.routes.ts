@@ -5,7 +5,17 @@ import {
   requireOwnerOrElevated,
 } from "../Gateway/middleware/rbac.middleware";
 import { auditLogService } from "./auditLog.service";
-import { AuditAction, AuditSeverity } from "./auditLog.entity";
+import { AuditAction } from "./auditLog.entity";
+import {
+  ok,
+  ApiError,
+  validateQuery,
+  validateParams,
+  PaginationQueryDto,
+  UserIdParamDto,
+  AuditLogListQueryDto,
+} from "../contracts";
+import { asyncHandler } from "../utils/expressAsync";
 
 const router = Router();
 
@@ -18,100 +28,44 @@ const router = Router();
  *     security:
  *       - bearerAuth: []
  *     parameters:
- *       - in: query
- *         name: userId
- *         schema:
- *           type: string
- *         description: Filter by user ID
- *       - in: query
- *         name: action
- *         schema:
- *           type: string
- *         description: Filter by action type
- *       - in: query
- *         name: severity
- *         schema:
- *           type: string
- *           enum: [info, warning, error, critical]
- *         description: Filter by severity
- *       - in: query
- *         name: startDate
- *         schema:
- *           type: string
- *           format: date-time
- *         description: Start date filter
- *       - in: query
- *         name: endDate
- *         schema:
- *           type: string
- *           format: date-time
- *         description: End date filter
- *       - in: query
- *         name: success
- *         schema:
- *           type: boolean
- *         description: Filter by success status
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 50
- *         description: Number of logs to return
- *       - in: query
- *         name: offset
- *         schema:
- *           type: integer
- *           default: 0
- *         description: Offset for pagination
+ *       - { in: query, name: userId,    schema: { type: string } }
+ *       - { in: query, name: action,   schema: { type: string } }
+ *       - { in: query, name: severity, schema: { type: string, enum: [info, warning, error, critical] } }
+ *       - { in: query, name: startDate, schema: { type: string, format: date-time } }
+ *       - { in: query, name: endDate,   schema: { type: string, format: date-time } }
+ *       - { in: query, name: success,  schema: { type: boolean } }
+ *       - { in: query, name: limit,    schema: { type: integer, default: 50,  maximum: 500 } }
+ *       - { in: query, name: offset,   schema: { type: integer, default: 0 } }
  *     responses:
- *       200:
- *         description: Audit logs retrieved successfully
- *       401:
- *         description: Unauthorized
- *       403:
- *         description: Forbidden - Admin access required
+ *       200: { description: Audit logs retrieved successfully }
+ *       401: { description: Unauthorized }
+ *       403: { description: Forbidden - Admin access required }
  */
 router.get(
   "/logs",
   authenticateToken,
   requireAdmin,
-  async (req: Request, res: Response) => {
-    try {
-      const {
-        userId,
-        action,
-        severity,
-        startDate,
-        endDate,
-        success,
-        limit,
-        offset,
-      } = req.query;
+  validateQuery(AuditLogListQueryDto),
+  asyncHandler(async (req: Request, res: Response) => {
+    const q = req.query as unknown as AuditLogListQueryDto;
 
-      const result = await auditLogService.query({
-        userId: userId as string,
-        action: action as AuditAction,
-        severity: severity as AuditSeverity,
-        startDate: startDate ? new Date(startDate as string) : undefined,
-        endDate: endDate ? new Date(endDate as string) : undefined,
-        success:
-          success === "true" ? true : success === "false" ? false : undefined,
-        limit: limit ? parseInt(limit as string, 10) : 50,
-        offset: offset ? parseInt(offset as string, 10) : 0,
-      });
-
-      return res.status(200).json({
-        success: true,
-        ...result,
-      });
-    } catch (error) {
-      console.error("Error fetching audit logs:", error);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch audit logs",
-      });
+    if (q.startDate && q.endDate && q.startDate > q.endDate) {
+      throw ApiError.badRequest("startDate must be before or equal to endDate");
     }
-  }
+
+    const result = await auditLogService.query({
+      userId: q.userId,
+      action: q.action as AuditAction | undefined,
+      severity: q.severity,
+      startDate: q.startDate ? new Date(q.startDate) : undefined,
+      endDate: q.endDate ? new Date(q.endDate) : undefined,
+      success: q.success,
+      limit: q.limit ?? 50,
+      offset: q.offset ?? 0,
+    });
+
+    return ok(res, result);
+  })
 );
 
 /**
@@ -123,59 +77,30 @@ router.get(
  *     security:
  *       - bearerAuth: []
  *     parameters:
- *       - in: path
- *         name: userId
- *         required: true
- *         schema:
- *           type: string
- *         description: User ID
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 50
- *         description: Number of logs to return
- *       - in: query
- *         name: offset
- *         schema:
- *           type: integer
- *           default: 0
- *         description: Offset for pagination
+ *       - { in: path,  name: userId, required: true, schema: { type: string } }
+ *       - { in: query, name: limit,  schema: { type: integer, default: 50, maximum: 500 } }
+ *       - { in: query, name: offset, schema: { type: integer, default: 0 } }
  *     responses:
- *       200:
- *         description: User audit logs retrieved successfully
- *       401:
- *         description: Unauthorized
- *       403:
- *         description: Forbidden - Can only access own logs unless admin
+ *       200: { description: User audit logs retrieved successfully }
  */
 router.get(
   "/user/:userId",
   authenticateToken,
   requireOwnerOrElevated("userId"),
-  async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const { limit, offset } = req.query;
+  validateParams(UserIdParamDto),
+  validateQuery(PaginationQueryDto),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { userId } = req.params as unknown as UserIdParamDto;
+    const { limit, offset } = req.query as unknown as PaginationQueryDto;
 
-      const result = await auditLogService.getUserAuditLogs(
-        userId,
-        limit ? parseInt(limit as string, 10) : 50,
-        offset ? parseInt(offset as string, 10) : 0
-      );
+    const result = await auditLogService.getUserAuditLogs(
+      userId,
+      limit ?? 50,
+      offset ?? 0
+    );
 
-      return res.status(200).json({
-        success: true,
-        ...result,
-      });
-    } catch (error) {
-      console.error("Error fetching user audit logs:", error);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch user audit logs",
-      });
-    }
-  }
+    return ok(res, result);
+  })
 );
 
 /**
@@ -187,52 +112,29 @@ router.get(
  *     security:
  *       - bearerAuth: []
  *     parameters:
- *       - in: query
- *         name: hours
- *         schema:
- *           type: integer
- *           default: 24
- *         description: Number of hours to look back
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 100
- *         description: Maximum number of events to return
+ *       - { in: query, name: hours, schema: { type: integer, default: 24 } }
+ *       - { in: query, name: limit, schema: { type: integer, default: 100, maximum: 500 } }
  *     responses:
- *       200:
- *         description: Security events retrieved successfully
- *       401:
- *         description: Unauthorized
- *       403:
- *         description: Forbidden - Admin access required
+ *       200: { description: Security events retrieved successfully }
  */
 router.get(
   "/security-events",
   authenticateToken,
   requireAdmin,
-  async (req: Request, res: Response) => {
-    try {
-      const { hours, limit } = req.query;
+  validateQuery(PaginationQueryDto),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { limit } = req.query as unknown as PaginationQueryDto;
+    // `hours` isn't part of `PaginationQueryDto`; parse defensively.
+    const hoursRaw = (req.query as Record<string, unknown>).hours;
+    const hours =
+      typeof hoursRaw === "string"
+        ? Math.max(1, parseInt(hoursRaw, 10) || 24)
+        : 24;
 
-      const events = await auditLogService.getSecurityEvents(
-        hours ? parseInt(hours as string, 10) : 24,
-        limit ? parseInt(limit as string, 10) : 100
-      );
+    const events = await auditLogService.getSecurityEvents(hours, limit ?? 100);
 
-      return res.status(200).json({
-        success: true,
-        events,
-        total: events.length,
-      });
-    } catch (error) {
-      console.error("Error fetching security events:", error);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch security events",
-      });
-    }
-  }
+    return ok(res, { events, total: events.length });
+  })
 );
 
 /**
@@ -244,51 +146,28 @@ router.get(
  *     security:
  *       - bearerAuth: []
  *     parameters:
- *       - in: query
- *         name: userId
- *         schema:
- *           type: string
- *         description: Filter by user ID
- *       - in: query
- *         name: hours
- *         schema:
- *           type: integer
- *           default: 24
- *         description: Number of hours to look back
+ *       - { in: query, name: userId, schema: { type: string } }
+ *       - { in: query, name: hours,  schema: { type: integer, default: 24 } }
  *     responses:
- *       200:
- *         description: Failed auth attempts retrieved successfully
- *       401:
- *         description: Unauthorized
- *       403:
- *         description: Forbidden - Admin access required
+ *       200: { description: Failed auth attempts retrieved successfully }
  */
 router.get(
   "/failed-auth",
   authenticateToken,
   requireAdmin,
-  async (req: Request, res: Response) => {
-    try {
-      const { userId, hours } = req.query;
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId =
+      typeof req.query.userId === "string" ? req.query.userId : undefined;
+    const hoursRaw = (req.query as Record<string, unknown>).hours;
+    const hours =
+      typeof hoursRaw === "string"
+        ? Math.max(1, parseInt(hoursRaw, 10) || 24)
+        : 24;
 
-      const attempts = await auditLogService.getFailedAuthAttempts(
-        userId as string,
-        hours ? parseInt(hours as string, 10) : 24
-      );
+    const attempts = await auditLogService.getFailedAuthAttempts(userId, hours);
 
-      return res.status(200).json({
-        success: true,
-        attempts,
-        total: attempts.length,
-      });
-    } catch (error) {
-      console.error("Error fetching failed auth attempts:", error);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch failed auth attempts",
-      });
-    }
-  }
+    return ok(res, { attempts, total: attempts.length });
+  })
 );
 
 export default router;
