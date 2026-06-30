@@ -1,10 +1,12 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, token};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, token, symbol_short};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Config,
+    DistributionNonce,
+    LastDistribution,
 }
 
 #[contracttype]
@@ -18,13 +20,23 @@ pub struct Config {
     pub ai_agent_bps: u32,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DistributionRecord {
+    pub nonce: u32,
+    pub token: Address,
+    pub from: Address,
+    pub amount: i128,
+    pub treasury_share: i128,
+    pub ai_agent_share: i128,
+    pub lp_share: i128,
+}
+
 #[contract]
 pub struct FeeDistributionContract;
 
 #[contractimpl]
 impl FeeDistributionContract {
-    /// Initializes the fee distribution contract with recipient addresses and basis points.
-    /// Basis points (bps) are out of 10,000 (e.g., 100 bps = 1%).
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -37,65 +49,30 @@ impl FeeDistributionContract {
         if env.storage().instance().has(&DataKey::Config) {
             panic!("Already initialized");
         }
-        if treasury_bps + ai_agent_bps > 10000 {
+        if treasury_bps + ai_agent_bps > 10_000 {
             panic!("Invalid basis points: sum exceeds 10000");
         }
-
-        let config = Config {
-            admin,
-            treasury,
-            ai_agent_pool,
-            lp_pool,
-            treasury_bps,
-            ai_agent_bps,
-        };
-        env.storage().instance().set(&DataKey::Config, &config);
+        env.storage().instance().set(&DataKey::Config, &Config { admin, treasury, ai_agent_pool, lp_pool, treasury_bps, ai_agent_bps });
+        env.storage().instance().set(&DataKey::DistributionNonce, &0u32);
     }
 
-    /// Updates the configuration. Only the admin can call this.
     pub fn update_config(env: Env, config: Config) {
         let current_config: Config = env.storage().instance().get(&DataKey::Config).expect("Not initialized");
         current_config.admin.require_auth();
-
-        if config.treasury_bps + config.ai_agent_bps > 10000 {
+        if config.treasury_bps + config.ai_agent_bps > 10_000 {
             panic!("Invalid basis points: sum exceeds 10000");
         }
-
         env.storage().instance().set(&DataKey::Config, &config);
     }
 
-    /// Distributes fees from the `from` address to Treasury, AI-Agent Pool, and LPs.
-    /// The LP share is calculated as the remainder to ensure totals always reconcile.
-    pub fn distribute(env: Env, token_addr: Address, from: Address, amount: i128) {
+    pub fn distribute(env: Env, token_addr: Address, from: Address, amount: i128) -> DistributionRecord {
         if amount <= 0 {
-            return;
+            panic!("amount must be positive");
         }
-
         let config: Config = env.storage().instance().get(&DataKey::Config).expect("Not initialized");
-        
-        // Calculate shares using deterministic basis points
-        // treasury_share = amount * treasury_bps / 10000
-        let treasury_share = amount
-            .checked_mul(config.treasury_bps as i128)
-            .expect("Multiplication overflow")
-            .checked_div(10000)
-            .expect("Division by zero");
-
-        // ai_agent_share = amount * ai_agent_bps / 10000
-        let ai_agent_share = amount
-            .checked_mul(config.ai_agent_bps as i128)
-            .expect("Multiplication overflow")
-            .checked_div(10000)
-            .expect("Division by zero");
-
-        // lp_share = amount - treasury_share - ai_agent_share
-        // This ensures every single unit of the fee (including rounding remainders) is distributed.
-        let lp_share = amount
-            .checked_sub(treasury_share)
-            .expect("Subtraction underflow")
-            .checked_sub(ai_agent_share)
-            .expect("Subtraction underflow");
-
+        let treasury_share = amount.checked_mul(config.treasury_bps as i128).expect("Multiplication overflow").checked_div(10_000).expect("Division by zero");
+        let ai_agent_share = amount.checked_mul(config.ai_agent_bps as i128).expect("Multiplication overflow").checked_div(10_000).expect("Division by zero");
+        let lp_share = amount.checked_sub(treasury_share).expect("Subtraction underflow").checked_sub(ai_agent_share).expect("Subtraction underflow");
         let client = token::Client::new(&env, &token_addr);
 
         if treasury_share > 0 {
@@ -107,9 +84,19 @@ impl FeeDistributionContract {
         if lp_share > 0 {
             client.transfer_from(&env.current_contract_address(), &from, &config.lp_pool, &lp_share);
         }
+
+        let nonce = env.storage().instance().get::<DataKey, u32>(&DataKey::DistributionNonce).unwrap_or(0);
+        let record = DistributionRecord { nonce: nonce + 1, token: token_addr.clone(), from: from.clone(), amount, treasury_share, ai_agent_share, lp_share };
+        env.storage().instance().set(&DataKey::DistributionNonce, &(nonce + 1));
+        env.storage().instance().set(&DataKey::LastDistribution, &record);
+        env.events().publish((symbol_short!("fees"), symbol_short!("split")), (record.nonce, amount, treasury_share, ai_agent_share, lp_share));
+        record
     }
-    
-    /// Returns the current configuration.
+
+    pub fn last_distribution(env: Env) -> Option<DistributionRecord> {
+        env.storage().instance().get(&DataKey::LastDistribution)
+    }
+
     pub fn get_config(env: Env) -> Config {
         env.storage().instance().get(&DataKey::Config).expect("Not initialized")
     }

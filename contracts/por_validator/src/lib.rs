@@ -1,10 +1,8 @@
 #![no_std]
 use soroban_sdk::{contract, contractimpl, contracttype, contractclient, Address, Env, symbol_short};
 
-// TTL for validator status: ~1 day (172_800 ledgers at 5s/ledger)
-// Validator status is instance storage (rarely-changed config), but with TTL
-// to ensure stale status records are refreshed periodically for accuracy
-const VALIDATOR_STATUS_TTL_LEDGERS: u32 = 172_800;
+const DEFAULT_MAX_STALE_LEDERS: u32 = 10_000;
+const DEFAULT_PROOF_CADENCE_LEDGERS: u32 = 1_000;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -12,6 +10,25 @@ pub struct ReserveData {
     pub balance: i128,
     pub circulating_supply: i128,
     pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofRecord {
+    pub reserve_data: ReserveData,
+    pub is_valid: bool,
+    pub verified_ledger: u32,
+    pub valid_until_ledger: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VaultSafetyStatus {
+    pub is_safe: bool,
+    pub proof_is_fresh: bool,
+    pub proof_is_valid: bool,
+    pub verified_ledger: u32,
+    pub valid_until_ledger: u32,
 }
 
 #[contractclient(name = "OracleClient")]
@@ -23,7 +40,7 @@ pub trait OracleTrait {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Config,
-    IsValid,
+    CurrentProof,
 }
 
 #[contracttype]
@@ -32,7 +49,9 @@ pub struct Config {
     pub admin: Address,
     pub wbtc_token: Address,
     pub oracle: Address,
-    pub tolerance_bps: u32, // Basis points (e.g., 50 bps = 0.5%)
+    pub tolerance_bps: u32,
+    pub proof_cadence_ledgers: u32,
+    pub max_stale_ledgers: u32,
 }
 
 #[contract]
@@ -40,7 +59,6 @@ pub struct PoRValidatorContract;
 
 #[contractimpl]
 impl PoRValidatorContract {
-    /// Initializes the Proof-of-Reserve validator.
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -56,67 +74,90 @@ impl PoRValidatorContract {
             wbtc_token,
             oracle,
             tolerance_bps,
+            proof_cadence_ledgers: DEFAULT_PROOF_CADENCE_LEDGERS,
+            max_stale_ledgers: DEFAULT_MAX_STALE_LEDERS,
         };
         env.storage().instance().set(&DataKey::Config, &config);
-        
-        // Store initial IsValid status with TTL to force periodic re-validation
-        env.storage().instance().set_with_ttl(&DataKey::IsValid, &true, VALIDATOR_STATUS_TTL_LEDGERS);
     }
 
-    /// Updates the configuration. Only the admin can call this.
     pub fn update_config(env: Env, config: Config) {
         let current_config: Config = env.storage().instance().get(&DataKey::Config).expect("Not initialized");
         current_config.admin.require_auth();
         env.storage().instance().set(&DataKey::Config, &config);
     }
 
-    /// Performs the reserve validation by comparing token supply against oracle balance.
-    /// This function updates the internal `is_valid` state and emits events.
-    pub fn verify_reserves(env: Env) {
+    pub fn set_safety_policy(env: Env, proof_cadence_ledgers: u32, max_stale_ledgers: u32) {
+        let mut config: Config = env.storage().instance().get(&DataKey::Config).expect("Not initialized");
+        config.admin.require_auth();
+        config.proof_cadence_ledgers = proof_cadence_ledgers;
+        config.max_stale_ledgers = max_stale_ledgers;
+        env.storage().instance().set(&DataKey::Config, &config);
+    }
+
+    pub fn verify_reserves(env: Env) -> ProofRecord {
         let config: Config = env.storage().instance().get(&DataKey::Config).expect("Not initialized");
-        
-        // 1. Fetch total supply and reserve balance from the trusted oracle.
-        // Soroban SEP-41 token interface does not expose total_supply directly;
-        // the PoR oracle is expected to report both circulating supply and BTC reserves.
+        let current_ledger = env.ledger().sequence();
         let oracle_client = OracleClient::new(&env, &config.oracle);
         let reserve_data = oracle_client.get_reserve_data();
-        let supply = reserve_data.circulating_supply;
-        
-        // 3. Calculate the maximum allowed supply based on tolerance_bps
-        // Allowed = Reserves * (10000 + tolerance) / 10000
-        let allowed_supply = reserve_data.balance
-            .checked_mul((10000 + config.tolerance_bps) as i128)
+
+        let allowed_supply = reserve_data
+            .balance
+            .checked_mul((10_000 + config.tolerance_bps) as i128)
             .expect("Multiplication overflow")
-            .checked_div(10000)
+            .checked_div(10_000)
             .expect("Division error");
+        let is_valid = reserve_data.circulating_supply <= allowed_supply;
+        let valid_until_ledger = current_ledger.saturating_add(config.max_stale_ledgers);
 
-        // 4. Compare supply vs reserves
-        let is_valid = supply <= allowed_supply;
-        
-        // Store validation result with TTL to force re-validation periodically
-        env.storage().instance().set_with_ttl(&DataKey::IsValid, &is_valid, VALIDATOR_STATUS_TTL_LEDGERS);
+        let proof = ProofRecord {
+            reserve_data: reserve_data.clone(),
+            is_valid,
+            verified_ledger: current_ledger,
+            valid_until_ledger,
+        };
+        env.storage().instance().set(&DataKey::CurrentProof, &proof);
 
-        if !is_valid {
-            // Discrepancy detected: Supply exceeds reserves + tolerance
-            env.events().publish(
-                (symbol_short!("PoRAlert"),),
-                (supply, reserve_data.balance, reserve_data.timestamp)
-            );
+        env.events().publish(
+            (symbol_short!("por"), symbol_short!("proof")),
+            (is_valid, reserve_data.balance, reserve_data.circulating_supply, current_ledger, valid_until_ledger),
+        );
+
+        proof
+    }
+
+    pub fn get_current_proof(env: Env) -> Option<ProofRecord> {
+        env.storage().instance().get(&DataKey::CurrentProof)
+    }
+
+    pub fn is_valid(env: Env) -> bool {
+        Self::vault_safety_status(env).is_safe
+    }
+
+    pub fn vault_safety_status(env: Env) -> VaultSafetyStatus {
+        let current_ledger = env.ledger().sequence();
+        let proof: Option<ProofRecord> = env.storage().instance().get(&DataKey::CurrentProof);
+
+        if let Some(proof) = proof {
+            let proof_is_fresh = current_ledger <= proof.valid_until_ledger;
+            let is_safe = proof_is_fresh && proof.is_valid;
+            VaultSafetyStatus {
+                is_safe,
+                proof_is_fresh,
+                proof_is_valid: proof.is_valid,
+                verified_ledger: proof.verified_ledger,
+                valid_until_ledger: proof.valid_until_ledger,
+            }
         } else {
-            // Reserves are healthy
-            env.events().publish(
-                (symbol_short!("PoROk"),),
-                (supply, reserve_data.balance, reserve_data.timestamp)
-            );
+            VaultSafetyStatus {
+                is_safe: false,
+                proof_is_fresh: false,
+                proof_is_valid: false,
+                verified_ledger: 0,
+                valid_until_ledger: 0,
+            }
         }
     }
 
-    /// Returns the current validity status of the reserves.
-    pub fn is_valid(env: Env) -> bool {
-        env.storage().instance().get(&DataKey::IsValid).unwrap_or(false)
-    }
-    
-    /// Returns the current contract configuration.
     pub fn get_config(env: Env) -> Config {
         env.storage().instance().get(&DataKey::Config).expect("Not initialized")
     }
