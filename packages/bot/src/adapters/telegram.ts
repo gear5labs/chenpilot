@@ -13,6 +13,10 @@ import {
   extractCommandName,
 } from "../performanceProfiler";
 import { botWorkflowManager } from "../services/workflowService";
+import { MarketOverviewService } from "../marketOverview";
+import { DigestTarget } from "../services/marketDigestScheduler";
+import { commandRegistry } from "../commands/registry";
+import { fromTelegrafCtx } from "../commands/adapters/telegramContext";
 
 const BACKEND_URL =
   process.env.BACKEND_URL ||
@@ -30,6 +34,9 @@ const DASHBOARD_URL = process.env.DASHBOARD_URL || `${BACKEND_URL}/dashboard`;
 const HORIZON_URL =
   process.env.STELLAR_HORIZON_URL || "https://horizon-testnet.stellar.org";
 const DEBOUNCE_MS = 1000; // 1 second debounce between commands
+
+// Market digest target chat — used by createDigestTarget()
+const MARKET_OVERVIEW_CHAT_ID = process.env.TELEGRAM_MARKET_OVERVIEW_CHAT_ID || "";
 
 // Commands that involve personal account data and must only be used in DMs
 const DM_ONLY_COMMANDS = ['/balance', '/swap'];
@@ -66,6 +73,8 @@ export class TelegramAdapter {
   private buttonHandlers: Map<string, ButtonHandler> = new Map();
   // #114: AI agent client
   private agentClient: AgentClient;
+  // Market overview service — used by createDigestTarget()
+  private marketOverviewService: MarketOverviewService;
 
   constructor(token: string) {
     this.token = token;
@@ -75,6 +84,8 @@ export class TelegramAdapter {
     this.strictRateLimiter = new RateLimiter(STRICT_RATE_LIMIT);
     // #114: Initialize AI agent client
     this.agentClient = new AgentClient({ baseUrl: BACKEND_URL });
+    // Market overview service
+    this.marketOverviewService = new MarketOverviewService();
   }
 
   // #145: Returns true if the user is flooding (within debounce window)
@@ -175,45 +186,119 @@ export class TelegramAdapter {
       }
     });
 
-    this.bot.start(async (ctx: any) => {
-    this.bot.start(async (ctx: Context) => {
-      const userId = String(ctx.from?.id || "unknown");
-      await withPerformanceProfiling("/start", "telegram", userId, () =>
-        ctx.reply(
-          "Welcome to Chen Pilot! I am your AI-powered Stellar DeFi assistant."
-        )
-      )();
-    });
-    this.bot.help(async (ctx: Context) => {
-      const userId = String(ctx.from?.id || "unknown");
-      await withPerformanceProfiling("/help", "telegram", userId, () =>
-        ctx.reply(
-          "Commands: /start, /balance, /swap, /trustline, /dashboard, /validate"
-        )
-      )();
+    // ── Shared command dispatch ──────────────────────────────────────────────
+    // All commands that have shared handlers are wired through a single
+    // factory.  The Telegraf `command()` call is just the entry-point; the
+    // actual logic lives in the platform-neutral CommandRegistry.
+
+    const dispatchCommand = (commandName: string) =>
+      async (ctx: any) => {
+        const text: string = ctx.message?.text ?? "";
+        const args = text.split(" ").slice(1).filter(Boolean);
+        const cmdCtx = fromTelegrafCtx(ctx, commandName, args);
+        await commandRegistry.dispatch(cmdCtx);
+      };
+
+    this.bot.start(dispatchCommand("start"));
+    this.bot.help(dispatchCommand("help"));
+
+    this.bot.command("ping",      dispatchCommand("ping"));
+    this.bot.command("dashboard", dispatchCommand("dashboard"));
+    this.bot.command("trustline", dispatchCommand("trustline"));
+    this.bot.command("validate",  dispatchCommand("validate"));
+    this.bot.command("sponsor",   dispatchCommand("sponsor"));
+    this.bot.command("multisig",  dispatchCommand("multisig"));
+    this.bot.command("swap",      dispatchCommand("swap"));
+    this.bot.command("portfolio", dispatchCommand("portfolio"));
+    this.bot.command("currency",  dispatchCommand("currency"));
+    this.bot.command("alert",     dispatchCommand("alert"));
+    this.bot.command("alerts",    dispatchCommand("alerts"));
+    this.bot.command("discover",  dispatchCommand("discover"));
+    this.bot.command("feedback",  dispatchCommand("feedback"));
+
+    // ── Telegram-specific: settings (WebApp) ─────────────────────────────────
+    this.bot.command("settings", async (ctx: any) => {
+      const settingsUrl = `${BACKEND_URL}/settings`;
+      await ctx.replyWithHTML("⚙️ <b>Open Settings</b>", {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "Open Settings", web_app: { url: settingsUrl } }],
+          ],
+        },
+      });
     });
 
-    this.bot.command("trustline", async (ctx: Context) => {
-      const userId = String(ctx.from?.id || "unknown");
-      const text = ctx.message && "text" in ctx.message ? ctx.message.text : "";
-      const commandName = extractCommandName(text, "telegram");
-      await withPerformanceProfiling(
-        commandName,
-        "telegram",
-        userId,
-        async () => {
-          const args = text.split(" ").slice(1);
-          if (args.length < 1) {
-            return ctx.reply(
-              "Usage: /trustline <assetCode> [issuerDomain|issuerAddress]\nExample: /trustline USDC circle.com"
-            );
-          }
-      const userId = String(ctx.from?.id || 'unknown');
-      await withPerformanceProfiling('/start', 'telegram', userId, () => ctx.reply('Welcome to Chen Pilot! I am your AI-powered Stellar DeFi assistant.'))();
+    // ── Telegram-specific: inline asset search ────────────────────────────────
+    this.bot.on("inline_query", async (ctx: any) => {
+      const query: string = ctx.inlineQuery.query.trim();
+      if (query.length < 2) {
+        return ctx.answerInlineQuery([]);
+      }
+      try {
+        const res = await fetch(
+          `${BACKEND_URL}/api/assets/search?q=${encodeURIComponent(query)}&limit=5`
+        );
+        if (!res.ok) return ctx.answerInlineQuery([]);
+        const assets = (await res.json()) as Array<{
+          code: string;
+          issuer?: string;
+          domain?: string;
+          price?: number;
+          priceChange24h?: number;
+        }>;
+        const results = assets.map((asset, index) => ({
+          type: "article",
+          id: `${asset.code}-${asset.issuer ?? "native"}-${index}`,
+          title: `${asset.code}${asset.domain ? ` (${asset.domain})` : ""}`,
+          description: asset.price
+            ? `Price: $${asset.price.toFixed(4)}${asset.priceChange24h !== undefined ? ` | 24h: ${asset.priceChange24h >= 0 ? "+" : ""}${asset.priceChange24h.toFixed(2)}%` : ""}`
+            : "Stellar asset",
+          input_message_content: {
+            message_text: this.formatAssetInlineResult(asset),
+            parse_mode: "HTML",
+          },
+          thumb_url: asset.domain
+            ? `https://www.google.com/s2/favicons?domain=${asset.domain}`
+            : undefined,
+        }));
+        await ctx.answerInlineQuery(results, { cache_time: 300 });
+      } catch {
+        return ctx.answerInlineQuery([]);
+      }
     });
-    this.bot.help(async (ctx: Context) => {
-      const userId = String(ctx.from?.id || 'unknown');
-      await withPerformanceProfiling('/help', 'telegram', userId, async () => {
+
+    // ── Wizard input handler ─────────────────────────────────────────────────
+    this.bot.use(async (ctx: any, next: () => Promise<void>) => {
+      const userId = String(ctx.from?.id ?? "unknown");
+      const text: string = ctx.message?.text ?? "";
+      const response = await botWorkflowManager.handleInput(userId, "telegram", text);
+      if (response) {
+        await ctx.reply(response.message);
+        return;
+      }
+      return next();
+    });
+
+    // Set bot commands for mobile menu
+    await this.bot.telegram.setMyCommands([
+      { command: "start",     description: "Start the bot" },
+      { command: "portfolio", description: "Portfolio summary & net worth" },
+      { command: "swap",      description: "Swap assets (DM only)" },
+      { command: "trustline", description: "Add trustline" },
+      { command: "multisig",  description: "Setup multisig wallet (DM only)" },
+      { command: "alert",     description: "Set a price alert" },
+      { command: "alerts",    description: "List your price alerts" },
+      { command: "currency",  description: "Set reporting currency" },
+      { command: "feedback",  description: "Send feedback or report bugs" },
+      { command: "settings",  description: "Open settings" },
+      { command: "help",      description: "Show help" },
+    ]);
+
+    this.bot.launch();
+    console.log("✅ Telegram bot initialized.");
+  }
+
+
         // Extract query after /help command
         const messageText = ctx.message?.text || '';
         const query = messageText.replace(/^\/help\s*/i, '').trim();
@@ -972,5 +1057,34 @@ export class TelegramAdapter {
       console.error("Error sending message with buttons:", error);
       return false;
     }
+  }
+
+  /**
+   * Create a DigestTarget for the MarketDigestScheduler.
+   * Register the returned target with the scheduler in index.ts.
+   *
+   * The target posts to TELEGRAM_MARKET_OVERVIEW_CHAT_ID using HTML parse mode.
+   * Returns null when no chat ID is configured so the caller can skip
+   * registration gracefully.
+   */
+  createDigestTarget(): DigestTarget | null {
+    if (!MARKET_OVERVIEW_CHAT_ID) {
+      return null;
+    }
+    const adapter = this;
+    const chatId = MARKET_OVERVIEW_CHAT_ID;
+
+    return {
+      label: `telegram:${chatId}`,
+      async post(data) {
+        if (!adapter.bot) {
+          throw new Error("Telegram bot not initialized");
+        }
+        const message = adapter.marketOverviewService.formatForTelegram(data);
+        await adapter.bot.telegram.sendMessage(chatId, message, {
+          parse_mode: "HTML",
+        });
+      },
+    };
   }
 }
