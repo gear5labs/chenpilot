@@ -14,6 +14,8 @@ import {
   SignatureProviderErrorRecovery,
   signatureProviderErrorRecovery,
   ProviderType,
+  ProviderConfig,
+  TransactionWorkflowEngine,
 } from "./index";
 import {
   SignatureProviderSDKConfig,
@@ -31,6 +33,7 @@ export class SignatureProviderSDK {
   private registry: SignatureProviderRegistry;
   private factory: SignatureProviderFactory;
   private coordinator: MultiSignatureCoordinator;
+  private workflowEngine: TransactionWorkflowEngine;
   private errorRecovery: SignatureProviderErrorRecovery;
   private metrics: Map<string, ProviderMetrics> = new Map();
   private healthChecks: Map<string, ProviderHealthCheck> = new Map();
@@ -57,6 +60,7 @@ export class SignatureProviderSDK {
     this.factory = signatureProviderFactory;
     this.coordinator = new MultiSignatureCoordinator();
     this.errorRecovery = signatureProviderErrorRecovery;
+    this.workflowEngine = new TransactionWorkflowEngine(this.registry, this.factory);
   }
 
   /**

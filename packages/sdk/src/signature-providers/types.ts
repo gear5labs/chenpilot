@@ -83,6 +83,9 @@ export interface SignatureProviderCapabilities {
   requiresUserInteraction: boolean;
   supportsMessageSigning: boolean;
   maxConcurrentSignatures: number;
+  signingModes?: Array<"transaction" | "message" | "batch" | "offline">;
+  supportsSubmission?: boolean;
+  supportsHealthCheck?: boolean;
   metadata?: Record<string, unknown>;
 }
 
@@ -117,4 +120,49 @@ export interface SignatureProviderSDKConfig {
 export interface ProviderConfig {
   type: ProviderType;
   config?: Record<string, unknown>;
+}
+
+export interface ProviderSelectionPreferences {
+  preferHardwareWallet?: boolean;
+  preferBrowserExtension?: boolean;
+  requireUserInteraction?: boolean;
+  requireMessageSigning?: boolean;
+  minConcurrentSignatures?: number;
+  preferredProviderIds?: string[];
+}
+
+export interface ProviderResolutionRequest {
+  chainId: ChainId;
+  operation?: "transaction" | "message" | "submission";
+  preferences?: ProviderSelectionPreferences;
+  fallbackToMock?: boolean;
+}
+
+export interface ProviderResolutionResult {
+  providerType: ProviderType;
+  providerId?: string;
+  score: number;
+  capabilities: SignatureProviderCapabilities;
+  reason: string[];
+}
+
+export interface TransactionWorkflowRequest {
+  chainId: ChainId;
+  transaction: ChainTransaction["transaction"];
+  accountAddress: string;
+  providerPreferences?: ProviderSelectionPreferences;
+  submit?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface TransactionWorkflowResult {
+  providerId: string;
+  chainId: ChainId;
+  signature: SignatureResult;
+  submitted?: {
+    success: boolean;
+    transactionId?: string;
+    rawResult?: unknown;
+  };
+  metadata?: Record<string, unknown>;
 }
