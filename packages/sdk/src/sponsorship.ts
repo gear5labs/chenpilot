@@ -1,53 +1,65 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
+import { AssetToTrust, TrustlineWorkflowBuilder } from "./trustline";
 
-/**
- * Sponsorship operation types (SEP-40)
- */
 export type SponsorshipOperation = "begin" | "end";
 
-/**
- * Configuration for sponsorship operations
- */
 export interface SponsorshipConfig {
-  /**
-   * The account ID of the sponsor (pays for reserve)
-   */
   sponsor: string;
-
-  /**
-   * The account ID to be sponsored
-   */
   sponsoredAccount: string;
-
-  /**
-   * Optional: Number of ledger entries to sponsor (default: indefinite)
-   */
   numFrames?: number;
 }
 
-/**
- * Result of a sponsorship operation
- */
 export interface SponsorshipResult {
-  /**
-   * The transaction envelope XDR
-   */
   transactionXdr: string;
-
-  /**
-   * The operation type performed
-   */
   operation: SponsorshipOperation;
-
-  /**
-   * The sponsor account ID
-   */
   sponsor: string;
-
-  /**
-   * The sponsored account ID
-   */
   sponsoredAccount: string;
+}
+
+export enum SponsorshipWorkflowStep {
+  IDLE = "idle",
+  PREVIEWING = "previewing",
+  VALIDATING = "validating",
+  ESTIMATING = "estimating",
+  BUILDING = "building",
+  READY = "ready",
+}
+
+export interface SponsorshipWorkflowConfig {
+  horizonUrl?: string;
+  networkPassphrase?: string;
+  sponsorSecret?: string;
+  sponsor?: string;
+  sponsoredAccount?: string;
+}
+
+export interface SponsorshipWorkflowPreview {
+  operations: StellarSdk.Operation<any>[];
+  transactionXdr: string;
+  sponsor: string;
+  sponsoredAccount: string;
+}
+
+export interface SponsorshipWorkflowValidation {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  sponsorExists: boolean;
+  sponsoredAccountExists: boolean;
+}
+
+export interface SponsorshipWorkflowResourceEstimate {
+  baseFee: number;
+  totalCost: string;
+  operationCount: number;
+  reservesToSponsor: number;
+}
+
+export interface SponsorshipWorkflowResult {
+  transactionXdr: string;
+  signedTransactionXdr?: string;
+  operations: StellarSdk.Operation<any>[];
+  resourceEstimate: SponsorshipWorkflowResourceEstimate;
 }
 
 /**
@@ -364,13 +376,9 @@ export function createEndSponsorshipTransaction(
 ): SponsorshipResult {
   const builder = new SponsorshipTransactionBuilder(source, networkPassphrase);
 
-  // Add begin sponsorship (must be active to end)
   builder.addBeginSponsorship(sponsorshipConfig);
-
-  // Add end sponsorship
   builder.addEndSponsorship();
 
-  // Build transaction
   const transaction = builder.build();
 
   return {
@@ -379,4 +387,243 @@ export function createEndSponsorshipTransaction(
     sponsor: sponsorshipConfig.sponsor,
     sponsoredAccount: sponsorshipConfig.sponsoredAccount,
   };
+}
+
+export class SponsorshipWorkflowBuilder {
+  private config: Required<SponsorshipWorkflowConfig>;
+  private sponsoredAssets: AssetToTrust[] = [];
+  private managedData: Array<{ name: string; value: string | null }> = [];
+  private createAccountDestination?: string;
+  private payments: Array<{ destination: string; amount: string; asset?: StellarSdk.Asset }> = [];
+  private step: SponsorshipWorkflowStep = SponsorshipWorkflowStep.IDLE;
+
+  constructor(config: SponsorshipWorkflowConfig = {}) {
+    this.config = {
+      horizonUrl: config.horizonUrl || "https://horizon.stellar.org",
+      networkPassphrase: config.networkPassphrase || StellarSdk.Networks.PUBLIC,
+      sponsorSecret: config.sponsorSecret,
+      sponsor: config.sponsor,
+      sponsoredAccount: config.sponsoredAccount,
+    };
+  }
+
+  setSponsoredAccount(accountId: string): this {
+    this.config.sponsoredAccount = accountId;
+    this.step = SponsorshipWorkflowStep.BUILDING;
+    return this;
+  }
+
+  addTrustline(assetCode: string, assetIssuer: string, limit?: string): this {
+    this.sponsoredAssets.push({ assetCode, assetIssuer, limit });
+    this.step = SponsorshipWorkflowStep.BUILDING;
+    return this;
+  }
+
+  addTrustlines(assets: AssetToTrust[]): this {
+    this.sponsoredAssets.push(...assets);
+    this.step = SponsorshipWorkflowStep.BUILDING;
+    return this;
+  }
+
+  addCreateAccount(destination: string, startingBalance: string = "0"): this {
+    this.createAccountDestination = destination;
+    this.step = SponsorshipWorkflowStep.BUILDING;
+    return this;
+  }
+
+  addManageData(name: string, value: string | null): this {
+    this.managedData.push({ name, value });
+    this.step = SponsorshipWorkflowStep.BUILDING;
+    return this;
+  }
+
+  addPayment(destination: string, amount: string, asset?: StellarSdk.Asset): this {
+    this.payments.push({ destination, amount, asset });
+    this.step = SponsorshipWorkflowStep.BUILDING;
+    return this;
+  }
+
+  async preview(): Promise<SponsorshipWorkflowPreview> {
+    this.step = SponsorshipWorkflowStep.PREVIEWING;
+
+    const operations: StellarSdk.Operation<any>[] = [];
+
+    if (this.config.sponsor && this.config.sponsoredAccount) {
+      operations.push(
+        StellarSdk.Operation.beginSponsoringFutureReserves({
+          sponsor: this.config.sponsor,
+          sponsored: this.config.sponsoredAccount,
+        })
+      );
+    }
+
+    for (const asset of this.sponsoredAssets) {
+      operations.push(
+        StellarSdk.Operation.changeTrust({
+          source: this.config.sponsoredAccount,
+          asset: new StellarSdk.Asset(asset.assetCode, asset.assetIssuer),
+          limit: asset.limit,
+        })
+      );
+    }
+
+    for (const data of this.managedData) {
+      operations.push(
+        StellarSdk.Operation.manageData({
+          source: this.config.sponsoredAccount,
+          name: data.name,
+          value: data.value,
+        })
+      );
+    }
+
+    for (const payment of this.payments) {
+      operations.push(
+        StellarSdk.Operation.payment({
+          source: this.config.sponsoredAccount,
+          destination: payment.destination,
+          asset: payment.asset || StellarSdk.Asset.native(),
+          amount: payment.amount,
+        })
+      );
+    }
+
+    if (this.createAccountDestination && this.config.sponsor) {
+      operations.push(
+        StellarSdk.Operation.createAccount({
+          source: this.config.sponsor,
+          destination: this.createAccountDestination,
+          startingBalance: "0",
+        })
+      );
+    }
+
+    if (this.config.sponsoredAccount) {
+      operations.push(
+        StellarSdk.Operation.endSponsoringFutureReserves({
+          source: this.config.sponsoredAccount,
+        })
+      );
+    }
+
+    let transactionXdr = "";
+    if (this.config.sponsor) {
+      const tx = new StellarSdk.TransactionBuilder(
+        new StellarSdk.Account(this.config.sponsor, "0"),
+        {
+          fee: StellarSdk.BASE_FEE,
+          networkPassphrase: this.config.networkPassphrase,
+        }
+      );
+      operations.forEach((op) => tx.addOperation(op));
+      transactionXdr = tx.build().toXDR();
+    }
+
+    return {
+      operations,
+      transactionXdr,
+      sponsor: this.config.sponsor || "",
+      sponsoredAccount: this.config.sponsoredAccount || "",
+    };
+  }
+
+  async validate(): Promise<SponsorshipWorkflowValidation> {
+    this.step = SponsorshipWorkflowStep.VALIDATING;
+
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    let sponsorExists = false;
+    let sponsoredAccountExists = false;
+
+    if (!this.config.sponsor) {
+      errors.push("Sponsor account is required");
+    }
+
+    if (!this.config.sponsoredAccount) {
+      errors.push("Sponsored account is required");
+    }
+
+    const server = new StellarSdk.Horizon.Server(this.config.horizonUrl);
+
+    if (this.config.sponsor) {
+      try {
+        await server.accounts().accountId(this.config.sponsor).call();
+        sponsorExists = true;
+      } catch {
+        errors.push(`Sponsor account ${this.config.sponsor} not found`);
+      }
+    }
+
+    if (this.config.sponsoredAccount && !this.createAccountDestination) {
+      try {
+        await server.accounts().accountId(this.config.sponsoredAccount).call();
+        sponsoredAccountExists = true;
+      } catch {
+        warnings.push(`Sponsored account ${this.config.sponsoredAccount} does not exist yet`);
+      }
+    }
+
+    this.sponsoredAssets.forEach((a) => {
+      if (!a.assetIssuer.startsWith("G")) {
+        warnings.push(`Asset issuer ${a.assetIssuer} does not appear to be a valid Stellar address`);
+      }
+    });
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings,
+      sponsorExists,
+      sponsoredAccountExists,
+    };
+  }
+
+  estimate(previewResult?: SponsorshipWorkflowPreview): SponsorshipWorkflowResourceEstimate {
+    this.step = SponsorshipWorkflowStep.ESTIMATING;
+
+    const preview = previewResult || { operations: [] };
+    const operationCount = preview.operations.length;
+    const reservesToSponsor = this.sponsoredAssets.length + this.managedData.length + (this.createAccountDestination ? 1 : 0);
+
+    return {
+      baseFee: 100,
+      totalCost: operationCount.toString(),
+      operationCount,
+      reservesToSponsor,
+    };
+  }
+
+  async build(): Promise<SponsorshipWorkflowResult> {
+    const preview = await this.preview();
+    const estimate = this.estimate(preview);
+
+    return {
+      transactionXdr: preview.transactionXdr,
+      operations: preview.operations,
+      resourceEstimate: estimate,
+    };
+  }
+
+  getCurrentStep(): SponsorshipWorkflowStep {
+    return this.step;
+  }
+}
+
+export function withSponsorship(
+  trustlineWorkflow: TrustlineWorkflowBuilder,
+  sponsorshipConfig: SponsorshipWorkflowConfig
+): SponsorshipWorkflowBuilder {
+  const builder = new SponsorshipWorkflowBuilder(sponsorshipConfig);
+
+  const assets = (trustlineWorkflow as any).assets || [];
+  assets.forEach((asset: AssetToTrust) => {
+    builder.addTrustline(asset.assetCode, asset.assetIssuer, asset.limit);
+  });
+
+  const trustlinesToRemove = (trustlineWorkflow as any).trustlinesToRemove || [];
+  trustlinesToRemove.forEach((t: { assetCode: string; assetIssuer: string }) => {
+    builder.addTrustline(t.assetCode, t.assetIssuer);
+  });
+
+  return builder;
 }
