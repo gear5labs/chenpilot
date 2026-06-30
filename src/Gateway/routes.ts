@@ -24,6 +24,7 @@ import contractMetadataRoutes from "../services/contracts/contractMetadata.route
 import horizonProxyRoutes from "./horizonProxy.routes";
 import auditLogRoutes from "../AuditLog/auditLog.routes";
 import adminAgentRoutes from "../Agents/admin/adminAgent.routes";
+import governanceRoutes from "../Agents/admin/governance.routes";
 import experimentRoutes from "../Agents/admin/experiment.routes";
 import simulationRoutes from "../Agents/admin/simulation.routes";
 import { stellarLiquidityTool } from "../Agents/tools/stellarLiquidityTool";
@@ -132,6 +133,7 @@ router.use("/audit", auditLogRoutes);
 
 // Mount admin agent management routes (requires admin role)
 router.use("/admin/agents", adminAgentRoutes);
+router.use("/admin/governance", governanceRoutes);
 
 // Mount experiment management routes (requires admin role)
 router.use("/admin/experiments", experimentRoutes);

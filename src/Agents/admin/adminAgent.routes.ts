@@ -192,7 +192,7 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const adminId = (req as any).user?.id;
+      const adminId = req.user?.userId;
       
       await durableExecutor.resumeExecution(id, adminId);
       
