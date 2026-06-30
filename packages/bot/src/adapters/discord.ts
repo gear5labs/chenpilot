@@ -43,6 +43,11 @@ import {
 import { botWorkflowManager } from "../services/workflowService";
 import { ScamDetectionService } from "../scamDetection";
 import { MarketOverviewService } from "../marketOverview";
+import { DigestTarget } from "../services/marketDigestScheduler";
+import { commandRegistry } from "../commands/registry";
+import { fromSlashInteraction } from "../commands/adapters/discordContext";
+import { setUserCurrency, getUserCurrency } from "../commands/handlers/currency";
+import { getAlerts } from "../commands/handlers/alert";
 import { searchFeatures, formatHelpMessage, formatAiHelpMessage } from "../services/helpProvider";
 import { AssetVerificationService } from '../assetVerification';
 import { RateLimiter, DEFAULT_RATE_LIMIT, STRICT_RATE_LIMIT } from '../rateLimiter';
@@ -57,6 +62,57 @@ const DASHBOARD_URL = process.env.DASHBOARD_URL || `${BACKEND_URL}/dashboard`;
 const HORIZON_URL =
   process.env.STELLAR_HORIZON_URL || "https://horizon-testnet.stellar.org";
 const DEBOUNCE_MS = 2000;
+
+/**
+ * Extracts slash-command option values into a positional string array so that
+ * shared CommandHandlers (which receive ctx.args[]) stay platform-neutral.
+ *
+ * Convention (matches the slashCommandDefinitions argument order):
+ *   trustline → [asset, issuer]
+ *   validate  → [asset, issuer]
+ *   alert     → [asset, condition, price, currency?]
+ *   help      → [query?]
+ *   currency  → [currency]
+ *   swap      → [from, to, amount]
+ */
+function buildSlashArgs(interaction: ChatInputCommandInteraction): string[] {
+  const opts = interaction.options;
+  switch (interaction.commandName) {
+    case "trustline":
+      return [
+        opts.getString("asset") ?? "",
+        opts.getString("issuer") ?? "",
+      ];
+    case "validate":
+      return [
+        opts.getString("asset") ?? "",
+        opts.getString("issuer") ?? "",
+      ];
+    case "alert": {
+      const currency = opts.getString("currency");
+      const args = [
+        opts.getString("asset") ?? "",
+        opts.getString("condition") ?? "",
+        String(opts.getNumber("price") ?? ""),
+      ];
+      if (currency) args.push(currency);
+      return args;
+    }
+    case "help":
+      return [opts.getString("query") ?? ""].filter(Boolean);
+    case "currency":
+      return [opts.getString("currency") ?? ""];
+    case "swap":
+      return [
+        opts.getString("from") ?? "",
+        opts.getString("to") ?? "",
+        String(opts.getNumber("amount") ?? ""),
+      ];
+    default:
+      return [];
+  }
+}
+
 
 // Role names required for advanced commands (#120)
 const ADVANCED_ROLE_NAMES = (
@@ -86,13 +142,11 @@ const SCAM_DETECTION_CHANNELS = (
   .split(",")
   .filter((c) => c.trim());
 
-// #128: Daily market overview digest configuration
-const MARKET_OVERVIEW_ENABLED =
-  process.env.DISCORD_MARKET_OVERVIEW_ENABLED === "true";
+// #128: Daily market overview digest configuration — kept for the Discord
+// channel ID used by createDigestTarget(). Schedule timing is now owned
+// by MarketDigestScheduler in services/marketDigestScheduler.ts.
 const MARKET_OVERVIEW_CHANNEL_ID =
   process.env.DISCORD_MARKET_OVERVIEW_CHANNEL_ID || "";
-const MARKET_OVERVIEW_TIME =
-  process.env.DISCORD_MARKET_OVERVIEW_TIME || "09:00"; // Format: HH:MM in UTC
 
 // Transaction thread logging (#113)
 const TRANSACTION_THREAD_LOGGING_ENABLED = process.env.DISCORD_TRANSACTION_LOG_THREADS_ENABLED !== 'false';
@@ -134,8 +188,6 @@ export class DiscordAdapter {
   // #119: Active price alerts
   private priceAlerts: Map<string, PriceAlert> = new Map();
   private alertCheckInterval?: ReturnType<typeof setInterval>;
-  // #128: Market overview digest interval
-  private marketOverviewInterval?: ReturnType<typeof setInterval>;
   // Button handlers map: buttonId -> ButtonHandler
   private buttonHandlers: Map<string, ButtonHandler> = new Map();
   // #114: AI agent client
@@ -248,91 +300,42 @@ export class DiscordAdapter {
     });
   }
 
-  // #128: Calculate milliseconds until next scheduled market overview post
-  private getTimeUntilNextSchedule(): number {
-    const [hours, minutes] = MARKET_OVERVIEW_TIME.split(":").map(Number);
-    const now = new Date();
-    const scheduledTime = new Date();
-    scheduledTime.setUTCHours(hours, minutes, 0, 0);
-
-    // If the scheduled time has already passed today, schedule for tomorrow
-    if (scheduledTime <= now) {
-      scheduledTime.setDate(scheduledTime.getDate() + 1);
-    }
-
-    return scheduledTime.getTime() - now.getTime();
-  }
-
-  // #128: Post daily market overview to configured channel
-  private async postMarketOverview(): Promise<void> {
+  /**
+   * Create a DigestTarget for the MarketDigestScheduler.
+   * Register the returned target with the scheduler in index.ts.
+   *
+   * The target posts to DISCORD_MARKET_OVERVIEW_CHANNEL_ID using Discord
+   * markdown formatting and writes an audit log entry on success or failure.
+   *
+   * Returns null when no channel ID is configured so the caller can skip
+   * registration gracefully.
+   */
+  createDigestTarget(): DigestTarget | null {
     if (!MARKET_OVERVIEW_CHANNEL_ID) {
-      console.warn(
-        "⚠️ Market overview channel ID not configured, skipping digest"
-      );
-      return;
+      return null;
     }
+    // Capture `this` for the closure
+    const adapter = this;
+    const channelId = MARKET_OVERVIEW_CHANNEL_ID;
 
-    try {
-      console.log("📊 Fetching daily market overview...");
-      const marketData = await this.marketOverviewService.fetchMarketOverview();
-      const message =
-        this.marketOverviewService.formatMarketOverviewMessage(marketData);
-
-      const channel = this.client.channels.cache.get(
-        MARKET_OVERVIEW_CHANNEL_ID
-      ) as TextChannel;
-      if (!channel) {
-        console.error(
-          `❌ Market overview channel ${MARKET_OVERVIEW_CHANNEL_ID} not found`
-        );
-        return;
-      }
-
-      await channel.send(message);
-      console.log("✅ Daily market overview posted successfully");
-
-      await this.logAuditAction({
-        action: "MARKET_OVERVIEW_POSTED",
-        triggeredBy: "system",
-        details: `Channel: ${MARKET_OVERVIEW_CHANNEL_ID}`,
-        success: true,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.error("❌ Error posting market overview:", error);
-      await this.logAuditAction({
-        action: "MARKET_OVERVIEW_FAILED",
-        triggeredBy: "system",
-        details: `Error: ${error instanceof Error ? error.message : String(error)}`,
-        success: false,
-        timestamp: new Date().toISOString(),
-      });
-    }
-  }
-
-  // #128: Start the daily market overview scheduler
-  private startMarketOverviewScheduler(): void {
-    if (!MARKET_OVERVIEW_ENABLED || !MARKET_OVERVIEW_CHANNEL_ID) {
-      console.log("ℹ️ Market overview digest disabled or not configured");
-      return;
-    }
-
-    const initialDelay = this.getTimeUntilNextSchedule();
-    console.log(
-      `📅 Market overview digest scheduled for ${MARKET_OVERVIEW_TIME} UTC (next post in ${Math.round(initialDelay / 1000 / 60)} minutes)`
-    );
-
-    // Schedule the first post
-    setTimeout(async () => {
-      await this.postMarketOverview();
-      // Then schedule daily posts (24 hours = 86400000 ms)
-      this.marketOverviewInterval = setInterval(
-        async () => {
-          await this.postMarketOverview();
-        },
-        24 * 60 * 60 * 1000
-      );
-    }, initialDelay);
+    return {
+      label: `discord:${channelId}`,
+      async post(data) {
+        const message = adapter.marketOverviewService.formatForDiscord(data);
+        const channel = adapter.client.channels.cache.get(channelId) as TextChannel | undefined;
+        if (!channel) {
+          throw new Error(`Discord channel ${channelId} not found in cache`);
+        }
+        await channel.send(message);
+        await adapter.logAuditAction({
+          action: "MARKET_OVERVIEW_POSTED",
+          triggeredBy: "system",
+          details: `Channel: ${channelId}`,
+          success: true,
+          timestamp: new Date().toISOString(),
+        });
+      },
+    };
   }
 
   // Register slash commands with Discord via REST API
@@ -1253,253 +1256,64 @@ export class DiscordAdapter {
     await this.client.login(token);
     await this.deploySlashCommands();
     this.startAlertPolling();
-    // #128: Start market overview scheduler
-    this.startMarketOverviewScheduler();
     console.log("✅ Discord bot initialized.");
   }
 
-  // Route slash command interactions to the appropriate handler
+  // Route slash command interactions to the shared command registry.
   private async handleSlashCommand(interaction: ChatInputCommandInteraction): Promise<void> {
     const userId = interaction.user.id;
     const cmd = interaction.commandName;
 
-    // Anti-flood check
-    if (this.isFlooding(userId)) {
-      await interaction.reply({ content: "⏳ Please wait a moment before sending another command.", ephemeral: true });
-      return;
+    // Collect slash-command option args as a plain array so the registry
+    // handlers stay platform-neutral.
+    const args = buildSlashArgs(interaction);
+
+    // Build the platform-neutral context.  The registry handles flood, rate
+    // limiting, guards, execution, and metrics internally.
+    const ctx = fromSlashInteraction(interaction, args);
+
+    // Defer for commands known to do async work so Discord doesn't time out.
+    const deferCommands = new Set([
+      "ping", "sponsor", "trustline", "validate", "report", "portfolio",
+      "discover", "swap",
+    ]);
+    if (deferCommands.has(cmd) && !interaction.deferred && !interaction.replied) {
+      const ephemeral = ["sponsor", "report", "portfolio"].includes(cmd);
+      await interaction.deferReply({ ephemeral });
     }
 
-    // Rate limit check
-    const rateLimitResult = this.checkRateLimit(userId, `/${cmd}`);
-    if (!rateLimitResult.allowed) {
-      await interaction.reply({ content: rateLimitResult.message ?? "⏳ Rate limit exceeded.", ephemeral: true });
-      return;
-    }
-
-    await withPerformanceProfiling(`/${cmd}`, 'discord', userId, async () => {
-      switch (cmd) {
-        case "start":
-          await interaction.reply("Welcome to Chen Pilot! I am your AI-powered Stellar DeFi assistant. Type `/help` to see what I can do!");
-          break;
-
-        case "ping": {
-          await interaction.deferReply();
-          const startTime = Date.now();
-          try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 5000);
-            const response = await fetch(`${BACKEND_URL}/api/health`, { method: "GET", signal: controller.signal });
-            clearTimeout(timeout);
-            const ms = Date.now() - startTime;
-            await interaction.editReply(
-              response.ok
-                ? `🏓 **Pong!**\n\n📡 **End-to-End Latency:** ${ms}ms\n✅ Backend: Online`
-                : `🏓 **Pong!**\n\n📡 **End-to-End Latency:** ${ms}ms\n⚠️ Backend: HTTP ${response.status}`
-            );
-          } catch {
-            await interaction.editReply(`🏓 **Pong!**\n\n📡 **End-to-End Latency:** ${Date.now() - startTime}ms\n❌ Backend: Unreachable`);
-          }
-          break;
+    // /thread is Discord-specific (creates a thread object) — keep it inline.
+    if (cmd === "thread") {
+      if (interaction.channel?.type === ChannelType.GuildText) {
+        try {
+          const thread = await interaction.channel.threads.create({
+            name: `Chen Pilot Session - ${interaction.user.username}`,
+            autoArchiveDuration: 60,
+          });
+          await thread.send(
+            `👋 Hello ${interaction.user.username}! I've started this thread. How can I help you with Stellar DeFi today?`
+          );
+          await interaction.reply({ content: `🧵 Thread created: ${thread}`, ephemeral: true });
+        } catch {
+          await interaction.reply({ content: "❌ Couldn't start a thread. Check my permissions.", ephemeral: true });
         }
-
-        case "help": {
-          const query = interaction.options.getString("query") ?? "";
-          const results = searchFeatures(query);
-          await interaction.reply(formatHelpMessage(results, query.length > 0, "markdown"));
-          break;
-        }
-
-        case "thread": {
-          if (interaction.channel?.type === ChannelType.GuildText) {
-            try {
-              const thread = await interaction.channel.threads.create({
-                name: `Chen Pilot Session - ${interaction.user.username}`,
-                autoArchiveDuration: 60,
-              });
-              await thread.send(`👋 Hello ${interaction.user.username}! I've started this thread. How can I help you with Stellar DeFi today?`);
-              await interaction.reply({ content: `🧵 Thread created: ${thread}`, ephemeral: true });
-            } catch {
-              await interaction.reply({ content: "❌ Couldn't start a thread. Check my permissions.", ephemeral: true });
-            }
-          } else if (interaction.channel?.isThread()) {
-            await interaction.reply({ content: "🧵 We are already in a thread!", ephemeral: true });
-          } else {
-            await interaction.reply({ content: "❌ Threads can only be started in text channels.", ephemeral: true });
-          }
-          break;
-        }
-
-        case "sponsor": {
-          if (!interaction.channel || interaction.channel.type !== ChannelType.DM) {
-            await interaction.reply({ content: "🔒 This command can only be used in a Direct Message (DM) with the bot.", ephemeral: true });
-            return;
-          }
-          await interaction.deferReply({ ephemeral: true });
-          try {
-            const response = await fetch(`${BACKEND_URL}/api/account/${userId}/sponsor`, { method: "POST", headers: { "Content-Type": "application/json" } });
-            const data = await response.json() as { success: boolean; message: string; address?: string };
-            if (data.success) {
-              await interaction.editReply(`✅ Account sponsored!\n📬 Address: \`${data.address}\``);
-              await this.logAuditAction({ action: "SPONSOR_ACCOUNT", triggeredBy: userId, details: `Address: ${data.address}`, success: true, timestamp: new Date().toISOString() });
-            } else {
-              await interaction.editReply(`❌ Sponsorship failed: ${data.message}`);
-              await this.logAuditAction({ action: "SPONSOR_ACCOUNT", triggeredBy: userId, details: `Failed: ${data.message}`, success: false, timestamp: new Date().toISOString() });
-            }
-          } catch {
-            await interaction.editReply("❌ Could not reach the sponsorship service. Please try again later.");
-          }
-          break;
-        }
-
-        case "trustline": {
-          const assetCode = interaction.options.getString("asset", true);
-          const assetIssuer = interaction.options.getString("issuer", true);
-          await interaction.deferReply();
-          try {
-            const op = await createTrustlineOperation(assetCode, assetIssuer);
-            const issuer = (op as { asset: { issuer: string } }).asset.issuer;
-            const reply = `✅ Found asset **${assetCode}**!\n\n**Asset:** ${assetCode}\n**Issuer:** \`${issuer}\`\n\n*Note: In a future update, I will provide a direct signing link.*`;
-            await interaction.editReply(reply);
-            await this.logAuditAction({ action: "TRUSTLINE_LOOKUP", triggeredBy: userId, details: `Asset: ${assetCode}, Issuer: ${assetIssuer}`, success: true, timestamp: new Date().toISOString() });
-          } catch (error) {
-            await interaction.editReply(`❌ Error: ${error instanceof Error ? error.message : String(error)}`);
-          }
-          break;
-        }
-
-        case "dashboard":
-          await interaction.reply({ content: `📊 **Chen Pilot Dashboard**\n\n🔗 ${DASHBOARD_URL}\n\n*You must be logged in to view the dashboard.*`, ephemeral: true });
-          break;
-
-        case "validate": {
-          const assetCode = interaction.options.getString("asset", true);
-          const issuerAddress = interaction.options.getString("issuer", true);
-          await interaction.deferReply();
-          try {
-            const result = await this.verificationService.verifyAsset(assetCode, issuerAddress);
-            const statusEmoji = result.status === "VERIFIED" ? "✅" : result.status === "MALICIOUS" ? "🚨" : "⚠️";
-            let reply = `${statusEmoji} **Asset Verification: ${result.status}**\n\n**Asset:** ${assetCode}\n**Issuer:** \`${issuerAddress}\`\n`;
-            if (result.domain) reply += `**Domain:** ${result.domain}\n`;
-            if (result.details) reply += `**Details:** ${result.details}\n`;
-            reply += `\n**Safe to use:** ${result.isSafe ? "Yes ✅" : "No ❌"}`;
-            await interaction.editReply(reply);
-          } catch (error) {
-            await interaction.editReply(`❌ Verification error: ${error instanceof Error ? error.message : String(error)}`);
-          }
-          break;
-        }
-
-        case "multisig": {
-          if (!interaction.channel || interaction.channel.type !== ChannelType.DM) {
-            await interaction.reply({ content: "🔒 This command can only be used in a Direct Message (DM) with the bot.", ephemeral: true });
-            return;
-          }
-          const response = this.multisigWizard.startWizard(userId, "discord");
-          await interaction.reply({ content: response.message, ephemeral: true });
-          break;
-        }
-
-        case "currency": {
-          const currency = interaction.options.getString("currency", true) as "USD" | "XLM" | "BTC";
-          this.userCurrency.set(userId, currency);
-          await interaction.reply({ content: `✅ Report currency set to **${currency}**`, ephemeral: true });
-          break;
-        }
-
-        case "report": {
-          const currency = this.userCurrency.get(userId) ?? "USD";
-          await interaction.deferReply({ ephemeral: true });
-          try {
-            const res = await fetch(`${BACKEND_URL}/api/portfolio/${userId}?currency=${currency}`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json() as { totalValue: number; assets: { code: string; balance: number; value: number }[] };
-            let reply = `📊 **Portfolio Report (${currency})**\n\n**Total Value:** ${data.totalValue.toFixed(4)} ${currency}\n\n`;
-            for (const a of data.assets) {
-              reply += `• **${a.code}**: ${a.balance} ≈ ${a.value.toFixed(4)} ${currency}\n`;
-            }
-            await interaction.editReply(reply);
-          } catch {
-            await interaction.editReply("❌ Could not fetch portfolio. Make sure your account is registered.");
-          }
-          break;
-        }
-
-        case "alert": {
-          const assetCode = interaction.options.getString("asset", true).toUpperCase();
-          const condition = interaction.options.getString("condition", true) as "above" | "below";
-          const targetPrice = interaction.options.getNumber("price", true);
-          const currency = (interaction.options.getString("currency") ?? this.userCurrency.get(userId) ?? "USD") as "USD" | "XLM" | "BTC";
-          const alertId = `${userId}-${assetCode}-${Date.now()}`;
-          const alert: PriceAlert = { id: alertId, userId, assetCode, targetPrice, currency, condition, createdAt: new Date().toISOString(), triggered: false };
-          this.priceAlerts.set(alertId, alert);
-          if (!this.userChannels.has(userId)) this.userChannels.set(userId, interaction.channelId);
-          await interaction.reply({ content: `🔔 Alert set: notify me when **${assetCode}** is ${condition} **${targetPrice} ${currency}**`, ephemeral: true });
-          break;
-        }
-
-        case "alerts": {
-          const userAlerts = [...this.priceAlerts.values()].filter(a => a.userId === userId && !a.triggered);
-          if (!userAlerts.length) {
-            await interaction.reply({ content: "📭 You have no active price alerts. Use `/alert` to set one.", ephemeral: true });
-            return;
-          }
-          let reply = "🔔 **Your Active Alerts**\n\n";
-          for (const a of userAlerts) {
-            reply += `• **${a.assetCode}** ${a.condition} ${a.targetPrice} ${a.currency} (ID: \`${a.id.slice(-6)}\`)\n`;
-          }
-          await interaction.reply({ content: reply, ephemeral: true });
-          break;
-        }
-
-        case "advanced": {
-          if (!interaction.member || !interaction.guild) {
-            await interaction.reply({ content: "❌ This command must be used in a server.", ephemeral: true });
-            return;
-          }
-          const member = await interaction.guild.members.fetch(userId);
-          const hasRole = member.roles.cache.some((r: { name: string }) => ADVANCED_ROLE_NAMES.includes(r.name));
-          if (!hasRole) {
-            await interaction.reply({ content: `🔒 This command requires one of the following roles: **${ADVANCED_ROLE_NAMES.join(", ")}**`, ephemeral: true });
-            return;
-          }
-          await interaction.reply({ content: "✅ Advanced command executed. (Role check passed)", ephemeral: true });
-          break;
-        }
-
-        case "discover": {
-          if (!interaction.member || !interaction.guild) {
-            await interaction.reply({ content: "❌ This command must be used in a server.", ephemeral: true });
-            return;
-          }
-          const member = await interaction.guild.members.fetch(userId);
-          const hasRole = member.roles.cache.some((r: { name: string }) => ADVANCED_ROLE_NAMES.includes(r.name));
-          if (!hasRole) {
-            await interaction.reply({ content: `🔒 \`/discover\` requires one of the following roles: **${ADVANCED_ROLE_NAMES.join(", ")}**`, ephemeral: true });
-            return;
-          }
-          await interaction.deferReply();
-          try {
-            const res = await fetch(`${BACKEND_URL}/api/assets/trending`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const assets = await res.json() as TrendingAsset[];
-            if (!assets.length) { await interaction.editReply("📭 No trending assets found at this time."); return; }
-            let reply = "🌟 **Trending Stellar Assets**\n\n";
-            for (const a of assets.slice(0, 5)) {
-              const change = a.priceChange24h >= 0 ? `+${a.priceChange24h.toFixed(2)}%` : `${a.priceChange24h.toFixed(2)}%`;
-              const emoji = a.priceChange24h >= 0 ? "📈" : "📉";
-              reply += `${emoji} **${a.assetCode}**${a.domain ? ` (${a.domain})` : ""}\n  24h Change: ${change} | Volume: ${a.volume24h.toLocaleString()} | Holders: ${a.holders.toLocaleString()}\n\n`;
-            }
-            await interaction.editReply(reply);
-          } catch {
-            await interaction.editReply("❌ Could not fetch trending assets. Please try again later.");
-          }
-          break;
-        }
-
-        default:
-          await interaction.reply({ content: "❓ Unknown command.", ephemeral: true });
+      } else if (interaction.channel?.isThread()) {
+        await interaction.reply({ content: "🧵 We are already in a thread!", ephemeral: true });
+      } else {
+        await interaction.reply({ content: "❌ Threads can only be started in text channels.", ephemeral: true });
       }
-    })();
+      return;
+    }
+
+    const result = await commandRegistry.dispatch(ctx);
+    if (result === null) {
+      // Unknown command not in registry
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: "❓ Unknown command.", ephemeral: true });
+      } else if (interaction.deferred) {
+        await interaction.editReply("❓ Unknown command.");
+      }
+    }
   }
 
   // #120: Check if message author has an advanced role
