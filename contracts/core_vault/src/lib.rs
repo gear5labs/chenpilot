@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Env, Address, BytesN, token};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Env, Address, BytesN, token};
 
 // ~1 hour at 5s/ledger
 const TIMELOCK_LEDGERS: u32 = 720;
@@ -38,6 +38,93 @@ pub struct ForceExitRequest {
     pub eligible_at: u64, // unix timestamp
 }
 
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtInit {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub admin: Address,
+    pub vault_token: Address,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtBackendStatus {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub online: bool,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtDeposit {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub user: Address,
+    pub amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtForceExitReq {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub user: Address,
+    pub amount: i128,
+    pub eligible_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtForceExitDone {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub user: Address,
+    pub amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtUpgProp {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub new_wasm_hash: BytesN<32>,
+    pub unlock_ledger: u32,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtUpgCncl {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtUpgDone {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub new_wasm_hash: BytesN<32>,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtAdmXfer {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub old_admin: Address,
+    pub new_admin: Address,
+}
+
 #[contract]
 pub struct CoreVaultContract;
 
@@ -51,6 +138,17 @@ impl CoreVaultContract {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::VaultToken, &vault_token);
         env.storage().instance().set(&DataKey::BackendOnline, &true);
+
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("init")),
+            EvtInit {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: admin.clone(),
+                admin,
+                vault_token,
+            },
+        );
     }
 
     // ── Backend status ────────────────────────────────────────────────────────
@@ -60,6 +158,16 @@ impl CoreVaultContract {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
         env.storage().instance().set(&DataKey::BackendOnline, &online);
+
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("backend_status")),
+            EvtBackendStatus {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: admin.clone(),
+                online,
+            },
+        );
     }
 
     pub fn is_backend_online(env: Env) -> bool {
@@ -85,7 +193,18 @@ impl CoreVaultContract {
         let new_balance = current + amount;
         
         // Store deposit with TTL extension to keep active accounts fresh
-        env.storage().persistent().set_with_ttl(&DataKey::Deposit(user), &new_balance, DEPOSIT_TTL_LEDGERS);
+        env.storage().persistent().set_with_ttl(&DataKey::Deposit(user.clone()), &new_balance, DEPOSIT_TTL_LEDGERS);
+
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("deposit")),
+            EvtDeposit {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: user.clone(),
+                user: user.clone(),
+                amount,
+            },
+        );
     }
 
     // ── Force Exit ────────────────────────────────────────────────────────────
@@ -115,7 +234,19 @@ impl CoreVaultContract {
         
         // Store force-exit with TTL to auto-expire unclaimed requests after ~50 hours
         // This prevents stale requests from accumulating indefinitely
-        env.storage().persistent().set_with_ttl(&DataKey::ForceExit(user), &req, FORCE_EXIT_TTL_LEDGERS);
+        env.storage().persistent().set_with_ttl(&DataKey::ForceExit(user.clone()), &req, FORCE_EXIT_TTL_LEDGERS);
+
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("force_exit_req")),
+            EvtForceExitReq {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: user.clone(),
+                user: user.clone(),
+                amount: balance,
+                eligible_at,
+            },
+        );
     }
 
     /// Complete the force-exit after the 48-hour challenge period has passed.
@@ -137,6 +268,17 @@ impl CoreVaultContract {
         let vault_token: Address = env.storage().instance().get(&DataKey::VaultToken).unwrap();
         let token = token::Client::new(&env, &vault_token);
         token.transfer(&env.current_contract_address(), &user, &req.amount);
+
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("force_exit_done")),
+            EvtForceExitDone {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: user.clone(),
+                user: user.clone(),
+                amount: req.amount,
+            },
+        );
     }
 
     /// Returns a pending force-exit request for a user, if any
@@ -151,14 +293,34 @@ impl CoreVaultContract {
         admin.require_auth();
 
         let unlock_ledger = env.ledger().sequence() + TIMELOCK_LEDGERS;
-        let pending = PendingUpgrade { new_wasm_hash, unlock_ledger };
+        let pending = PendingUpgrade { new_wasm_hash: new_wasm_hash.clone(), unlock_ledger };
         env.storage().instance().set(&DataKey::PendingUpgrade, &pending);
+
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("upg_prop")),
+            EvtUpgProp {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: admin.clone(),
+                new_wasm_hash,
+                unlock_ledger,
+            },
+        );
     }
 
     pub fn cancel_upgrade(env: Env) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
         env.storage().instance().remove(&DataKey::PendingUpgrade);
+
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("upg_cncl")),
+            EvtUpgCncl {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: admin,
+            },
+        );
     }
 
     pub fn apply_upgrade(env: Env) {
@@ -173,13 +335,34 @@ impl CoreVaultContract {
         }
 
         env.storage().instance().remove(&DataKey::PendingUpgrade);
-        env.deployer().update_current_contract_wasm(pending.new_wasm_hash);
+        env.deployer().update_current_contract_wasm(pending.new_wasm_hash.clone());
+
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("upg_done")),
+            EvtUpgDone {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: env.current_contract_address(),
+                new_wasm_hash: pending.new_wasm_hash.clone(),
+            },
+        );
     }
 
     pub fn transfer_admin(env: Env, new_admin: Address) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &new_admin);
+
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("adm_xfer")),
+            EvtAdmXfer {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: admin.clone(),
+                old_admin: admin,
+                new_admin,
+            },
+        );
     }
 
     pub fn upgrade_unlock_ledger(env: Env) -> u32 {
