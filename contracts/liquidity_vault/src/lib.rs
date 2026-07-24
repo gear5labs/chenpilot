@@ -1,5 +1,9 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, contractclient, Address, Env, symbol_short, panic_with_error};
+use soroban_sdk::{contract, contractimpl, contracttype, contractclient, Address, Env, Vec, symbol_short};
+
+// ---------------------------------------------------------------------------
+// Reusable protected-execution primitive
+// ---------------------------------------------------------------------------
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -18,6 +22,7 @@ pub trait PriceOracleTrait {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Config,
+    ExecutionContext,
 }
 
 #[contracttype]
@@ -25,7 +30,28 @@ pub enum DataKey {
 pub struct Config {
     pub admin: Address,
     pub oracle: Address,
-    pub threshold_bps: u32, // Deviation threshold in Basis Points (100 bps = 1%)
+    pub threshold_bps: u32,
+}
+
+/// Generic execution context for protected execution primitive.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExecutionContext {
+    pub caller: Address,
+    pub operation: Bytes, // e.g. "swap", "deposit", "withdraw"
+    pub intent_price: i128,
+    pub min_amount_out: i128,
+    pub max_slippage_bps: u32,
+    pub deadline_ledger: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExecutionResult {
+    pub approved: bool,
+    pub market_price: i128,
+    pub deviation_bps: u128,
+    pub reason: Bytes,
 }
 
 #[contract]
@@ -33,7 +59,6 @@ pub struct LiquidityVaultContract;
 
 #[contractimpl]
 impl LiquidityVaultContract {
-    /// Initializes the liquidity-protected vault.
     pub fn initialize(env: Env, admin: Address, oracle: Address, threshold_bps: u32) {
         if env.storage().instance().has(&DataKey::Config) {
             panic!("Already initialized");
@@ -42,18 +67,96 @@ impl LiquidityVaultContract {
         env.storage().instance().set(&DataKey::Config, &config);
     }
 
-    /// Updates the configuration parameters. Only the admin can call this.
     pub fn update_config(env: Env, config: Config) {
         let current: Config = env.storage().instance().get(&DataKey::Config).expect("Not initialized");
         current.admin.require_auth();
         env.storage().instance().set(&DataKey::Config, &config);
     }
 
-    /// Executes a swap with on-chain liquidity protection.
-    /// Rejects the transaction if the oracle price deviates from the intent price by more than X%.
-    ///
-    /// `intent_price`: The expected price of 1 unit of `token_in` in terms of `token_out`, 
-    /// scaled to 8 decimal places (1e8).
+    /// Generic protected execution: validates intent vs market conditions.
+    /// Returns ExecutionResult indicating whether the operation is approved.
+    pub fn execute_protected(
+        env: Env,
+        token_in: Address,
+        token_out: Address,
+        amount_in: i128,
+        ctx: ExecutionContext,
+    ) -> ExecutionResult {
+        if amount_in <= 0 || ctx.intent_price <= 0 {
+            return ExecutionResult {
+                approved: false,
+                market_price: 0,
+                deviation_bps: 0,
+                reason: Bytes::from_slice(&env, b"invalid_params"),
+            };
+        }
+
+        let config: Config = env.storage().instance().get(&DataKey::Config).expect("Not initialized");
+        let current_ledger = env.ledger().sequence();
+
+        // Deadline check
+        if current_ledger > ctx.deadline_ledger {
+            return ExecutionResult {
+                approved: false,
+                market_price: 0,
+                deviation_bps: 0,
+                reason: Bytes::from_slice(&env, b"deadline_exceeded"),
+            };
+        }
+
+        let oracle = PriceOracleClient::new(&env, &config.oracle);
+        let p_in = oracle.get_price(&token_in).unwrap_or_else(|| panic!("Oracle price missing for token_in"));
+        let p_out = oracle.get_price(&token_out).unwrap_or_else(|| panic!("Oracle price missing for token_out"));
+
+        let p_in_norm = normalize_price(p_in.price, p_in.decimals, 8);
+        let p_out_norm = normalize_price(p_out.price, p_out.decimals, 8);
+
+        let market_price = p_in_norm
+            .checked_mul(100_000_000)
+            .expect("Price math overflow")
+            .checked_div(p_out_norm)
+            .expect("Price math division error");
+
+        let diff = if market_price > ctx.intent_price {
+            market_price - ctx.intent_price
+        } else {
+            ctx.intent_price - market_price
+        };
+
+        let deviation_bps = diff
+            .checked_mul(10000)
+            .expect("Deviation math overflow")
+            .checked_div(ctx.intent_price)
+            .expect("Deviation math division error");
+
+        let max_allowed = if ctx.max_slippage_bps > 0 && ctx.max_slippage_bps < config.threshold_bps {
+            ctx.max_slippage_bps as i128
+        } else {
+            config.threshold_bps as i128
+        };
+
+        if deviation_bps > max_allowed {
+            env.events().publish(
+                (symbol_short!("DevAlert"),),
+                (market_price, ctx.intent_price, deviation_bps),
+            );
+            return ExecutionResult {
+                approved: false,
+                market_price,
+                deviation_bps: deviation_bps as u128,
+                reason: Bytes::from_slice(&env, b"deviation_exceeded"),
+            };
+        }
+
+        ExecutionResult {
+            approved: true,
+            market_price,
+            deviation_bps: deviation_bps as u128,
+            reason: Bytes::from_slice(&env, b"approved"),
+        }
+    }
+
+    /// Convenience wrapper for swap-style operations.
     pub fn execute_protected_swap(
         env: Env,
         token_in: Address,
@@ -62,60 +165,27 @@ impl LiquidityVaultContract {
         min_amount_out: i128,
         intent_price: i128,
     ) {
-        if amount_in <= 0 || intent_price <= 0 {
-            panic!("Invalid parameters");
-        }
-
-        let config: Config = env.storage().instance().get(&DataKey::Config).expect("Not initialized");
-        let oracle = PriceOracleClient::new(&env, &config.oracle);
-        
-        // 1. Fetch real-time market prices from the oracle
-        let p_in = oracle.get_price(&token_in).expect("Oracle price missing for token_in");
-        let p_out = oracle.get_price(&token_out).expect("Oracle price missing for token_out");
-        
-        // 2. Normalize both prices to 1e8 precision for comparison
-        let p_in_norm = normalize_price(p_in.price, p_in.decimals, 8);
-        let p_out_norm = normalize_price(p_out.price, p_out.decimals, 8);
-        
-        // 3. Calculate market exchange rate (Price of In relative to Out)
-        // Rate = (PriceUSD_In / PriceUSD_Out) * 1e8
-        let market_price = p_in_norm
-            .checked_mul(100_000_000)
-            .expect("Price math overflow")
-            .checked_div(p_out_norm)
-            .expect("Price math division error");
-        
-        // 4. Calculate deviation percentage in Basis Points (bps)
-        let diff = if market_price > intent_price {
-            market_price - intent_price
-        } else {
-            intent_price - market_price
+        let caller = Address::generate(&env); // In practice, resolve from tx auth
+        let ctx = ExecutionContext {
+            caller,
+            operation: Bytes::from_slice(&env, b"swap"),
+            intent_price,
+            min_amount_out,
+            max_slippage_bps: 0,
+            deadline_ledger: env.ledger().sequence() + 1000,
         };
-        
-        let deviation_bps = diff
-            .checked_mul(10000)
-            .expect("Deviation math overflow")
-            .checked_div(intent_price)
-            .expect("Deviation math division error");
-        
-        // 5. Enforce protection threshold
-        if deviation_bps > config.threshold_bps as i128 {
-            // Emitting details for debugging before panicking
-            env.events().publish(
-                (symbol_short!("DevAlert"),),
-                (market_price, intent_price, deviation_bps)
-            );
-            panic!("Liquidity Protection: Price deviation exceeds allowed threshold");
+
+        let result = Self::execute_protected(env, token_in, token_out, amount_in, ctx);
+        if !result.approved {
+            panic!("Liquidity Protection: {}", std::str::from_utf8(result.reason.as_slice()).unwrap_or("unknown"));
         }
 
-        // Logic for actual swap execution would be called here (e.g. DEX Router)
-        // For this task, we emit the verified swap event.
         env.events().publish(
             (symbol_short!("SwapOk"),),
-            (token_in, token_out, amount_in, market_price)
+            (token_in, token_out, amount_in, result.market_price),
         );
     }
-    
+
     /// Returns the current configuration.
     pub fn get_config(env: Env) -> Config {
         env.storage().instance().get(&DataKey::Config).expect("Not initialized")
@@ -139,3 +209,4 @@ fn normalize_price(price: i128, current_decimals: u32, target_decimals: u32) -> 
 }
 
 mod test;
+mod test_property;
