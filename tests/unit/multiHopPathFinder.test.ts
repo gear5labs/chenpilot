@@ -45,6 +45,36 @@ describe("MultiHopPathFinder", () => {
     pathFinder = new MultiHopPathFinder();
   });
 
+  describe("findOptimalPath", () => {
+    it("should find and evaluate multiple trading paths", async () => {
+      const mockPaths = {
+        records: [
+          {
+            source_amount: "100.0000000",
+            destination_amount: "12.5000000",
+            path: [
+              {
+                asset_type: "credit_alphanum4",
+                asset_code: "USDC",
+                asset_issuer:
+                  "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+              },
+            ],
+          },
+          {
+            source_amount: "100.0000000",
+            destination_amount: "12.3000000",
+            path: [
+              {
+                asset_type: "credit_alphanum4",
+                asset_code: "USDT",
+                asset_issuer:
+                  "GCQTGZQQ5G4PTM2GL7CDIFKUBIPEC52BROAQIAPW53XBRJVN6ZJVTG6V",
+              },
+            ],
+          },
+        ],
+      };
   describe("findOptimalPath — basic evaluation", () => {
     it("returns a result with normalized efficiency in [0,1]", async () => {
       mockServer.call.mockResolvedValue({
@@ -74,6 +104,28 @@ describe("MultiHopPathFinder", () => {
       expect(parseFloat(result.bestPath.destinationAmount)).toBe(15.0);
     });
 
+    it("should select path with highest efficiency", async () => {
+      const mockPaths = {
+        records: [
+          {
+            source_amount: "100.0000000",
+            destination_amount: "15.0000000",
+            path: [],
+          },
+          {
+            source_amount: "100.0000000",
+            destination_amount: "14.5000000",
+            path: [
+              {
+                asset_type: "credit_alphanum4",
+                asset_code: "USDC",
+                asset_issuer:
+                  "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+              },
+            ],
+          },
+        ],
+      };
     it("evaluationTime is a positive number", async () => {
       mockServer.call.mockResolvedValue({
         records: [makeRecord("12.0000000")],
@@ -89,6 +141,10 @@ describe("MultiHopPathFinder", () => {
     it("throws when no paths are found", async () => {
       mockServer.call.mockResolvedValue({ records: [] });
 
+      expect(
+        parseFloat(result.bestPath.destinationAmount)
+      ).toBeGreaterThanOrEqual(
+        parseFloat(result.allPaths[1]?.destinationAmount || "0")
       await expect(
         pathFinder.findOptimalPath(XLM, USDC, "100")
       ).rejects.toThrow("No valid trading paths found");
@@ -114,6 +170,32 @@ describe("MultiHopPathFinder", () => {
       ];
       mockServer.call.mockResolvedValue({
         records: [
+          {
+            source_amount: "100.0000000",
+            destination_amount: "12.0000000",
+            path: [],
+          },
+          {
+            source_amount: "100.0000000",
+            destination_amount: "12.5000000",
+            path: [
+              {
+                asset_type: "credit_alphanum4",
+                asset_code: "USDC",
+                asset_issuer: "ISSUER1",
+              },
+              {
+                asset_type: "credit_alphanum4",
+                asset_code: "USDT",
+                asset_issuer: "ISSUER2",
+              },
+              {
+                asset_type: "credit_alphanum4",
+                asset_code: "BTC",
+                asset_issuer: "ISSUER3",
+              },
+            ],
+          },
           makeRecord("12.0000000"), // 1 hop (direct)
           makeRecord("13.0000000", manyHops), // 4 hops — excluded when maxHops=2
         ],

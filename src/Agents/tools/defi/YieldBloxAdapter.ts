@@ -1,3 +1,10 @@
+import {
+  DeFiAdapter,
+  AdapterResult,
+  QuoteResult,
+  TransactionRequest,
+  PositionResult,
+} from "./DeFiAdapter";
 import { DeFiAdapter, AdapterResult, QuoteResult, TransactionRequest, PositionResult } from "./DeFiAdapter";
 import { LendingCapability, BorrowingCapability } from "./CapabilityContract";
 import { YieldBloxLendingPositionsResponseSchema, YieldBloxBorrowingPositionsResponseSchema } from "./resilience/Schemas";
@@ -5,7 +12,7 @@ import { YieldBloxLendingPositionsResponseSchema, YieldBloxBorrowingPositionsRes
 /**
  * YieldBlox Lending Adapter
  * Implements lending and borrowing operations for the YieldBlox protocol
- * 
+ *
  * YieldBlox is a lending protocol on Stellar that supports:
  * - Lending (supply assets to earn interest)
  * - Borrowing (use supplied assets as collateral)
@@ -49,10 +56,13 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
   /**
    * Get liquidity positions (not applicable for lending protocol)
    */
-  async getLiquidityPositions(address: string): Promise<AdapterResult<PositionResult[]>> {
+  async getLiquidityPositions(
+    address: string
+  ): Promise<AdapterResult<PositionResult[]>> {
     return {
       success: false,
-      error: "Liquidity positions are not applicable for YieldBlox (lending protocol)",
+      error:
+        "Liquidity positions are not applicable for YieldBlox (lending protocol)",
       timestamp: new Date().toISOString(),
     };
   }
@@ -61,7 +71,9 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
    * Get lending positions for an address
    * These are assets the user has supplied to the protocol
    */
-  async getLendingPositions(address: string): Promise<AdapterResult<PositionResult[]>> {
+  async getLendingPositions(
+    address: string
+  ): Promise<AdapterResult<PositionResult[]>> {
     if (!this.hasCapability("lending")) {
       return {
         success: false,
@@ -71,17 +83,21 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
     }
 
     try {
+      const response = await this.fetchWithRetry<any>(
+        `/v1/lending/positions/${address}`
       const response = await this.fetchWithSchema<any>(
         `/v1/lending/positions/${address}`,
         YieldBloxLendingPositionsResponseSchema
       );
 
-      const positions: PositionResult[] = (response.positions || []).map((pos: any) => ({
-        token: pos.token,
-        amount: pos.supplied,
-        valueUSD: pos.valueUSD || 0,
-        APY: pos.supplyAPY || 0,
-      }));
+      const positions: PositionResult[] = (response.positions || []).map(
+        (pos: any) => ({
+          token: pos.token,
+          amount: pos.supplied,
+          valueUSD: pos.valueUSD || 0,
+          APY: pos.supplyAPY || 0,
+        })
+      );
 
       return {
         success: true,
@@ -91,7 +107,10 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to get lending positions",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to get lending positions",
         timestamp: new Date().toISOString(),
       };
     }
@@ -101,7 +120,9 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
    * Get borrowing positions for an address
    * These are assets the user has borrowed from the protocol
    */
-  async getBorrowingPositions(address: string): Promise<AdapterResult<PositionResult[]>> {
+  async getBorrowingPositions(
+    address: string
+  ): Promise<AdapterResult<PositionResult[]>> {
     if (!this.hasCapability("borrowing")) {
       return {
         success: false,
@@ -111,17 +132,21 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
     }
 
     try {
+      const response = await this.fetchWithRetry<any>(
+        `/v1/borrowing/positions/${address}`
       const response = await this.fetchWithSchema<any>(
         `/v1/borrowing/positions/${address}`,
         YieldBloxBorrowingPositionsResponseSchema
       );
 
-      const positions: PositionResult[] = (response.positions || []).map((pos: any) => ({
-        token: pos.token,
-        amount: pos.borrowed,
-        valueUSD: pos.valueUSD || 0,
-        APY: pos.borrowAPY || 0,
-      }));
+      const positions: PositionResult[] = (response.positions || []).map(
+        (pos: any) => ({
+          token: pos.token,
+          amount: pos.borrowed,
+          valueUSD: pos.valueUSD || 0,
+          APY: pos.borrowAPY || 0,
+        })
+      );
 
       return {
         success: true,
@@ -131,7 +156,10 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to get borrowing positions",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to get borrowing positions",
         timestamp: new Date().toISOString(),
       };
     }
@@ -140,7 +168,10 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
   /**
    * Supply assets to the lending pool
    */
-  async supply(asset: string, amount: string): Promise<AdapterResult<TransactionRequest>> {
+  async supply(
+    asset: string,
+    amount: string
+  ): Promise<AdapterResult<TransactionRequest>> {
     if (!this.hasCapability("lending")) {
       return {
         success: false,
@@ -170,7 +201,10 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to create supply transaction",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create supply transaction",
         timestamp: new Date().toISOString(),
       };
     }
@@ -179,7 +213,10 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
   /**
    * Borrow assets from the lending pool
    */
-  async borrow(asset: string, amount: string): Promise<AdapterResult<TransactionRequest>> {
+  async borrow(
+    asset: string,
+    amount: string
+  ): Promise<AdapterResult<TransactionRequest>> {
     if (!this.hasCapability("borrowing")) {
       return {
         success: false,
@@ -208,7 +245,10 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to create borrow transaction",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create borrow transaction",
         timestamp: new Date().toISOString(),
       };
     }
@@ -217,7 +257,10 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
   /**
    * Repay borrowed assets
    */
-  async repay(asset: string, amount: string): Promise<AdapterResult<TransactionRequest>> {
+  async repay(
+    asset: string,
+    amount: string
+  ): Promise<AdapterResult<TransactionRequest>> {
     try {
       const lendingPoolAddress = this.getContractAddress("lendingPool");
       if (!lendingPoolAddress) {
@@ -239,7 +282,10 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to create repay transaction",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create repay transaction",
         timestamp: new Date().toISOString(),
       };
     }
@@ -248,7 +294,10 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
   /**
    * Withdraw supplied assets
    */
-  async withdraw(asset: string, amount: string): Promise<AdapterResult<TransactionRequest>> {
+  async withdraw(
+    asset: string,
+    amount: string
+  ): Promise<AdapterResult<TransactionRequest>> {
     try {
       const lendingPoolAddress = this.getContractAddress("lendingPool");
       if (!lendingPoolAddress) {
@@ -269,7 +318,10 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to create withdraw transaction",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create withdraw transaction",
         timestamp: new Date().toISOString(),
       };
     }

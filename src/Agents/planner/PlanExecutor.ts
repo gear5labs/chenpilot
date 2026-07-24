@@ -3,6 +3,7 @@ import { toolRegistry } from "../registry/ToolRegistry";
 import { ToolResult } from "../registry/ToolMetadata";
 import { ExecutionPlan, PlanStep } from "./AgentPlanner";
 import { HashedPlan, planHashService } from "./planHash";
+import { policyEnforcer } from "../policy/PolicyEnforcer";
 import { durableExecutor } from "./DurableExecutor";
 import { ExecutionStatus } from "./DurableExecution.entity";
 import logger from "../../config/logger";
@@ -168,6 +169,23 @@ export class PlanExecutor {
             message: "Dry run - not executed",
             data: { dryRun: true },
           },
+          duration: Date.now() - startTime,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Hard policy gate — LLM output is untrusted; every step must pass before execution
+      const policy = await policyEnforcer.enforce({
+        userId,
+        action: step.action,
+        payload: step.payload,
+      });
+      if (!policy.allowed) {
+        return {
+          stepNumber: step.stepNumber,
+          action: step.action,
+          status: "failed",
+          error: `Policy denied: ${policy.reason}`,
           duration: Date.now() - startTime,
           timestamp: new Date().toISOString(),
         };

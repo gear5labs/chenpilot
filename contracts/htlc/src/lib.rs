@@ -4,6 +4,10 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, token,
 };
 
+// TTL for swap state: swaps auto-expire after the expiry ledger + grace period
+// Add 7 days (1_209_600 ledgers at 5s/ledger) beyond expiry for post-claim/refund records
+const SWAP_TTL_GRACE_LEDGERS: u32 = 1_209_600;
+
 // ---------------------------------------------------------------------------
 // Storage keys
 // ---------------------------------------------------------------------------
@@ -40,6 +44,42 @@ pub struct Swap {
     /// Ledger sequence after which the initiator can refund
     pub expiry_ledger: u32,
     pub status: SwapStatus,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtSwapInit {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub swap_id: BytesN<32>,
+    pub initiator: Address,
+    pub recipient: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub expiry_ledger: u32,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtClaim {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub swap_id: BytesN<32>,
+    pub recipient: Address,
+    pub amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtRefund {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub swap_id: BytesN<32>,
+    pub initiator: Address,
+    pub amount: i128,
 }
 
 // ---------------------------------------------------------------------------
@@ -95,9 +135,25 @@ impl HtlcContract {
             expiry_ledger,
             status: SwapStatus::Active,
         };
-        env.storage().persistent().set(&DataKey::Swap(swap_id.clone()), &swap);
+        
+        // Calculate TTL: expiry + grace period for post-completion records
+        let ttl_ledgers = expiry_ledger.saturating_add(SWAP_TTL_GRACE_LEDGERS);
+        env.storage().persistent().set_with_ttl(&DataKey::Swap(swap_id.clone()), &swap, ttl_ledgers);
 
-        env.events().publish((symbol_short!("SwapInit"),), swap_id.clone());
+        env.events().publish(
+            (symbol_short!("htlc"), symbol_short!("init")),
+            EvtSwapInit {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: initiator.clone(),
+                swap_id: swap_id.clone(),
+                initiator,
+                recipient: swap.recipient.clone(),
+                token: swap.token.clone(),
+                amount: swap.amount,
+                expiry_ledger: swap.expiry_ledger,
+            },
+        );
         swap_id
     }
 
@@ -134,13 +190,26 @@ impl HtlcContract {
         }
 
         swap.status = SwapStatus::Claimed;
-        env.storage().persistent().set(&DataKey::Swap(swap_id.clone()), &swap);
+        
+        // Extend TTL to keep claimed record queryable for grace period
+        let ttl_ledgers = swap.expiry_ledger.saturating_add(SWAP_TTL_GRACE_LEDGERS);
+        env.storage().persistent().set_with_ttl(&DataKey::Swap(swap_id.clone()), &swap, ttl_ledgers);
 
         // Release funds to recipient
         let token_client = token::Client::new(&env, &swap.token);
         token_client.transfer(&env.current_contract_address(), &swap.recipient, &swap.amount);
 
-        env.events().publish((symbol_short!("Claimed"),), swap_id);
+        env.events().publish(
+            (symbol_short!("htlc"), symbol_short!("claim")),
+            EvtClaim {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: swap.recipient.clone(),
+                swap_id,
+                recipient: swap.recipient.clone(),
+                amount: swap.amount,
+            },
+        );
     }
 
     /// Refund the locked funds back to the initiator after expiry.
@@ -161,13 +230,26 @@ impl HtlcContract {
         swap.initiator.require_auth();
 
         swap.status = SwapStatus::Refunded;
-        env.storage().persistent().set(&DataKey::Swap(swap_id.clone()), &swap);
+        
+        // Extend TTL to keep refunded record queryable for grace period
+        let ttl_ledgers = swap.expiry_ledger.saturating_add(SWAP_TTL_GRACE_LEDGERS);
+        env.storage().persistent().set_with_ttl(&DataKey::Swap(swap_id.clone()), &swap, ttl_ledgers);
 
         // Return funds to initiator
         let token_client = token::Client::new(&env, &swap.token);
         token_client.transfer(&env.current_contract_address(), &swap.initiator, &swap.amount);
 
-        env.events().publish((symbol_short!("Refunded"),), swap_id);
+        env.events().publish(
+            (symbol_short!("htlc"), symbol_short!("refund")),
+            EvtRefund {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: swap.initiator.clone(),
+                swap_id,
+                initiator: swap.initiator.clone(),
+                amount: swap.amount,
+            },
+        );
     }
 
     /// Returns the swap details for a given swap_id.

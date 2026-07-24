@@ -1,14 +1,24 @@
 import { createHash, randomUUID } from "crypto";
-import { AgentResponse, ChainId, CrossChainSwapRequest } from "./types";
+import { 
+  AgentResponse, 
+  ChainId, 
+  CrossChainSwapRequest,
+  RequestOptions,
+  SimulationRequest,
+  SimulationResult,
+  ExecutionRequest,
+  ExecutionResult,
+  VaultOperationRequest,
+  VaultOperationResult,
+  AbortSignalLike,
+} from "./types";
 
-/** Input required to generate a stable idempotency key */
 export interface IdempotencyKeyInput {
   namespace: string;
   payload: unknown;
   clientRequestId?: string;
 }
 
-/** Configuration options for initializing the AgentClient */
 export interface AgentClientOptions {
   baseUrl: string;
   defaultTimeoutMs?: number;
@@ -17,21 +27,11 @@ export interface AgentClientOptions {
   fetchFn?: FetchLike;
 }
 
-interface AbortSignalLike {
-  aborted: boolean;
-  addEventListener?: (
-    type: "abort",
-    listener: () => void,
-    options?: { once?: boolean }
-  ) => void;
-}
-
 interface AbortControllerLike {
   signal: AbortSignalLike;
   abort: () => void;
 }
 
-/** Request payload for making a query to the AI Agent */
 export interface AgentQueryRequest {
   userId: string;
   query: string;
@@ -42,24 +42,12 @@ export interface AgentQueryRequest {
   signal?: AbortSignalLike;
 }
 
-/** The result envelope from an Agent query */
 export interface AgentQueryResult<T = AgentResponse> {
   idempotencyKey: string;
   attempts: number;
   result: T;
 }
 
-/** Options for executing a specific BTC to Stellar swap query */
-export interface ExecuteBtcToStellarSwapOptions {
-  userId: string;
-  idempotencyKey?: string;
-  timeoutMs?: number;
-  maxRetries?: number;
-  retryDelayMs?: number;
-  signal?: AbortSignalLike;
-}
-
-/** Error thrown when an agent request fails after all retries */
 export class AgentRequestError extends Error {
   readonly idempotencyKey: string;
   readonly attempts: number;
@@ -124,12 +112,6 @@ function canonicalize(value: unknown): unknown {
     }, {});
 }
 
-/**
- * Generates universally unique string determining an idempotent request based on its data payload.
- *
- * @param input - The payload and namespace for the key.
- * @returns The generated idempotency key.
- */
 export function generateIdempotencyKey({
   namespace,
   payload,
@@ -144,13 +126,6 @@ export function generateIdempotencyKey({
   return `${namespace}:${fingerprint}:${requestId}`;
 }
 
-/**
- * Specific idempotency key generator for BTC-Stellar swaps.
- *
- * @param request - The swap request payload.
- * @param clientRequestId - Optional client-provided request ID.
- * @returns The generated idempotency key.
- */
 export function createBtcToStellarSwapIdempotencyKey(
   request: CrossChainSwapRequest,
   clientRequestId?: string
@@ -194,10 +169,6 @@ function createTimedSignal(
   };
 }
 
-/**
- * Client for interacting with the Chen Pilot AI Agent backend.
- * Provides resilient querying with retries and timeout controls.
- */
 export class AgentClient {
   private readonly baseUrl: string;
   private readonly defaultTimeoutMs: number;
@@ -220,12 +191,6 @@ export class AgentClient {
     this.fetchFn = selectedFetch;
   }
 
-  /**
-   * Sends a parameterized query to the AI Agent backend.
-   *
-   * @param request - The query parameters.
-   * @returns A promise resolving to the agent's response.
-   */
   async query<T = AgentResponse>(
     request: AgentQueryRequest
   ): Promise<AgentQueryResult<T>> {
@@ -332,16 +297,75 @@ export class AgentClient {
     );
   }
 
-  /**
-   * High-level utility to request a cross-chain swap from BTC to Stellar.
-   *
-   * @param swapRequest - Details about the swap token pair and amount.
-   * @param options - Execution options including signals and timeouts.
-   * @returns A promise resolving to the swap execution response.
-   */
+  async simulate(
+    simulationRequest: SimulationRequest,
+    options: RequestOptions
+  ): Promise<AgentQueryResult<SimulationResult>> {
+    const idempotencyKey =
+      options.idempotencyKey ??
+      generateIdempotencyKey({
+        namespace: "simulation",
+        payload: simulationRequest,
+      });
+
+    return this.query<SimulationResult>({
+      userId: options.userId,
+      query: JSON.stringify({ type: "simulate", data: simulationRequest }),
+      idempotencyKey,
+      timeoutMs: options.timeoutMs,
+      maxRetries: options.maxRetries,
+      retryDelayMs: options.retryDelayMs,
+      signal: options.signal,
+    });
+  }
+
+  async execute(
+    executionRequest: ExecutionRequest,
+    options: RequestOptions
+  ): Promise<AgentQueryResult<ExecutionResult>> {
+    const idempotencyKey =
+      options.idempotencyKey ??
+      generateIdempotencyKey({
+        namespace: "execution",
+        payload: executionRequest,
+      });
+
+    return this.query<ExecutionResult>({
+      userId: options.userId,
+      query: JSON.stringify({ type: "execute", data: executionRequest }),
+      idempotencyKey,
+      timeoutMs: options.timeoutMs,
+      maxRetries: options.maxRetries,
+      retryDelayMs: options.retryDelayMs,
+      signal: options.signal,
+    });
+  }
+
+  async vaultOperation(
+    vaultRequest: VaultOperationRequest,
+    options: RequestOptions
+  ): Promise<AgentQueryResult<VaultOperationResult>> {
+    const idempotencyKey =
+      options.idempotencyKey ??
+      generateIdempotencyKey({
+        namespace: "vault-operation",
+        payload: vaultRequest,
+      });
+
+    return this.query<VaultOperationResult>({
+      userId: options.userId,
+      query: JSON.stringify({ type: "vault", data: vaultRequest }),
+      idempotencyKey,
+      timeoutMs: options.timeoutMs,
+      maxRetries: options.maxRetries,
+      retryDelayMs: options.retryDelayMs,
+      signal: options.signal,
+    });
+  }
+
   async executeBtcToStellarSwap<T = AgentResponse>(
     swapRequest: CrossChainSwapRequest,
-    options: ExecuteBtcToStellarSwapOptions
+    options: RequestOptions
   ): Promise<AgentQueryResult<T>> {
     if (
       swapRequest.fromChain !== ChainId.BITCOIN ||
