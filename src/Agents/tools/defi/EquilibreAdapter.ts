@@ -1,3 +1,10 @@
+import {
+  DeFiAdapter,
+  AdapterResult,
+  QuoteResult,
+  TransactionRequest,
+  PositionResult,
+} from "./DeFiAdapter";
 import { DeFiAdapter, AdapterResult, QuoteResult, TransactionRequest, PositionResult } from "./DeFiAdapter";
 import { SwapCapability, LiquidityCapability } from "./CapabilityContract";
 import { EquilibreSwapQuoteResponseSchema, EquilibreLiquidityPositionsResponseSchema } from "./resilience/Schemas";
@@ -5,7 +12,7 @@ import { EquilibreSwapQuoteResponseSchema, EquilibreLiquidityPositionsResponseSc
 /**
  * Equilibre DEX Adapter
  * Implements swap and liquidity operations for the Equilibre protocol
- * 
+ *
  * Equilibre is a DEX on Stellar that supports:
  * - Token swaps via path payments
  * - Liquidity provision
@@ -61,7 +68,8 @@ export class EquilibreAdapter extends DeFiAdapter implements SwapCapability, Liq
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to get swap quote",
+        error:
+          error instanceof Error ? error.message : "Failed to get swap quote",
         timestamp: new Date().toISOString(),
       };
     }
@@ -115,7 +123,8 @@ export class EquilibreAdapter extends DeFiAdapter implements SwapCapability, Liq
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to execute swap",
+        error:
+          error instanceof Error ? error.message : "Failed to execute swap",
         timestamp: new Date().toISOString(),
       };
     }
@@ -124,7 +133,9 @@ export class EquilibreAdapter extends DeFiAdapter implements SwapCapability, Liq
   /**
    * Get liquidity positions for an address
    */
-  async getLiquidityPositions(address: string): Promise<AdapterResult<PositionResult[]>> {
+  async getLiquidityPositions(
+    address: string
+  ): Promise<AdapterResult<PositionResult[]>> {
     if (!this.hasCapability("liquidity")) {
       return {
         success: false,
@@ -134,17 +145,21 @@ export class EquilibreAdapter extends DeFiAdapter implements SwapCapability, Liq
     }
 
     try {
+      const response = await this.fetchWithRetry<any>(
+        `/v1/liquidity/positions/${address}`
       const response = await this.fetchWithSchema<any>(
         `/v1/liquidity/positions/${address}`,
         EquilibreLiquidityPositionsResponseSchema
       );
 
-      const positions: PositionResult[] = (response.positions || []).map((pos: any) => ({
-        token: pos.token,
-        amount: pos.amount,
-        valueUSD: pos.valueUSD || 0,
-        APY: pos.apy || 0,
-      }));
+      const positions: PositionResult[] = (response.positions || []).map(
+        (pos: any) => ({
+          token: pos.token,
+          amount: pos.amount,
+          valueUSD: pos.valueUSD || 0,
+          APY: pos.apy || 0,
+        })
+      );
 
       return {
         success: true,
@@ -154,7 +169,10 @@ export class EquilibreAdapter extends DeFiAdapter implements SwapCapability, Liq
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to get liquidity positions",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to get liquidity positions",
         timestamp: new Date().toISOString(),
       };
     }
@@ -163,7 +181,9 @@ export class EquilibreAdapter extends DeFiAdapter implements SwapCapability, Liq
   /**
    * Get lending positions (not supported by Equilibre)
    */
-  async getLendingPositions(address: string): Promise<AdapterResult<PositionResult[]>> {
+  async getLendingPositions(
+    address: string
+  ): Promise<AdapterResult<PositionResult[]>> {
     return {
       success: false,
       error: "Lending is not supported by Equilibre",
@@ -174,7 +194,9 @@ export class EquilibreAdapter extends DeFiAdapter implements SwapCapability, Liq
   /**
    * Get borrowing positions (not supported by Equilibre)
    */
-  async getBorrowingPositions(address: string): Promise<AdapterResult<PositionResult[]>> {
+  async getBorrowingPositions(
+    address: string
+  ): Promise<AdapterResult<PositionResult[]>> {
     return {
       success: false,
       error: "Borrowing is not supported by Equilibre",

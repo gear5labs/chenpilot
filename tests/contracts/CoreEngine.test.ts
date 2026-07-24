@@ -6,7 +6,8 @@ import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 
 describe("CoreEngine Emergency Logic", function () {
   async function deployCoreEngineFixture() {
-    const [owner, emergencyAccount, user, otherAccount] = await ethers.getSigners();
+    const [owner, emergencyAccount, user, otherAccount] =
+      await ethers.getSigners();
 
     // Deploy a mock ERC20 for testing
     const MockToken = await ethers.getContractFactory("MockERC20");
@@ -20,15 +21,29 @@ describe("CoreEngine Emergency Logic", function () {
     const EMERGENCY_ROLE = await coreEngine.EMERGENCY_ROLE();
     await coreEngine.grantRole(EMERGENCY_ROLE, emergencyAccount.address);
 
-    return { coreEngine, token, owner, emergencyAccount, user, otherAccount, EMERGENCY_ROLE };
+    return {
+      coreEngine,
+      token,
+      owner,
+      emergencyAccount,
+      user,
+      otherAccount,
+      EMERGENCY_ROLE,
+    };
   }
 
   describe("Pause Functionality", function () {
     it("Should allow account with EMERGENCY_ROLE to pause", async function () {
-      const { coreEngine, emergencyAccount } = await loadFixture(deployCoreEngineFixture);
-      await expect(coreEngine.connect(emergencyAccount).pause())
-        .to.emit(coreEngine, "EmergencyPaused")
-        .withArgs(emergencyAccount.address);
+      const { coreEngine, emergencyAccount } = await loadFixture(
+        deployCoreEngineFixture
+      );
+      const receipt = await (await coreEngine.connect(emergencyAccount).pause()).wait();
+      const event = receipt.logs.find(
+        (l: { fragment?: { name?: string } }) => l.fragment?.name === "EmergencyPaused"
+      );
+      expect(event).to.not.be.undefined;
+      expect(event!.args[0]).to.equal(1);
+      expect(event!.args[1]).to.equal(emergencyAccount.address);
       expect(await coreEngine.isEmergencyPaused()).to.be.true;
     });
 
@@ -36,43 +51,60 @@ describe("CoreEngine Emergency Logic", function () {
       const { coreEngine, user } = await loadFixture(deployCoreEngineFixture);
       const EMERGENCY_ROLE = await coreEngine.EMERGENCY_ROLE();
       await expect(coreEngine.connect(user).pause())
-        .to.be.revertedWithCustomError(coreEngine, "AccessControlUnauthorizedAccount")
+        .to.be.revertedWithCustomError(
+          coreEngine,
+          "AccessControlUnauthorizedAccount"
+        )
         .withArgs(user.address, EMERGENCY_ROLE);
     });
 
     it("Should allow account with EMERGENCY_ROLE to unpause", async function () {
-      const { coreEngine, emergencyAccount } = await loadFixture(deployCoreEngineFixture);
+      const { coreEngine, emergencyAccount } = await loadFixture(
+        deployCoreEngineFixture
+      );
       await coreEngine.connect(emergencyAccount).pause();
-      await expect(coreEngine.connect(emergencyAccount).unpause())
-        .to.emit(coreEngine, "EmergencyUnpaused")
-        .withArgs(emergencyAccount.address);
+      const receipt = await (await coreEngine.connect(emergencyAccount).unpause()).wait();
+      const event = receipt.logs.find(
+        (l: { fragment?: { name?: string } }) => l.fragment?.name === "EmergencyUnpaused"
+      );
+      expect(event).to.not.be.undefined;
+      expect(event!.args[0]).to.equal(1);
+      expect(event!.args[1]).to.equal(emergencyAccount.address);
       expect(await coreEngine.isEmergencyPaused()).to.be.false;
     });
   });
 
   describe("Gated Functions", function () {
     it("Should reject swap when paused", async function () {
-      const { coreEngine, emergencyAccount, user, token } = await loadFixture(deployCoreEngineFixture);
+      const { coreEngine, emergencyAccount, user, token } = await loadFixture(
+        deployCoreEngineFixture
+      );
       await coreEngine.connect(emergencyAccount).pause();
-      
+
       const tokenAddress = await token.getAddress();
-      await expect(coreEngine.connect(user).swap(tokenAddress, tokenAddress, 100))
-        .to.be.revertedWithCustomError(coreEngine, "EnforcedPause");
+      await expect(
+        coreEngine.connect(user).swap(tokenAddress, tokenAddress, 100)
+      ).to.be.revertedWithCustomError(coreEngine, "EnforcedPause");
     });
 
     it("Should reject rebalance when paused", async function () {
-      const { coreEngine, emergencyAccount, user, token } = await loadFixture(deployCoreEngineFixture);
+      const { coreEngine, emergencyAccount, user, token } = await loadFixture(
+        deployCoreEngineFixture
+      );
       await coreEngine.connect(emergencyAccount).pause();
-      
+
       const tokenAddress = await token.getAddress();
-      await expect(coreEngine.connect(user).rebalance([tokenAddress], [100]))
-        .to.be.revertedWithCustomError(coreEngine, "EnforcedPause");
+      await expect(
+        coreEngine.connect(user).rebalance([tokenAddress], [100])
+      ).to.be.revertedWithCustomError(coreEngine, "EnforcedPause");
     });
   });
 
   describe("Emergency Evacuation", function () {
     it("Should track principal correctly and allow withdrawal during pause", async function () {
-      const { coreEngine, emergencyAccount, user, token } = await loadFixture(deployCoreEngineFixture);
+      const { coreEngine, emergencyAccount, user, token } = await loadFixture(
+        deployCoreEngineFixture
+      );
       const depositAmount = ethers.parseEther("100");
       const tokenAddress = await token.getAddress();
       const coreEngineAddress = await coreEngine.getAddress();
@@ -82,36 +114,55 @@ describe("CoreEngine Emergency Logic", function () {
       await token.connect(user).approve(coreEngineAddress, depositAmount);
       await coreEngine.connect(user).deposit(tokenAddress, depositAmount);
 
-      expect(await coreEngine.userPrincipal(user.address, tokenAddress)).to.equal(depositAmount);
+      expect(
+        await coreEngine.userPrincipal(user.address, tokenAddress)
+      ).to.equal(depositAmount);
 
       // Pause the contract
       await coreEngine.connect(emergencyAccount).pause();
 
       // Withdraw principal
       const initialBalance = await token.balanceOf(user.address);
-      await expect(coreEngine.connect(user).emergencyWithdraw(tokenAddress))
-        .to.emit(coreEngine, "EmergencyWithdrawn")
-        .withArgs(user.address, tokenAddress, depositAmount);
+      const receipt = await (await coreEngine.connect(user).emergencyWithdraw(tokenAddress)).wait();
+      const event = receipt.logs.find(
+        (l: { fragment?: { name?: string } }) => l.fragment?.name === "EmergencyWithdrawn"
+      );
+      expect(event).to.not.be.undefined;
+      expect(event!.args[0]).to.equal(1);
+      expect(event!.args[1]).to.equal(user.address);
+      expect(event!.args[2]).to.equal(user.address);
+      expect(event!.args[3]).to.equal(tokenAddress);
+      expect(event!.args[4]).to.equal(depositAmount);
 
-      expect(await token.balanceOf(user.address)).to.equal(initialBalance + depositAmount);
-      expect(await coreEngine.userPrincipal(user.address, tokenAddress)).to.equal(0);
+      expect(await token.balanceOf(user.address)).to.equal(
+        initialBalance + depositAmount
+      );
+      expect(
+        await coreEngine.userPrincipal(user.address, tokenAddress)
+      ).to.equal(0);
     });
 
     it("Should reject emergencyWithdraw when not paused", async function () {
-      const { coreEngine, user, token } = await loadFixture(deployCoreEngineFixture);
+      const { coreEngine, user, token } = await loadFixture(
+        deployCoreEngineFixture
+      );
       const tokenAddress = await token.getAddress();
-      
-      await expect(coreEngine.connect(user).emergencyWithdraw(tokenAddress))
-        .to.be.revertedWithCustomError(coreEngine, "ExpectedPause");
+
+      await expect(
+        coreEngine.connect(user).emergencyWithdraw(tokenAddress)
+      ).to.be.revertedWithCustomError(coreEngine, "ExpectedPause");
     });
 
     it("Should reject emergencyWithdraw if no principal", async function () {
-      const { coreEngine, emergencyAccount, user, token } = await loadFixture(deployCoreEngineFixture);
+      const { coreEngine, emergencyAccount, user, token } = await loadFixture(
+        deployCoreEngineFixture
+      );
       await coreEngine.connect(emergencyAccount).pause();
-      
+
       const tokenAddress = await token.getAddress();
-      await expect(coreEngine.connect(user).emergencyWithdraw(tokenAddress))
-        .to.be.revertedWith("No principal to withdraw");
+      await expect(
+        coreEngine.connect(user).emergencyWithdraw(tokenAddress)
+      ).to.be.revertedWith("No principal to withdraw");
     });
   });
 });

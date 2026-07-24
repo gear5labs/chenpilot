@@ -54,6 +54,51 @@ pub struct ExecutionResult {
     pub reason: Bytes,
 }
 
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtInit {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub admin: Address,
+    pub oracle: Address,
+    pub threshold_bps: u32,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtCfgUpd {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub admin: Address,
+    pub oracle: Address,
+    pub threshold_bps: u32,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtSwapOk {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub token_in: Address,
+    pub token_out: Address,
+    pub amount_in: i128,
+    pub market_price: i128,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtDevAlert {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub market_price: i128,
+    pub intent_price: i128,
+    pub deviation_bps: i128,
+}
+
 #[contract]
 pub struct LiquidityVaultContract;
 
@@ -63,14 +108,38 @@ impl LiquidityVaultContract {
         if env.storage().instance().has(&DataKey::Config) {
             panic!("Already initialized");
         }
-        let config = Config { admin, oracle, threshold_bps };
+        let config = Config { admin: admin.clone(), oracle: oracle.clone(), threshold_bps };
         env.storage().instance().set(&DataKey::Config, &config);
+
+        env.events().publish(
+            (symbol_short!("liqv"), symbol_short!("init")),
+            EvtInit {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: admin,
+                admin: admin.clone(),
+                oracle,
+                threshold_bps,
+            },
+        );
     }
 
     pub fn update_config(env: Env, config: Config) {
         let current: Config = env.storage().instance().get(&DataKey::Config).expect("Not initialized");
         current.admin.require_auth();
         env.storage().instance().set(&DataKey::Config, &config);
+
+        env.events().publish(
+            (symbol_short!("liqv"), symbol_short!("cfg_upd")),
+            EvtCfgUpd {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: current.admin.clone(),
+                admin: config.admin.clone(),
+                oracle: config.oracle.clone(),
+                threshold_bps: config.threshold_bps,
+            },
+        );
     }
 
     /// Generic protected execution: validates intent vs market conditions.
@@ -80,15 +149,11 @@ impl LiquidityVaultContract {
         token_in: Address,
         token_out: Address,
         amount_in: i128,
-        ctx: ExecutionContext,
-    ) -> ExecutionResult {
-        if amount_in <= 0 || ctx.intent_price <= 0 {
-            return ExecutionResult {
-                approved: false,
-                market_price: 0,
-                deviation_bps: 0,
-                reason: Bytes::from_slice(&env, b"invalid_params"),
-            };
+        _min_amount_out: i128,
+        intent_price: i128,
+    ) {
+        if amount_in <= 0 || intent_price <= 0 {
+            panic!("Invalid parameters");
         }
 
         let config: Config = env.storage().instance().get(&DataKey::Config).expect("Not initialized");
@@ -128,17 +193,19 @@ impl LiquidityVaultContract {
             .expect("Deviation math overflow")
             .checked_div(ctx.intent_price)
             .expect("Deviation math division error");
-
-        let max_allowed = if ctx.max_slippage_bps > 0 && ctx.max_slippage_bps < config.threshold_bps {
-            ctx.max_slippage_bps as i128
-        } else {
-            config.threshold_bps as i128
-        };
-
-        if deviation_bps > max_allowed {
+        
+        // 5. Enforce protection threshold
+        if deviation_bps > config.threshold_bps as i128 {
             env.events().publish(
-                (symbol_short!("DevAlert"),),
-                (market_price, ctx.intent_price, deviation_bps),
+                (symbol_short!("liqv"), symbol_short!("dev_alert")),
+                EvtDevAlert {
+                    version: 1,
+                    ledger: env.ledger().sequence(),
+                    actor: config.admin.clone(),
+                    market_price,
+                    intent_price,
+                    deviation_bps,
+                },
             );
             return ExecutionResult {
                 approved: false,
@@ -181,8 +248,16 @@ impl LiquidityVaultContract {
         }
 
         env.events().publish(
-            (symbol_short!("SwapOk"),),
-            (token_in, token_out, amount_in, result.market_price),
+            (symbol_short!("liqv"), symbol_short!("swap_ok")),
+            EvtSwapOk {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: config.admin.clone(),
+                token_in,
+                token_out,
+                amount_in,
+                market_price,
+            },
         );
     }
 

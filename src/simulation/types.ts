@@ -1,8 +1,9 @@
-export type SimulationMode = 'local' | 'live' | 'hybrid';
+export type SimulationMode = "local" | "live" | "hybrid";
 
 export interface SimulationConfig {
   mode: SimulationMode;
   enabledServices: string[];
+
   deterministicSeed?: number;
   
   stellar: {
@@ -10,13 +11,13 @@ export interface SimulationConfig {
     defaultAccounts: SimulatedAccount[];
     initialBalances: Record<string, string>;
   };
-  
+
   starknet: {
     chainId: string;
     defaultAccounts: SimulatedAccount[];
     initialBalances: Record<string, string>;
   };
-  
+
   simulation: {
     latency: LatencyConfig;
     errorRate: number;
@@ -47,7 +48,7 @@ export interface SimulatedAccount {
 export interface LatencyConfig {
   baseDelay: number; // milliseconds
   variability: number; // percentage
-  networkCondition: 'fast' | 'normal' | 'slow';
+  networkCondition: "fast" | "normal" | "slow";
 }
 
 export interface AccountState {
@@ -66,11 +67,20 @@ export interface ContractState {
 }
 
 export interface SimulationRequest {
-  service: 'soroban' | 'wallet' | 'swap';
+  service: "soroban" | "wallet" | "swap";
   operation: string;
   parameters: Record<string, unknown>;
   userId: string;
   timestamp: number;
+  seed?: number; // Optional seed for deterministic simulation
+  failureInjections?: FailureInjection[]; // Optional failure injections
+}
+
+export interface FailureInjection {
+  type: "latency" | "error" | "state_corruption";
+  probability?: number; // 0-1
+  errorCode?: string;
+  delayMs?: number;
 }
 
 export interface SimulationResponse {
@@ -84,7 +94,7 @@ export interface SimulationResponse {
 }
 
 export interface StateChange {
-  type: 'account' | 'contract';
+  type: "account" | "contract";
   id: string;
   changes: Record<string, unknown>;
 }
