@@ -1,15 +1,19 @@
 #![no_std]
 use soroban_sdk::{
     contract, contractimpl, contracttype, contractclient, symbol_short,
-    Address, Env,
+    Address, Env, Vec,
 };
+use contract_failure::{fail, unwrap_or_fail, FailureReason};
+
+// TTL for price snapshot: ~1 day (172_800 ledgers at 5s/ledger)
+// Snapshots must be refreshed regularly to maintain price safety
+const PRICE_SNAPSHOT_TTL_LEDGERS: u32 = 172_800;
 
 // ---------------------------------------------------------------------------
-// Oracle interface — same pattern as liquidity_vault
+// Oracle interface
 // ---------------------------------------------------------------------------
 #[contractclient(name = "PriceOracleClient")]
 pub trait PriceOracleTrait {
-    /// Returns the price of `asset` scaled to 1e8.
     fn get_price(env: Env, asset: Address) -> i128;
 }
 
@@ -20,10 +24,11 @@ pub trait PriceOracleTrait {
 #[derive(Clone)]
 pub enum DataKey {
     Config,
-    /// Last ledger sequence at which a price snapshot was recorded.
     LastSnapshotLedger,
-    /// Price snapshot: stored as (price, ledger_sequence).
     PriceSnapshot,
+    OracleFreshness,
+    PriceSequenceHistory,
+    CircuitBreaker,
 }
 
 // ---------------------------------------------------------------------------
@@ -34,29 +39,160 @@ pub enum DataKey {
 pub struct Config {
     pub admin: Address,
     pub oracle: Address,
-    /// The asset whose price is being guarded (e.g. wBTC in the Chen Pilot vault).
     pub guarded_asset: Address,
-    /// Maximum allowed price deviation within a single ledger, in basis points.
-    /// e.g. 200 = 2%. Any intra-ledger price move larger than this is blocked.
     pub max_intra_ledger_deviation_bps: i128,
-    /// Minimum number of ledgers that must pass between price updates.
-    /// Prevents an attacker from updating the snapshot and exploiting in the same ledger.
     pub min_ledger_gap: u32,
+    pub max_oracle_staleness_seconds: u64,
+    pub max_consecutive_price_change_bps: i128,
+    pub max_oracle_update_gap_seconds: u64,
+    pub circuit_breaker_threshold_bps: i128,
+    pub circuit_breaker_window_seconds: u64,
 }
 
 // ---------------------------------------------------------------------------
-// Price snapshot stored on-chain
+// Price snapshot
 // ---------------------------------------------------------------------------
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PriceSnapshot {
     pub price: i128,
     pub ledger: u32,
+    pub oracle_timestamp: u64,
+    pub oracle_sequence: u64,
+}
+
+// ---------------------------------------------------------------------------
+// Circuit breaker state
+// ---------------------------------------------------------------------------
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerState {
+    pub triggered: bool,
+    pub trigger_ledger: u32,
+    pub trigger_timestamp: u64,
+    pub consecutive_violations: u32,
 }
 
 // ---------------------------------------------------------------------------
 // Contract
 // ---------------------------------------------------------------------------
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtInit {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub admin: Address,
+    pub oracle: Address,
+    pub guarded_asset: Address,
+    pub max_intra_ledger_deviation_bps: i128,
+    pub min_ledger_gap: u32,
+    pub max_oracle_staleness_seconds: u64,
+    pub max_consecutive_price_change_bps: i128,
+    pub max_oracle_update_gap_seconds: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtCfgUpd {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub admin: Address,
+    pub oracle: Address,
+    pub guarded_asset: Address,
+    pub max_intra_ledger_deviation_bps: i128,
+    pub min_ledger_gap: u32,
+    pub max_oracle_staleness_seconds: u64,
+    pub max_consecutive_price_change_bps: i128,
+    pub max_oracle_update_gap_seconds: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtSnapshot {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub price: i128,
+    pub oracle_timestamp: u64,
+    pub oracle_sequence: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtStalePrc {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub oracle_timestamp: u64,
+    pub current_time: u64,
+    pub max_staleness: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtSeqAttk {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub prev_seq: u64,
+    pub new_seq: u64,
+    pub price_diff: i128,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtStaleUpd {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub prev_timestamp: u64,
+    pub current_time: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtPriceSafe {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub snap_price: i128,
+    pub current_price: i128,
+    pub deviation_bps: i128,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtStaleChk {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub snap_timestamp: u64,
+    pub current_time: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtTimEdge {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub snap_ledger: u32,
+    pub current_ledger: u32,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtFlashBlk {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub snap_price: i128,
+    pub current_price: i128,
+    pub deviation_bps: i128,
+}
+
 #[contract]
 pub struct FlashLoanGuardContract;
 
@@ -64,25 +200,144 @@ pub struct FlashLoanGuardContract;
 impl FlashLoanGuardContract {
     pub fn initialize(env: Env, config: Config) {
         if env.storage().instance().has(&DataKey::Config) {
-            panic!("already initialized");
+            fail(&env, FailureReason::AlreadyInitialized);
         }
         env.storage().instance().set(&DataKey::Config, &config);
+        env.storage().instance().set(
+            &DataKey::CircuitBreaker,
+            &CircuitBreakerState {
+                triggered: false,
+                trigger_ledger: 0,
+                trigger_timestamp: 0,
+                consecutive_violations: 0,
+            },
+        );
+
+        env.events().publish(
+            (symbol_short!("flg"), symbol_short!("init")),
+            EvtInit {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: config.admin.clone(),
+                admin: config.admin.clone(),
+                oracle: config.oracle.clone(),
+                guarded_asset: config.guarded_asset.clone(),
+                max_intra_ledger_deviation_bps: config.max_intra_ledger_deviation_bps,
+                min_ledger_gap: config.min_ledger_gap,
+                max_oracle_staleness_seconds: config.max_oracle_staleness_seconds,
+                max_consecutive_price_change_bps: config.max_consecutive_price_change_bps,
+                max_oracle_update_gap_seconds: config.max_oracle_update_gap_seconds,
+            },
+        );
     }
 
     pub fn update_config(env: Env, config: Config) {
-        let current: Config = env.storage().instance().get(&DataKey::Config).expect("not initialized");
+        let current: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .unwrap_or_else(|| fail(&env, FailureReason::NotInitialized));
         current.admin.require_auth();
         env.storage().instance().set(&DataKey::Config, &config);
+
+        env.events().publish(
+            (symbol_short!("flg"), symbol_short!("cfg_upd")),
+            EvtCfgUpd {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: current.admin.clone(),
+                admin: config.admin.clone(),
+                oracle: config.oracle.clone(),
+                guarded_asset: config.guarded_asset.clone(),
+                max_intra_ledger_deviation_bps: config.max_intra_ledger_deviation_bps,
+                min_ledger_gap: config.min_ledger_gap,
+                max_oracle_staleness_seconds: config.max_oracle_staleness_seconds,
+                max_consecutive_price_change_bps: config.max_consecutive_price_change_bps,
+                max_oracle_update_gap_seconds: config.max_oracle_update_gap_seconds,
+            },
+        );
     }
 
-    /// Record a fresh price snapshot from the oracle.
-    ///
-    /// Enforces `min_ledger_gap`: the snapshot cannot be updated more than once
-    /// per `min_ledger_gap` ledgers, preventing an attacker from resetting the
-    /// baseline and exploiting in the same ledger close.
-    pub fn record_snapshot(env: Env) {
-        let config: Config = env.storage().instance().get(&DataKey::Config).expect("not initialized");
+    /// Update circuit breaker state and auto-release if window expired
+    fn update_circuit_breaker(env: Env, current_ledger: u32, current_time: u64) {
+        let config: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .unwrap_or_else(|| fail(&env, FailureReason::NotInitialized));
+        let mut cb: CircuitBreakerState = env
+            .storage()
+            .instance()
+            .get(&DataKey::CircuitBreaker)
+            .unwrap_or(CircuitBreakerState {
+                triggered: false,
+                trigger_ledger: 0,
+                trigger_timestamp: 0,
+                consecutive_violations: 0,
+            });
+
+        if cb.triggered {
+            if current_time > cb.trigger_timestamp + config.circuit_breaker_window_seconds {
+                cb.triggered = false;
+                cb.trigger_ledger = 0;
+                cb.trigger_timestamp = 0;
+                cb.consecutive_violations = 0;
+                env.storage().instance().set(&DataKey::CircuitBreaker, &cb);
+                env.events().publish((symbol_short!("CbRst"),), (current_ledger, current_time));
+            }
+        }
+    }
+
+    pub fn record_snapshot(env: Env, oracle_timestamp: u64, oracle_sequence: u64) {
+        let config: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .unwrap_or_else(|| fail(&env, FailureReason::NotInitialized));
         let current_ledger = env.ledger().sequence();
+        let current_time = env.ledger().timestamp();
+
+        // Check circuit breaker state first
+        self::update_circuit_breaker(&env, current_ledger, current_time);
+        let cb: CircuitBreakerState = env
+            .storage()
+            .instance()
+            .get(&DataKey::CircuitBreaker)
+            .unwrap_or(CircuitBreakerState {
+                triggered: false,
+                trigger_ledger: 0,
+                trigger_timestamp: 0,
+                consecutive_violations: 0,
+            });
+        if cb.triggered {
+            fail(&env, FailureReason::CircuitBreakerActive);
+        }
+
+        // Oracle freshness check
+        if current_time > oracle_timestamp + config.max_oracle_staleness_seconds {
+            env.events().publish(
+                (symbol_short!("flg"), symbol_short!("stale_prc")),
+                EvtStalePrc {
+                    version: 1,
+                    ledger: current_ledger,
+                    actor: config.admin.clone(),
+                    oracle_timestamp,
+                    current_time,
+                    max_staleness: config.max_oracle_staleness_seconds,
+                },
+            );
+            fail(&env, FailureReason::OracleDataStale);
+        }
+
+        let oracle = PriceOracleClient::new(&env, &config.oracle);
+        let price = oracle.get_price(&config.guarded_asset);
+
+        // Fetch last N snapshots for circuit breaker validation
+        let price_history: Vec<PriceSnapshot> = env
+            .storage()
+            .instance()
+            .get(&DataKey::PriceSequenceHistory)
+            .unwrap_or(Vec::from_array(&env, []));
 
         if let Some(snap) = env
             .storage()
@@ -90,95 +345,257 @@ impl FlashLoanGuardContract {
             .get::<DataKey, PriceSnapshot>(&DataKey::PriceSnapshot)
         {
             if current_ledger < snap.ledger + config.min_ledger_gap {
-                panic!("snapshot too recent: min_ledger_gap not met");
+                fail(&env, FailureReason::SnapshotTooRecent);
+            }
+
+            if oracle_sequence <= snap.oracle_sequence {
+                fail(&env, FailureReason::OracleSequenceNotIncreasing);
+            }
+
+            let price_diff = if snap.price > 0 {
+                let diff = if snap.price > price {
+                    snap.price - price
+                } else {
+                    price - snap.price
+                };
+                diff.checked_mul(10_000)
+                    .unwrap_or_else(|| fail(&env, FailureReason::ArithmeticError))
+                    .checked_div(snap.price)
+                    .unwrap_or_else(|| fail(&env, FailureReason::ArithmeticError))
+            } else {
+                0
+            };
+
+            if price_diff > config.max_consecutive_price_change_bps {
+                env.events().publish(
+                    (symbol_short!("flg"), symbol_short!("seq_attk")),
+                    EvtSeqAttk {
+                        version: 1,
+                        ledger: current_ledger,
+                        actor: config.admin.clone(),
+                        prev_seq: snap.oracle_sequence,
+                        new_seq: oracle_sequence,
+                        price_diff,
+                    },
+                );
+                fail(&env, FailureReason::ConsecutivePriceChangeExceedsThreshold);
+            }
+
+            if current_time > snap.oracle_timestamp + config.max_oracle_update_gap_seconds {
+                env.events().publish(
+                    (symbol_short!("flg"), symbol_short!("stale_upd")),
+                    EvtStaleUpd {
+                        version: 1,
+                        ledger: current_ledger,
+                        actor: config.admin.clone(),
+                        prev_timestamp: snap.oracle_timestamp,
+                        current_time,
+                    },
+                );
+                fail(&env, FailureReason::OracleUpdateGapExceeded);
+            }
+
+            // Circuit breaker: count consecutive violations from history
+            let mut violations = cb.consecutive_violations;
+            let mut should_trigger = false;
+            if price_diff > config.circuit_breaker_threshold_bps {
+                violations += 1;
+                if violations >= 3 {
+                    should_trigger = true;
+                }
+            } else {
+                violations = 0;
+            }
+
+            if should_trigger {
+                env.storage().instance().set(
+                    &DataKey::CircuitBreaker,
+                    &CircuitBreakerState {
+                        triggered: true,
+                        trigger_ledger: current_ledger,
+                        trigger_timestamp: current_time,
+                        consecutive_violations: violations,
+                    },
+                );
+                env.events().publish(
+                    (symbol_short!("CbTrip"),),
+                    (price_diff, violations, current_ledger),
+                );
+                fail(&env, FailureReason::CircuitBreakerTripped);
+            } else {
+                env.storage().instance().set(
+                    &DataKey::CircuitBreaker,
+                    &CircuitBreakerState {
+                        triggered: false,
+                        trigger_ledger: 0,
+                        trigger_timestamp: 0,
+                        consecutive_violations: violations,
+                    },
+                );
             }
         }
 
-        let oracle = PriceOracleClient::new(&env, &config.oracle);
-        let price = oracle.get_price(&config.guarded_asset);
+        // Update price history (keep last 10)
+        let mut new_history = Vec::from_array(&env, []);
+        if price_history.len() >= 10 {
+            for i in 1..price_history.len() {
+                new_history.push_back(
+                    unwrap_or_fail(&env, price_history.get(i), FailureReason::StorageValueMissing).clone(),
+                );
+            }
+        } else {
+            for item in price_history.iter() {
+                new_history.push_back(item.clone());
+            }
+        }
+        new_history.push_back(PriceSnapshot {
+            price,
+            ledger: current_ledger,
+            oracle_timestamp,
+            oracle_sequence,
+        });
+        env.storage().instance().set(&DataKey::PriceSequenceHistory, &new_history);
 
-        env.storage().instance().set(
+        // Store snapshot with TTL to ensure it must be refreshed regularly
+        env.storage().instance().set_with_ttl(
             &DataKey::PriceSnapshot,
-            &PriceSnapshot { price, ledger: current_ledger },
+            &PriceSnapshot {
+                price,
+                ledger: current_ledger,
+                oracle_timestamp,
+                oracle_sequence,
+            },
         );
 
-        env.events().publish((symbol_short!("Snapshot"),), (price, current_ledger));
+        env.events().publish(
+            (symbol_short!("flg"), symbol_short!("snapshot")),
+            EvtSnapshot {
+                version: 1,
+                ledger: current_ledger,
+                actor: config.admin.clone(),
+                price,
+                oracle_timestamp,
+                oracle_sequence,
+            },
+        );
     }
 
-    /// Core flash-loan guard check.
-    ///
-    /// Called before any price-sensitive vault operation (swap, liquidation, etc.).
-    /// Compares the current oracle price against the stored snapshot.
-    ///
-    /// Blocks execution if:
-    ///   1. No snapshot exists yet (cold-start protection).
-    ///   2. The snapshot was taken in the SAME ledger as the current call
-    ///      (same-block manipulation detection).
-    ///   3. The price deviation from the snapshot exceeds `max_intra_ledger_deviation_bps`.
-    ///
-    /// Returns the current price on success.
     pub fn assert_price_safe(env: Env) -> i128 {
-        let config: Config = env.storage().instance().get(&DataKey::Config).expect("not initialized");
+        let config: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .unwrap_or_else(|| fail(&env, FailureReason::NotInitialized));
+        let current_time = env.ledger().timestamp();
 
         let snap: PriceSnapshot = env
             .storage()
             .instance()
             .get(&DataKey::PriceSnapshot)
-            .expect("no price snapshot: call record_snapshot first");
+            .unwrap_or_else(|| fail(&env, FailureReason::NotFound));
 
         let current_ledger = env.ledger().sequence();
 
-        // --- Same-ledger manipulation check ---
-        // If the snapshot was recorded in this exact ledger, an attacker could have
-        // manipulated the price, taken the snapshot, and now be calling assert_price_safe
-        // all within the same ledger close. Block it.
         if current_ledger == snap.ledger {
-            panic!("flash-loan guard: price snapshot taken in same ledger");
+            fail(&env, FailureReason::SnapshotSameLedger);
         }
 
-        // --- Fetch live price ---
+        if current_time > snap.oracle_timestamp + config.max_oracle_staleness_seconds {
+            env.events().publish(
+                (symbol_short!("flg"), symbol_short!("stale_chk")),
+                EvtStaleChk {
+                    version: 1,
+                    ledger: current_ledger,
+                    actor: config.admin.clone(),
+                    snap_timestamp: snap.oracle_timestamp,
+                    current_time,
+                },
+            );
+            fail(&env, FailureReason::OracleDataStale);
+        }
+
+        if current_ledger > snap.ledger + (config.max_oracle_update_gap_seconds / 5) as u32 {
+            env.events().publish(
+                (symbol_short!("flg"), symbol_short!("tim_edge")),
+                EvtTimEdge {
+                    version: 1,
+                    ledger: current_ledger,
+                    actor: config.admin.clone(),
+                    snap_ledger: snap.ledger,
+                    current_ledger,
+                },
+            );
+            fail(&env, FailureReason::SnapshotTooOld);
+        }
+
         let oracle = PriceOracleClient::new(&env, &config.oracle);
         let current_price = oracle.get_price(&config.guarded_asset);
 
-        // --- Deviation check ---
         let diff = if current_price > snap.price {
             current_price - snap.price
         } else {
             snap.price - current_price
         };
 
-        // deviation_bps = diff * 10_000 / snap.price
         let deviation_bps = diff
             .checked_mul(10_000)
-            .expect("overflow")
+            .unwrap_or_else(|| fail(&env, FailureReason::ArithmeticError))
             .checked_div(snap.price)
-            .expect("div zero");
+            .unwrap_or_else(|| fail(&env, FailureReason::ArithmeticError));
 
         if deviation_bps > config.max_intra_ledger_deviation_bps {
             env.events().publish(
-                (symbol_short!("FlashBlk"),),
-                (snap.price, current_price, deviation_bps),
+                (symbol_short!("flg"), symbol_short!("flash_blk")),
+                EvtFlashBlk {
+                    version: 1,
+                    ledger: current_ledger,
+                    actor: config.admin.clone(),
+                    snap_price: snap.price,
+                    current_price,
+                    deviation_bps,
+                },
             );
-            panic!("flash-loan guard: price deviation exceeds threshold");
+            fail(&env, FailureReason::PriceDeviationExceedsThreshold);
         }
 
         env.events().publish(
-            (symbol_short!("PriceSafe"),),
-            (snap.price, current_price, deviation_bps),
+            (symbol_short!("flg"), symbol_short!("price_safe")),
+            EvtPriceSafe {
+                version: 1,
+                ledger: current_ledger,
+                actor: config.admin.clone(),
+                snap_price: snap.price,
+                current_price,
+                deviation_bps,
+            },
         );
 
         current_price
     }
 
-    /// Returns the current stored snapshot, if any.
     pub fn get_snapshot(env: Env) -> Option<PriceSnapshot> {
         env.storage().instance().get(&DataKey::PriceSnapshot)
     }
 
-    /// Returns the current config.
     pub fn get_config(env: Env) -> Config {
-        env.storage().instance().get(&DataKey::Config).expect("not initialized")
+        env.storage()
+            .instance()
+            .get(&DataKey::Config)
+            .unwrap_or_else(|| fail(&env, FailureReason::NotInitialized))
+    }
+
+    pub fn get_circuit_breaker(env: Env) -> CircuitBreakerState {
+        env.storage().instance()
+            .get(&DataKey::CircuitBreaker)
+            .unwrap_or(CircuitBreakerState {
+                triggered: false,
+                trigger_ledger: 0,
+                trigger_timestamp: 0,
+                consecutive_violations: 0,
+            })
     }
 }
 
 mod test;
+mod test_freshness;
+mod test_invariants;

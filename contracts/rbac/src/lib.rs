@@ -1,5 +1,6 @@
 #![no_std]
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Env, Address};
+use contract_failure::{fail, FailureReason};
 
 /// The three roles this contract manages.
 /// Stored per-address — an address can hold multiple roles.
@@ -25,6 +26,9 @@ pub enum DataKey {
 #[contracttype]
 #[derive(Clone)]
 pub struct EvtRoleGranted {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
     pub to: Address,
     pub role: Role,
     pub by: Address,
@@ -33,6 +37,9 @@ pub struct EvtRoleGranted {
 #[contracttype]
 #[derive(Clone)]
 pub struct EvtRoleRevoked {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
     pub from: Address,
     pub role: Role,
     pub by: Address,
@@ -41,8 +48,20 @@ pub struct EvtRoleRevoked {
 #[contracttype]
 #[derive(Clone)]
 pub struct EvtAdminTransferred {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
     pub old_admin: Address,
     pub new_admin: Address,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtInit {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub super_admin: Address,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -55,9 +74,19 @@ impl RbacContract {
     /// One-time setup — sets the super-admin.
     pub fn init(env: Env, admin: Address) {
         if env.storage().instance().has(&DataKey::SuperAdmin) {
-            panic!("already initialized");
+            fail(&env, FailureReason::AlreadyInitialized);
         }
         env.storage().instance().set(&DataKey::SuperAdmin, &admin);
+
+        env.events().publish(
+            (symbol_short!("rbac"), symbol_short!("init")),
+            EvtInit {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: admin.clone(),
+                super_admin: admin,
+            },
+        );
     }
 
     /// Grant a role to an address. Only super-admin can call this.
@@ -70,8 +99,15 @@ impl RbacContract {
             .set(&DataKey::HasRole(to.clone(), role.clone()), &true);
 
         env.events().publish(
-            (symbol_short!("role_grnt"), env.current_contract_address()),
-            EvtRoleGranted { to, role, by: admin },
+            (symbol_short!("rbac"), symbol_short!("role_grant")),
+            EvtRoleGranted {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: admin.clone(),
+                to,
+                role,
+                by: admin,
+            },
         );
     }
 
@@ -85,8 +121,15 @@ impl RbacContract {
             .remove(&DataKey::HasRole(from.clone(), role.clone()));
 
         env.events().publish(
-            (symbol_short!("role_rvk"), env.current_contract_address()),
-            EvtRoleRevoked { from, role, by: admin },
+            (symbol_short!("rbac"), symbol_short!("role_revoke")),
+            EvtRoleRevoked {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: admin.clone(),
+                from,
+                role,
+                by: admin,
+            },
         );
     }
 
@@ -105,8 +148,14 @@ impl RbacContract {
         env.storage().instance().set(&DataKey::SuperAdmin, &new_admin);
 
         env.events().publish(
-            (symbol_short!("adm_xfer"), env.current_contract_address()),
-            EvtAdminTransferred { old_admin, new_admin },
+            (symbol_short!("rbac"), symbol_short!("adm_xfer")),
+            EvtAdminTransferred {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: old_admin.clone(),
+                old_admin,
+                new_admin,
+            },
         );
     }
 
@@ -142,7 +191,7 @@ impl RbacContract {
         env.storage()
             .instance()
             .get(&DataKey::SuperAdmin)
-            .expect("not initialized")
+            .unwrap_or_else(|| fail(env, FailureReason::NotInitialized))
     }
 
     fn assert_role(env: &Env, addr: &Address, role: Role) {
@@ -152,7 +201,7 @@ impl RbacContract {
             .get::<DataKey, bool>(&DataKey::HasRole(addr.clone(), role))
             .unwrap_or(false);
         if !has {
-            panic!("unauthorized: missing role");
+            fail(env, FailureReason::Unauthorized);
         }
     }
 }

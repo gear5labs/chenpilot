@@ -103,6 +103,7 @@ export async function ErrorHandler(
     message: pgish?.message || "No message provided",
     statusCode,
     errorCode,
+    category,
     method: req.method,
     url: req.originalUrl,
     stack: pgish?.stack,

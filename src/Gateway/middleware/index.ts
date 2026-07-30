@@ -23,3 +23,5 @@ export {
   requireAdminWithIpWhitelist,
   isIpWhitelisted,
 } from "./ipWhitelist.middleware";
+
+export { requireAdminAuth } from "./adminAuth";

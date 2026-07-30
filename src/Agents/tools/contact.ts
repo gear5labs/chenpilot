@@ -15,6 +15,9 @@ interface DeletePayload {
   id: string;
 }
 
+/**
+ *
+ */
 export class ContactTool extends BaseTool {
   metadata: ToolMetadata = {
     name: "contact_tool",
@@ -39,10 +42,16 @@ export class ContactTool extends BaseTool {
     ],
     category: "contacts",
     version: "1.0.0",
+    riskLevel: "medium",
+    capabilities: ["contact_management"],
+    permissions: ["user"],
   };
 
   private contactService = container.resolve(ContactService);
 
+  /**
+   *
+   */
   async execute(
     payload: Record<string, unknown>,
     userId: string
@@ -69,11 +78,18 @@ export class ContactTool extends BaseTool {
     }
   }
 
+  /**
+   *
+   */
   private async createContact(
     data: CreatePayload,
     userId: string
   ): Promise<ToolResult> {
-    logger.info("Creating contact", { name: data?.name, tokenType: data?.tokenType, userId });
+    logger.info("Creating contact", {
+      name: data?.name,
+      tokenType: data?.tokenType,
+      userId,
+    });
     if (!data?.name || !data?.address || !data?.tokenType) {
       return this.createErrorResult(
         "create_contact",
@@ -85,11 +101,17 @@ export class ContactTool extends BaseTool {
     return this.createSuccessResult("contact_created", { created });
   }
 
+  /**
+   *
+   */
   private async listContacts(userId: string): Promise<ToolResult> {
     const contacts = await this.contactService.getAllContacts();
     return this.createSuccessResult("contacts_list", { contacts });
   }
 
+  /**
+   *
+   */
   private async deleteContact(
     data: DeletePayload,
     userId: string

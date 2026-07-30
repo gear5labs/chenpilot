@@ -52,6 +52,22 @@ const FEATURES: BotFeature[] = [
     command: "/price",
     keywords: ["price", "market", "cost", "value", "rate", "quote"],
   },
+  {
+    name: "Portfolio Summary",
+    description:
+      "View a formatted summary of all your Stellar asset balances and estimated net worth in USD, XLM, or BTC.",
+    command: "/portfolio",
+    keywords: [
+      "portfolio",
+      "net worth",
+      "summary",
+      "holdings",
+      "assets",
+      "total",
+      "wealth",
+      "overview",
+    ],
+  },
 ];
 
 export function searchFeatures(query: string): BotFeature[] {
@@ -120,4 +136,11 @@ export function formatHelpMessage(
   }
 
   return message;
+}
+
+export function formatAiHelpMessage(response: string, format: "html" | "markdown" = "html"): string {
+  const bold = (text: string) =>
+    format === "html" ? `<b>${text}</b>` : `**${text}**`;
+
+  return `${bold("🤖 Chen Pilot AI Help")}\n\n${response}`;
 }

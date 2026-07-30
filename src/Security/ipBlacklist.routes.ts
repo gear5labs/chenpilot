@@ -216,3 +216,4 @@ router.post(
 );
 
 export default router;
+export const ipBlacklistRoutes = router;

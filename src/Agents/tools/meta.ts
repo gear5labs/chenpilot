@@ -1,6 +1,9 @@
 import { BaseTool } from "./base/BaseTool";
 import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 
+/**
+ *
+ */
 export class MetaTool extends BaseTool {
   metadata: ToolMetadata = {
     name: "meta_tool",
@@ -21,8 +24,14 @@ export class MetaTool extends BaseTool {
     ],
     category: "meta",
     version: "1.0.0",
+    riskLevel: "low",
+    capabilities: ["agent_info"],
+    permissions: [],
   };
 
+  /**
+   *
+   */
   async execute(
     payload: Record<string, unknown>,
     _userId: string
@@ -43,7 +52,7 @@ export class MetaTool extends BaseTool {
             "Get wallet address",
             "Swap assets",
             "Provide agent info (name, version, capabilities)",
-            "Create delete and edit contacts"
+            "Create delete and edit contacts",
           ],
         });
 

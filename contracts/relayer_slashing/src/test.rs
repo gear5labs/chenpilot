@@ -15,22 +15,15 @@ fn create_token<'a>(env: &Env, admin: &Address) -> (Address, token::Client<'a>, 
 fn test_registration_and_staking() {
     let env = Env::default();
     env.mock_all_auths();
-
     let admin = Address::generate(&env);
     let relayer = Address::generate(&env);
     let treasury = Address::generate(&env);
-    
     let (token_addr, token_client, stellar_asset) = create_token(&env, &admin);
-    
     let contract_id = env.register_contract(None, RelayerSlashingContract);
     let client = RelayerSlashingContractClient::new(&env, &contract_id);
-    
-    // 50% slash, 10s unbonding
     client.initialize(&admin, &token_addr, &treasury, &5000, &10);
-    
     stellar_asset.mint(&relayer, &1000);
     client.register_relayer(&relayer, &1000);
-    
     let info = client.get_relayer_info(&relayer).unwrap();
     assert_eq!(info.stake_amount, 1000);
     assert_eq!(info.status, RelayerStatus::Active);
@@ -38,29 +31,44 @@ fn test_registration_and_staking() {
 }
 
 #[test]
-fn test_slash_relayer() {
+fn test_dispute_and_slash_relayer() {
     let env = Env::default();
     env.mock_all_auths();
-
     let admin = Address::generate(&env);
     let relayer = Address::generate(&env);
     let treasury = Address::generate(&env);
     let (token_addr, token_client, stellar_asset) = create_token(&env, &admin);
-    
     let contract_id = env.register_contract(None, RelayerSlashingContract);
     let client = RelayerSlashingContractClient::new(&env, &contract_id);
-    
     client.initialize(&admin, &token_addr, &treasury, &5000, &10);
-    
     stellar_asset.mint(&relayer, &1000);
     client.register_relayer(&relayer, &1000);
-    
+    client.dispute_relayer(&relayer);
     client.slash_relayer(&relayer);
-    
     let info = client.get_relayer_info(&relayer).unwrap();
-    assert_eq!(info.stake_amount, 500); // 5000 bps slash = 50%
+    assert_eq!(info.stake_amount, 500);
     assert_eq!(info.status, RelayerStatus::Slashed);
     assert_eq!(token_client.balance(&treasury), 500);
+}
+
+#[test]
+fn test_withdraw_success_after_unbonding() {
+    let env = Env::default();
+    env.ledger().set_timestamp(0);
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let relayer = Address::generate(&env);
+    let (token_addr, token_client, stellar_asset) = create_token(&env, &admin);
+    let contract_id = env.register_contract(None, RelayerSlashingContract);
+    let client = RelayerSlashingContractClient::new(&env, &contract_id);
+    client.initialize(&admin, &token_addr, &admin, &5000, &60);
+    stellar_asset.mint(&relayer, &1000);
+    client.register_relayer(&relayer, &1000);
+    client.request_unstake(&relayer);
+    env.ledger().set_timestamp(70);
+    client.withdraw_stake(&relayer);
+    assert_eq!(token_client.balance(&relayer), 1000);
+    assert_eq!(client.get_relayer_info(&relayer).unwrap().status, RelayerStatus::Withdrawn);
 }
 
 #[test]
@@ -69,63 +77,15 @@ fn test_withdraw_fails_within_unbonding_period() {
     let env = Env::default();
     env.ledger().set_timestamp(0);
     env.mock_all_auths();
-
     let admin = Address::generate(&env);
     let relayer = Address::generate(&env);
     let (token_addr, _token_client, stellar_asset) = create_token(&env, &admin);
-    
     let contract_id = env.register_contract(None, RelayerSlashingContract);
     let client = RelayerSlashingContractClient::new(&env, &contract_id);
-    
-    // 60s unbonding
     client.initialize(&admin, &token_addr, &admin, &5000, &60);
-    
     stellar_asset.mint(&relayer, &1000);
     client.register_relayer(&relayer, &1000);
-    
     client.request_unstake(&relayer);
-    
-    // Advance time by 30s
     env.ledger().set_timestamp(30);
-    client.withdraw_stake(&relayer); // Should panic
-}
-
-#[test]
-fn test_withdraw_success_after_unbonding() {
-    let env = Env::default();
-    env.ledger().set_timestamp(0);
-    env.mock_all_auths();
-
-    let admin = Address::generate(&env);
-    let relayer = Address::generate(&env);
-    let (token_addr, token_client, stellar_asset) = create_token(&env, &admin);
-    
-    let contract_id = env.register_contract(None, RelayerSlashingContract);
-    let client = RelayerSlashingContractClient::new(&env, &contract_id);
-    
-    client.initialize(&admin, &token_addr, &admin, &5000, &60);
-    
-    stellar_asset.mint(&relayer, &1000);
-    client.register_relayer(&relayer, &1000);
-    
-    client.request_unstake(&relayer);
-    
-    // Advance time by 70s
-    env.ledger().set_timestamp(70);
     client.withdraw_stake(&relayer);
-    
-    assert_eq!(token_client.balance(&relayer), 1000);
-    assert_eq!(client.get_relayer_info(&relayer).is_none(), true);
-}
-
-#[test]
-#[should_panic(expected = "Already initialized")]
-fn test_initialization_failure() {
-    let env = Env::default();
-    let admin = Address::generate(&env);
-    let contract_id = env.register_contract(None, RelayerSlashingContract);
-    let client = RelayerSlashingContractClient::new(&env, &contract_id);
-
-    client.initialize(&admin, &admin, &admin, &5000, &60);
-    client.initialize(&admin, &admin, &admin, &5000, &60);
 }

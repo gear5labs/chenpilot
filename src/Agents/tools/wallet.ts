@@ -1,5 +1,5 @@
 import { Account, RpcProvider, Contract, uint256 } from "starknet";
-import accountsData from "../../Auth/accounts.json";
+import { accountSecretStore } from "../../Auth/accountSecretStore";
 import tokenAbi from "../../abis/token.json";
 import { container } from "tsyringe";
 import {
@@ -25,6 +25,7 @@ interface AccountData {
   precalculatedAddress: string;
   deployed: boolean;
   contract_address?: string;
+  [key: string]: unknown;
 }
 
 type supportedTokens = "STRK" | "ETH" | "DAI";
@@ -39,6 +40,9 @@ interface TransferPayload {
   token?: "STRK" | "ETH";
 }
 
+/**
+ *
+ */
 export class WalletTool extends BaseTool {
   metadata: ToolMetadata = {
     name: "wallet_tool",
@@ -76,25 +80,35 @@ export class WalletTool extends BaseTool {
     ],
     category: "wallet",
     version: "1.0.0",
+    riskLevel: "high",
+    capabilities: ["starknet_wallet", "transfer"],
+    permissions: ["user"],
   };
 
-  private accounts: AccountData[];
   private provider: RpcProvider;
   private contactService = container.resolve(ContactService);
+  /**
+   *
+   */
   constructor() {
     super();
-    this.accounts = accountsData as AccountData[];
     this.provider = new RpcProvider({
       nodeUrl: config.node_url,
     });
   }
 
+  /**
+   *
+   */
   private getAccount(userId: string): AccountData {
-    const account = this.accounts.find((a) => a.userId === userId);
+    const account = accountSecretStore.getAccountByUserId<AccountData>(userId);
     if (!account) throw new Error(`Account not found: ${userId}`);
     return account;
   }
 
+  /**
+   *
+   */
   private getStarkAccount(userId: string): Account {
     const accountData = this.getAccount(userId);
 
@@ -105,6 +119,9 @@ export class WalletTool extends BaseTool {
     );
   }
 
+  /**
+   *
+   */
   async execute(
     payload: Record<string, unknown>,
     userId: string
@@ -126,6 +143,9 @@ export class WalletTool extends BaseTool {
     }
   }
 
+  /**
+   *
+   */
   private async getBalance(
     payload: BalancePayload,
     userId: string
@@ -149,10 +169,17 @@ export class WalletTool extends BaseTool {
         token: contractAddress,
         address: accountData.precalculatedAddress,
       });
-      logger.info("Balance retrieved successfully", { token: payload.token, userId });
+      logger.info("Balance retrieved successfully", {
+        token: payload.token,
+        userId,
+      });
       return result;
     } catch (error) {
-      logger.error("Failed to get balance", { error, token: payload.token, userId });
+      logger.error("Failed to get balance", {
+        error,
+        token: payload.token,
+        userId,
+      });
       return this.createErrorResult(
         "wallet_balance",
         `Failed to get balance: ${
@@ -162,12 +189,20 @@ export class WalletTool extends BaseTool {
     }
   }
 
+  /**
+   *
+   */
   private async transfer(
     payload: TransferPayload,
     userId: string
   ): Promise<ToolResult> {
     try {
-      logger.info("Initiating transfer", { to: payload.to, amount: payload.amount, token: payload.token, userId });
+      logger.info("Initiating transfer", {
+        to: payload.to,
+        amount: payload.amount,
+        token: payload.token,
+        userId,
+      });
       const starkAccount = this.getStarkAccount(userId);
       const tokenAddress = payload.token
         ? tokensMap[payload.token]
@@ -195,11 +230,16 @@ export class WalletTool extends BaseTool {
         to: payload.to,
         amount: payload.amount,
         txHash: tx.transaction_hash,
-        userId
+        userId,
       });
       return result;
     } catch (error) {
-      logger.error("Transfer failed", { error, to: payload.to, amount: payload.amount, userId });
+      logger.error("Transfer failed", {
+        error,
+        to: payload.to,
+        amount: payload.amount,
+        userId,
+      });
       return this.createErrorResult(
         "transfer",
         `Transfer failed: ${
@@ -209,6 +249,9 @@ export class WalletTool extends BaseTool {
     }
   }
 
+  /**
+   *
+   */
   private async getWalletAddress(userId: string): Promise<ToolResult> {
     try {
       const account = this.getAccount(userId);

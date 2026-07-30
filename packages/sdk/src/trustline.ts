@@ -1,5 +1,6 @@
-// @ts-ignore: dependency is provided at the workspace root
+/// @ts-ignore: dependency is provided at the workspace root
 import { Server, Asset, Operation } from "stellar-sdk";
+import * as StellarSdk from "@stellar/stellar-sdk";
 
 export interface TrustlineCheckResult {
   exists: boolean;
@@ -7,14 +8,87 @@ export interface TrustlineCheckResult {
   details?: Record<string, unknown>;
 }
 
-/**
- * Resolves an asset issuer's address from a home domain using SEP-1.
- * 
- * @param domain The home domain to resolve (e.g., "circle.com")
- * @param assetCode The asset code to find in the stellar.toml
- * @param timeout Optional request timeout in milliseconds
- * @returns The issuer's public key or undefined
- */
+export interface TrustlinePreview {
+  operations: Operation[];
+  transactionXdr: string;
+}
+
+export interface TrustlineValidation {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+export interface TrustlineResourceEstimate {
+  baseFee: number;
+  totalCost: string;
+  trustlinesCreated: number;
+  trustlinesRemoved: number;
+  reservesRequired: string;
+}
+
+export interface TrustlineInfo {
+  assetCode: string;
+  assetIssuer: string;
+  balance: string;
+}
+
+export interface AssetToTrust {
+  assetCode: string;
+  assetIssuer: string;
+  limit?: string;
+}
+
+export interface TrustlineWorkflowConfig {
+  horizonUrl?: string;
+  networkPassphrase?: string;
+  sourceSecret?: string;
+  source?: string;
+}
+
+export enum TrustlineWorkflowStep {
+  IDLE = "idle",
+  PREVIEWING = "previewing",
+  VALIDATING = "validating",
+  ESTIMATING = "estimating",
+  BUILDING = "building",
+  READY = "ready",
+}
+
+export interface TrustlineWorkflowPreview {
+  assetsToTrust: AssetToTrust[];
+  existingTrustlines: TrustlineInfo[];
+  operations: Operation[];
+  transactionXdr: string;
+  sourceAccount?: string;
+  trustlinesToRemove?: TrustlineInfo[];
+}
+
+export interface TrustlineWorkflowValidation {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  accountExists: boolean;
+  missingTrustlines: AssetToTrust[];
+  existingTrustlines: TrustlineInfo[];
+}
+
+export interface TrustlineWorkflowResourceEstimate {
+  baseFee: number;
+  totalCost: string;
+  trustlinesCreated: number;
+  trustlinesRemoved: number;
+  reservesRequired: string;
+  operationCount: number;
+}
+
+export interface TrustlineWorkflowResult {
+  transactionXdr: string;
+  signedTransactionXdr?: string;
+  operations: Operation[];
+  resourceEstimate: TrustlineWorkflowResourceEstimate;
+}
+
 export async function resolveIssuerFromDomain(
   domain: string,
   assetCode: string,
@@ -25,17 +99,20 @@ export async function resolveIssuerFromDomain(
     const signal = timeout ? AbortSignal.timeout(timeout) : undefined;
     const response = await fetch(url, { signal });
     if (!response.ok) return undefined;
-    
+
     const text = await response.text();
-    // Simple TOML parser for CURRENCIES section
     const currenciesMatch = text.match(/\[\[CURRENCIES\]\]([\s\S]*?)(?=\[\[|$)/g);
     if (!currenciesMatch) return undefined;
 
     for (const currencyBlock of currenciesMatch) {
       const codeMatch = currencyBlock.match(/code\s*=\s*["'](.+?)["']/);
       const issuerMatch = currencyBlock.match(/issuer\s*=\s*["'](.+?)["']/);
-      
-      if (codeMatch && codeMatch[1].toUpperCase() === assetCode.toUpperCase() && issuerMatch) {
+
+      if (
+        codeMatch &&
+        codeMatch[1].toUpperCase() === assetCode.toUpperCase() &&
+        issuerMatch
+      ) {
         return issuerMatch[1];
       }
     }
@@ -46,16 +123,6 @@ export async function resolveIssuerFromDomain(
   }
 }
 
-/**
- * Checks whether an account has a valid, non-frozen trustline for an asset.
- * - For native XLM the function returns exists=true, authorized=true.
- * - For other assets it fetches the account from Horizon and inspects balances.
- *
- * @param horizonUrl Horizon server URL (defaults to public Horizon)
- * @param accountId Stellar account id to check
- * @param assetCode Asset code (string; "XLM" for native)
- * @param assetIssuer Asset issuer public key (optional for native/XLM)
- */
 export async function hasValidStellarTrustline(
   horizonUrl: string | undefined,
   accountId: string,
@@ -64,12 +131,11 @@ export async function hasValidStellarTrustline(
 ): Promise<TrustlineCheckResult> {
   const server = new Server(horizonUrl || "https://horizon.stellar.org");
 
-  // Native XLM does not require a trustline
   if (!assetCode || assetCode.toUpperCase() === "XLM") {
     return { exists: true, authorized: true };
   }
 
-  let account: any;
+  let account: Record<string, unknown>;
   try {
     account = await server.accounts().accountId(accountId).call();
   } catch (err) {
@@ -80,11 +146,11 @@ export async function hasValidStellarTrustline(
     };
   }
 
-  const balances: any[] = account.balances || [];
+  const balances: Record<string, unknown>[] = (account.balances as Record<string, unknown>[]) || [];
   const match = balances.find((b) => {
     return (
-      b.asset_code === assetCode &&
-      (assetIssuer ? b.asset_issuer === assetIssuer : true)
+      b['asset_code'] === assetCode &&
+      (assetIssuer ? b['asset_issuer'] === assetIssuer : true)
     );
   });
 
@@ -92,53 +158,32 @@ export async function hasValidStellarTrustline(
     return { exists: false, authorized: false };
   }
 
-  // Horizon may include authorization properties on the trustline/balance object
   const authorized =
-    // common property name
     (match.is_authorized as boolean) ??
     (match.authorized as boolean) ??
-    // if issuer uses 'authorized_to_maintain_liabilities' treat as authorized
-    (match.authorized_to_maintain_liabilities as boolean) ?? true;
+    (match.authorized_to_maintain_liabilities as boolean) ??
+    true;
 
   return { exists: true, authorized, details: { balance: match } };
 }
 
-export interface TrustlineInfo {
-  assetCode: string;
-  assetIssuer: string;
-  balance: string;
-}
-
-/**
- * Inspect an account for non-native trustlines whose balance is zero.
- * Returns a list that can later be used to build changeTrust operations with
- * limit 0 (i.e. remove the trustline).
- *
- * @param horizonUrl optional horizon server URL
- * @param accountId account to inspect
- */
 export async function findZeroBalanceTrustlines(
   horizonUrl: string | undefined,
   accountId: string
 ): Promise<TrustlineInfo[]> {
   const server = new Server(horizonUrl || "https://horizon.stellar.org");
   const account = await server.accounts().accountId(accountId).call();
-  const balances: any[] = account.balances || [];
+  const balances: Record<string, unknown>[] = (account.balances as Record<string, unknown>[]) || [];
 
   return balances
-    .filter((b) => b.asset_type !== "native" && parseFloat(b.balance) === 0)
+    .filter((b) => b['asset_type'] !== "native" && parseFloat(b['balance'] as string) === 0)
     .map((b) => ({
-      assetCode: b.asset_code,
-      assetIssuer: b.asset_issuer,
-      balance: b.balance,
+      assetCode: b['asset_code'] as string,
+      assetIssuer: b['asset_issuer'] as string,
+      balance: b['balance'] as string,
     }));
 }
 
-/**
- * Build a collection of changeTrust operations that remove the provided
- * trustlines (setting limit to "0").  The returned operations can be added
- * to a transaction builder.
- */
 export function buildTrustlineRemovalOps(
   trustlines: TrustlineInfo[]
 ): Operation[] {
@@ -148,28 +193,26 @@ export function buildTrustlineRemovalOps(
       limit: "0",
     })
   );
-/**
- * Creates a ChangeTrust operation for a given asset.
- * 
- * @param assetCode Asset code (e.g., "USDC")
- * @param assetIssuer Asset issuer public key or domain
- * @param limit Optional trust limit
- * @param timeout Optional request timeout in milliseconds (used when resolving domain)
- * @returns An Operation object
- */
+}
+
 export async function createTrustlineOperation(
   assetCode: string,
   assetIssuer: string,
   limit?: string,
   timeout?: number
-): Promise<any> {
+): Promise<Operation> {
   let issuer = assetIssuer;
 
-  // If issuer looks like a domain, resolve it
   if (assetIssuer.includes(".") && !assetIssuer.startsWith("G")) {
-    const resolvedIssuer = await resolveIssuerFromDomain(assetIssuer, assetCode, timeout);
+    const resolvedIssuer = await resolveIssuerFromDomain(
+      assetIssuer,
+      assetCode,
+      timeout
+    );
     if (!resolvedIssuer) {
-      throw new Error(`Could not resolve issuer for ${assetCode} from domain ${assetIssuer}`);
+      throw new Error(
+        `Could not resolve issuer for ${assetCode} from domain ${assetIssuer}`
+      );
     }
     issuer = resolvedIssuer;
   }
@@ -179,6 +222,211 @@ export async function createTrustlineOperation(
     asset,
     limit,
   });
+}
+
+export class TrustlineWorkflowBuilder {
+  private assets: AssetToTrust[] = [];
+  private trustlinesToRemove: TrustlineInfo[] = [];
+  private config: Required<TrustlineWorkflowConfig>;
+  private step: TrustlineWorkflowStep = TrustlineWorkflowStep.IDLE;
+
+  constructor(config: TrustlineWorkflowConfig = {}) {
+    this.config = {
+      horizonUrl: config.horizonUrl || "https://horizon.stellar.org",
+      networkPassphrase: config.networkPassphrase || StellarSdk.Networks.PUBLIC,
+      sourceSecret: config.sourceSecret,
+      source: config.source,
+    };
+  }
+
+  addTrustline(assetCode: string, assetIssuer: string, limit?: string): this {
+    this.assets.push({ assetCode, assetIssuer, limit });
+    this.step = TrustlineWorkflowStep.BUILDING;
+    return this;
+  }
+
+  addTrustlines(assets: AssetToTrust[]): this {
+    this.assets.push(...assets);
+    this.step = TrustlineWorkflowStep.BUILDING;
+    return this;
+  }
+
+  addTrustlineRemoval(assetCode: string, assetIssuer: string): this {
+    this.trustlinesToRemove.push({ assetCode, assetIssuer, balance: "0" });
+    this.step = TrustlineWorkflowStep.BUILDING;
+    return this;
+  }
+
+  async preview(): Promise<TrustlineWorkflowPreview> {
+    this.step = TrustlineWorkflowStep.PREVIEWING;
+
+    const server = new Server(this.config.horizonUrl);
+    const existingTrustlines: TrustlineInfo[] = [];
+    let sourceAccount: string | undefined;
+
+    if (this.config.source) {
+      try {
+        const account = await server.accounts().accountId(this.config.source).call();
+        const trustlines = (account.balances as Record<string, unknown>[])
+          .filter((b) => b['asset_type'] !== "native")
+          .map((b) => ({
+            assetCode: b['asset_code'] as string,
+            assetIssuer: b['asset_issuer'] as string,
+            balance: b['balance'] as string,
+          }));
+        existingTrustlines.push(...trustlines);
+        sourceAccount = this.config.source;
+      } catch {
+        // Account may not exist
+      }
+    }
+
+    const resolvedAssets = await Promise.all(
+      this.assets.map(async (a) => {
+        if (a.assetIssuer.includes(".") && !a.assetIssuer.startsWith("G")) {
+          const issuer = await resolveIssuerFromDomain(a.assetIssuer, a.assetCode);
+          return issuer ? { ...a, assetIssuer: issuer } : a;
+        }
+        return a;
+      })
+    );
+
+    const operations: Operation[] = [
+      ...resolvedAssets.map((a) =>
+        Operation.changeTrust({
+          asset: new Asset(a.assetCode, a.assetIssuer),
+          limit: a.limit,
+        })
+      ),
+      ...this.trustlinesToRemove.map((t) =>
+        Operation.changeTrust({
+          asset: new Asset(t.assetCode, t.assetIssuer),
+          limit: "0",
+        })
+      ),
+    ];
+
+    let transactionXdr = "";
+    if (sourceAccount) {
+      const tx = new StellarSdk.TransactionBuilder(
+        new StellarSdk.Account(sourceAccount, "0"),
+        {
+          fee: StellarSdk.BASE_FEE,
+          networkPassphrase: this.config.networkPassphrase,
+        }
+      );
+      operations.forEach((op) => tx.addOperation(op));
+      transactionXdr = tx.build().toXDR();
+    }
+
+    return {
+      assetsToTrust: resolvedAssets,
+      existingTrustlines,
+      trustlinesToRemove: this.trustlinesToRemove,
+      operations,
+      transactionXdr,
+      sourceAccount,
+    };
+  }
+
+  async validate(): Promise<TrustlineWorkflowValidation> {
+    this.step = TrustlineWorkflowStep.VALIDATING;
+
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    let accountExists = false;
+    const existingTrustlines: TrustlineInfo[] = [];
+    const server = new Server(this.config.horizonUrl);
+
+    if (this.config.source) {
+      try {
+        const account = await server.accounts().accountId(this.config.source).call();
+        const trustlines = (account.balances as Record<string, unknown>[])
+          .filter((b) => b['asset_type'] !== "native")
+          .map((b) => ({
+            assetCode: b['asset_code'] as string,
+            assetIssuer: b['asset_issuer'] as string,
+            balance: b['balance'] as string,
+          }));
+        existingTrustlines.push(...trustlines);
+        accountExists = true;
+      } catch {
+        errors.push(`Source account ${this.config.source} not found`);
+      }
+    } else {
+      errors.push("Source account is required for validation");
+    }
+
+    const resolvedAssets = await Promise.all(
+      this.assets.map(async (a) => {
+        if (a.assetIssuer.includes(".") && !a.assetIssuer.startsWith("G")) {
+          const issuer = await resolveIssuerFromDomain(a.assetIssuer, a.assetCode);
+          return issuer ? { ...a, assetIssuer: issuer } : a;
+        }
+        return a;
+      })
+    );
+
+    resolvedAssets.forEach((a) => {
+      const hasExisting = existingTrustlines.some(
+        (t) => t.assetCode === a.assetCode && t.assetIssuer === a.assetIssuer
+      );
+      if (hasExisting) {
+        warnings.push(
+          `Trustline for ${a.assetCode} already exists on account`
+        );
+      }
+    });
+
+    const missingTrustlines = resolvedAssets.filter((a) => {
+      return !existingTrustlines.some(
+        (t) => t.assetCode === a.assetCode && t.assetIssuer === a.assetIssuer
+      );
+    });
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings,
+      accountExists,
+      missingTrustlines,
+      existingTrustlines,
+    };
+  }
+
+  estimate(previewResult?: TrustlineWorkflowPreview): TrustlineWorkflowResourceEstimate {
+    this.step = TrustlineWorkflowStep.ESTIMATING;
+
+    const preview = previewResult || { assetsToTrust: [], trustlinesToRemove: [] };
+    const operationCount = preview.assetsToTrust.length + preview.trustlinesToRemove.length;
+    const trustlinesCreated = preview.assetsToTrust.length;
+    const trustlinesRemoved = preview.trustlinesToRemove.length;
+    const reservesRequired = trustlinesCreated.toString();
+
+    return {
+      baseFee: 100,
+      totalCost: operationCount.toString(),
+      trustlinesCreated,
+      trustlinesRemoved,
+      reservesRequired,
+      operationCount,
+    };
+  }
+
+  async build(): Promise<TrustlineWorkflowResult> {
+    const preview = await this.preview();
+    const estimate = this.estimate(preview);
+
+    return {
+      transactionXdr: preview.transactionXdr,
+      operations: preview.operations,
+      resourceEstimate: estimate,
+    };
+  }
+
+  getCurrentStep(): TrustlineWorkflowStep {
+    return this.step;
+  }
 }
 
 export default hasValidStellarTrustline;

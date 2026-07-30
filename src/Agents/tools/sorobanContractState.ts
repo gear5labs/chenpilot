@@ -123,8 +123,14 @@ export class SorobanContractStateTool extends BaseTool<ContractStatePayload> {
     ],
     category: "soroban",
     version: "1.0.0",
+    riskLevel: "low",
+    capabilities: ["soroban_state_query"],
+    permissions: [],
   };
 
+  /**
+   *
+   */
   async execute(
     payload: ContractStatePayload,
     userId: string

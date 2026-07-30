@@ -3,6 +3,11 @@ use soroban_sdk::{
     contract, contractimpl, contracttype, contractclient, symbol_short,
     Address, Bytes, BytesN, Env, Vec,
 };
+use contract_failure::{fail, FailureReason};
+
+// TTL for claimed transaction records: ~30 days (6_048_000 ledgers at 5s/ledger)
+// Keeps transaction history available for audit while allowing old records to expire
+const CLAIMED_TX_TTL_LEDGERS: u32 = 6_048_000;
 
 // ---------------------------------------------------------------------------
 // BtcCrypto sub-contract client
@@ -50,6 +55,41 @@ pub struct Config {
     pub crypto_contract: Address,
 }
 
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtInit {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub admin: Address,
+    pub wrapped_btc_token: Address,
+    pub min_confirmations: u32,
+    pub crypto_contract: Address,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtCfgUpd {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub admin: Address,
+    pub wrapped_btc_token: Address,
+    pub min_confirmations: u32,
+    pub crypto_contract: Address,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EvtRelayOk {
+    pub version: u32,
+    pub ledger: u32,
+    pub actor: Address,
+    pub tx_id: BytesN<32>,
+    pub recipient: Address,
+    pub amount_sat: i128,
+}
+
 // ---------------------------------------------------------------------------
 // SPV proof submitted by the relayer
 // ---------------------------------------------------------------------------
@@ -88,19 +128,49 @@ impl BtcRelayContract {
         crypto_contract: Address,
     ) {
         if env.storage().instance().has(&DataKey::Config) {
-            panic!("already initialized");
+            fail(&env, FailureReason::AlreadyInitialized);
         }
         env.storage().instance().set(
             &DataKey::Config,
-            &Config { admin, wrapped_btc_token, min_confirmations, crypto_contract },
+            &Config { admin: admin.clone(), wrapped_btc_token: wrapped_btc_token.clone(), min_confirmations, crypto_contract: crypto_contract.clone() },
+        );
+
+        env.events().publish(
+            (symbol_short!("btc"), symbol_short!("init")),
+            EvtInit {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: admin.clone(),
+                admin,
+                wrapped_btc_token,
+                min_confirmations,
+                crypto_contract,
+            },
         );
     }
 
     /// Update configuration. Admin only.
     pub fn update_config(env: Env, config: Config) {
-        let current: Config = env.storage().instance().get(&DataKey::Config).expect("not initialized");
+        let current: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .unwrap_or_else(|| fail(&env, FailureReason::NotInitialized));
         current.admin.require_auth();
         env.storage().instance().set(&DataKey::Config, &config);
+
+        env.events().publish(
+            (symbol_short!("btc"), symbol_short!("cfg_upd")),
+            EvtCfgUpd {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: current.admin.clone(),
+                admin: config.admin.clone(),
+                wrapped_btc_token: config.wrapped_btc_token.clone(),
+                min_confirmations: config.min_confirmations,
+                crypto_contract: config.crypto_contract.clone(),
+            },
+        );
     }
 
     /// Core SPV verification gate.
@@ -113,30 +183,34 @@ impl BtcRelayContract {
     ///
     /// On success, emits a `RelayOk` event and marks the tx as claimed.
     pub fn verify_and_claim(env: Env, proof: SpvProof) -> (Address, i128) {
-        let config: Config = env.storage().instance().get(&DataKey::Config).expect("not initialized");
+        let config: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .unwrap_or_else(|| fail(&env, FailureReason::NotInitialized));
         let crypto = BtcCryptoClient::new(&env, &config.crypto_contract);
 
         // --- 1. Replay protection ---
         let claimed_key = DataKey::Claimed(proof.tx_id.clone());
         if env.storage().persistent().has(&claimed_key) {
-            panic!("tx already claimed");
+            fail(&env, FailureReason::TxAlreadyClaimed);
         }
 
         // --- 2. Validate block header length ---
         if proof.block_header.len() != 80 {
-            panic!("invalid block header length");
+            fail(&env, FailureReason::InvalidBlockHeaderLength);
         }
 
         // --- 3. Proof-of-Work check (delegated to crypto sub-contract) ---
         let header_hash = crypto.double_sha256(&proof.block_header);
         let target = crypto.extract_target(&proof.block_header);
         if !crypto.hash_meets_target(&header_hash, &target) {
-            panic!("block header fails proof-of-work check");
+            fail(&env, FailureReason::ProofOfWorkCheckFailed);
         }
 
         // --- 4. Merkle proof depth check ---
         if proof.merkle_proof.len() < config.min_confirmations {
-            panic!("insufficient merkle proof depth");
+            fail(&env, FailureReason::InsufficientMerkleProofDepth);
         }
 
         // --- 5. Merkle inclusion proof (delegated to crypto sub-contract) ---
@@ -147,16 +221,24 @@ impl BtcRelayContract {
             &proof.tx_index,
         );
         if merkle_root != computed_root {
-            panic!("merkle proof invalid: tx not in block");
+            fail(&env, FailureReason::MerkleProofInvalid);
         }
 
-        // --- 6. Mark as claimed ---
-        env.storage().persistent().set(&claimed_key, &true);
+        // --- 6. Mark as claimed with TTL ---
+        // Store claimed record with TTL to maintain audit trail while expiring old records
+        env.storage().persistent().set_with_ttl(&claimed_key, &true, CLAIMED_TX_TTL_LEDGERS);
 
         // --- 7. Emit success event ---
         env.events().publish(
-            (symbol_short!("RelayOk"),),
-            (proof.tx_id.clone(), proof.recipient.clone(), proof.amount_sat),
+            (symbol_short!("btc"), symbol_short!("relay_ok")),
+            EvtRelayOk {
+                version: 1,
+                ledger: env.ledger().sequence(),
+                actor: config.admin.clone(),
+                tx_id: proof.tx_id.clone(),
+                recipient: proof.recipient.clone(),
+                amount_sat: proof.amount_sat,
+            },
         );
 
         (proof.recipient, proof.amount_sat)
@@ -169,7 +251,10 @@ impl BtcRelayContract {
 
     /// Returns the current config.
     pub fn get_config(env: Env) -> Config {
-        env.storage().instance().get(&DataKey::Config).expect("not initialized")
+        env.storage()
+            .instance()
+            .get(&DataKey::Config)
+            .unwrap_or_else(|| fail(&env, FailureReason::NotInitialized))
     }
 }
 

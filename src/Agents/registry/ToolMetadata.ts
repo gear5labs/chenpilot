@@ -1,9 +1,5 @@
 export type ParameterType =
-  | "string"
-  | "number"
-  | "boolean"
-  | "object"
-  | "array";
+  "string" | "number" | "boolean" | "object" | "array";
 
 export interface ParameterDefinition {
   type: ParameterType;
@@ -15,6 +11,8 @@ export interface ParameterDefinition {
   pattern?: string;
 }
 
+export type ToolRiskLevel = "low" | "medium" | "high";
+
 export interface ToolMetadata {
   name: string;
   description: string;
@@ -22,6 +20,14 @@ export interface ToolMetadata {
   examples: string[];
   category: string;
   version: string;
+  // Governance & Lifecycle
+  deprecated?: boolean;
+  deprecationDate?: string;
+  replacementTool?: string; // name@version
+  permissions?: string[];
+  riskLevel: ToolRiskLevel;
+  capabilities: string[];
+  author?: string;
 }
 
 export interface ToolDefinition<T = Record<string, unknown>> {
@@ -36,6 +42,10 @@ export interface ToolResult {
   message?: string;
   data?: Record<string, unknown>;
   error?: string;
+  /** Machine-readable error category (TRANSPORT, VALIDATION, SIMULATION, POLICY, COMPATIBILITY, EXECUTION, UNKNOWN) */
+  errorCategory?: string;
+  /** Machine-readable error code for the specific failure */
+  errorCode?: string;
 }
 
 export interface ToolExecutionError extends Error {
@@ -48,7 +58,10 @@ export type ToolPayload = Record<string, unknown>;
 
 export interface ToolRegistryEntry {
   name: string;
+  version: string;
   definition: ToolDefinition;
   enabled: boolean;
+  registeredAt: Date;
   lastUsed?: Date;
+  governanceMetadata?: Record<string, unknown>;
 }

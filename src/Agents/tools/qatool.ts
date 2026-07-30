@@ -9,6 +9,9 @@ interface QAPayload {
   input?: string;
 }
 
+/**
+ *
+ */
 export class QATool extends BaseTool {
   metadata: ToolMetadata = {
     name: "qa_tool",
@@ -35,9 +38,15 @@ export class QATool extends BaseTool {
     ],
     category: "qa",
     version: "1.0.0",
+    riskLevel: "low",
+    capabilities: ["knowledge_retrieval"],
+    permissions: [],
   };
 
   private qaService = container.resolve(QaService);
+  /**
+   *
+   */
   async execute(
     payload: Record<string, unknown>,
     userId: string
@@ -60,6 +69,9 @@ export class QATool extends BaseTool {
     }
   }
 
+  /**
+   *
+   */
   private async ask(data: QAPayload, userId: string): Promise<ToolResult> {
     if (!data?.query) {
       return this.createErrorResult(

@@ -1,9 +1,24 @@
+/**
+ * auditLog.routes.ts  (Issue #344 — Security-Grade Audit Ledger)
+ *
+ * New SecOps endpoints added:
+ *   GET /api/audit/events              — typed event query (category, correlationId, actorId …)
+ *   GET /api/audit/correlation/:id     — full distributed trace for one request
+ *   GET /api/audit/category/:category  — all events in a taxonomy bucket
+ *   GET /api/audit/actor/:actorId      — actor timeline
+ *   GET /api/audit/chain/verify        — tamper-evident hash-chain verification
+ *
+ * Legacy endpoints retained unchanged for backward-compat:
+ *   GET /api/audit/logs
+ *   GET /api/audit/user/:userId
+ *   GET /api/audit/security-events
+ *   GET /api/audit/failed-auth
+ */
+
 import { Router, Request, Response } from "express";
 import { authenticateToken } from "../Auth/auth.middleware";
-import {
-  requireAdmin,
-  requireOwnerOrElevated,
-} from "../Gateway/middleware/rbac.middleware";
+import { requireOwnerOrElevated } from "../Gateway/middleware/rbac.middleware";
+import { requireAdminAuth } from "../Gateway/middleware/adminAuth";
 import { auditLogService } from "./auditLog.service";
 import { AuditAction } from "./auditLog.entity";
 import {
@@ -19,11 +34,13 @@ import { asyncHandler } from "../utils/expressAsync";
 
 const router = Router();
 
+// ─── NEW: Typed event query ───────────────────────────────────────────────────
+
 /**
  * @swagger
- * /api/audit/logs:
+ * /api/audit/events:
  *   get:
- *     summary: Get audit logs (admin only)
+ *     summary: Query structured audit events (admin only)
  *     tags: [Audit]
  *     security:
  *       - bearerAuth: []
@@ -42,7 +59,7 @@ const router = Router();
  *       403: { description: Forbidden - Admin access required }
  */
 router.get(
-  "/logs",
+  "/events",
   authenticateToken,
   requireAdmin,
   validateQuery(AuditLogListQueryDto),
@@ -68,11 +85,13 @@ router.get(
   })
 );
 
+// ─── NEW: Distributed trace reconstruction ────────────────────────────────────
+
 /**
  * @swagger
- * /api/audit/user/{userId}:
+ * /api/audit/correlation/{correlationId}:
  *   get:
- *     summary: Get audit logs for a specific user
+ *     summary: Get all events sharing a correlation ID (end-to-end trace)
  *     tags: [Audit]
  *     security:
  *       - bearerAuth: []
@@ -84,7 +103,7 @@ router.get(
  *       200: { description: User audit logs retrieved successfully }
  */
 router.get(
-  "/user/:userId",
+  "/correlation/:correlationId",
   authenticateToken,
   requireOwnerOrElevated("userId"),
   validateParams(UserIdParamDto),
@@ -103,11 +122,13 @@ router.get(
   })
 );
 
+// ─── NEW: Category bucket ─────────────────────────────────────────────────────
+
 /**
  * @swagger
- * /api/audit/security-events:
+ * /api/audit/category/{category}:
  *   get:
- *     summary: Get recent security events (admin only)
+ *     summary: Get events by taxonomy category (admin only)
  *     tags: [Audit]
  *     security:
  *       - bearerAuth: []
@@ -118,7 +139,7 @@ router.get(
  *       200: { description: Security events retrieved successfully }
  */
 router.get(
-  "/security-events",
+  "/category/:category",
   authenticateToken,
   requireAdmin,
   validateQuery(PaginationQueryDto),
@@ -137,11 +158,13 @@ router.get(
   })
 );
 
+// ─── NEW: Hash-chain integrity verification ───────────────────────────────────
+
 /**
  * @swagger
- * /api/audit/failed-auth:
+ * /api/audit/chain/verify:
  *   get:
- *     summary: Get failed authentication attempts (admin only)
+ *     summary: Verify tamper-evident hash chain integrity (admin only)
  *     tags: [Audit]
  *     security:
  *       - bearerAuth: []
@@ -152,7 +175,7 @@ router.get(
  *       200: { description: Failed auth attempts retrieved successfully }
  */
 router.get(
-  "/failed-auth",
+  "/chain/verify",
   authenticateToken,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
