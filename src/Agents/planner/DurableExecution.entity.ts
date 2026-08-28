@@ -8,6 +8,7 @@ import {
   Index,
 } from "typeorm";
 import { DurableStep } from "./DurableStep.entity";
+import { FailureState } from "../types";
 
 export enum ExecutionStatus {
   PENDING = "pending",
@@ -16,6 +17,7 @@ export enum ExecutionStatus {
   FAILED = "failed",
   PAUSED = "paused",
   AWAITING_APPROVAL = "awaiting_approval",
+  COMPENSATING = "compensating",
 }
 
 @Entity()
@@ -61,6 +63,16 @@ export class DurableExecution {
 
   @Column({ type: "text", nullable: true })
   errorMessage?: string;
+
+  // ── Compensation / failure classification ──────────────────────────────────
+
+  /** How the failure was classified after compensation attempts */
+  @Column({ type: "varchar", nullable: true })
+  failureState?: FailureState;
+
+  /** Summary of compensation results */
+  @Column({ type: "jsonb", nullable: true })
+  compensationSummary?: Record<string, unknown>;
 
   @CreateDateColumn()
   createdAt!: Date;

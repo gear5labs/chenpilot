@@ -7,6 +7,7 @@ import {
   ManyToOne,
 } from "typeorm";
 import { DurableExecution } from "./DurableExecution.entity";
+import { CompensationType, CompensationOutcome } from "../types";
 
 export enum StepStatus {
   PENDING = "pending",
@@ -14,6 +15,8 @@ export enum StepStatus {
   COMPLETED = "completed",
   FAILED = "failed",
   AWAITING_APPROVAL = "awaiting_approval",
+  COMPENSATING = "compensating",
+  COMPENSATED = "compensated",
 }
 
 @Entity()
@@ -66,6 +69,40 @@ export class DurableStep {
 
   @Column({ type: "timestamp", nullable: true })
   completedAt?: Date;
+
+  // ── Compensation fields ──────────────────────────────────────────────────────
+
+  /** Whether this step can be rolled back */
+  @Column({ type: "varchar", default: CompensationType.REVERSIBLE })
+  compensationType!: CompensationType;
+
+  /** The action to execute for rollback (null if irreversible) */
+  @Column({ type: "varchar", nullable: true })
+  rollbackAction?: string;
+
+  /** Payload for the rollback action */
+  @Column({ type: "jsonb", nullable: true })
+  rollbackPayload?: Record<string, unknown>;
+
+  /** Human-readable description of how to compensate */
+  @Column({ type: "text", nullable: true })
+  compensationDescription?: string;
+
+  /** Outcome of the compensation attempt */
+  @Column({ type: "varchar", nullable: true })
+  compensationOutcome?: CompensationOutcome;
+
+  /** Error message from compensation attempt */
+  @Column({ type: "text", nullable: true })
+  compensationError?: string;
+
+  /** Number of compensation retries attempted */
+  @Column({ type: "integer", default: 0 })
+  compensationRetryCount!: number;
+
+  /** Maximum compensation retries */
+  @Column({ type: "integer", default: 3 })
+  maxCompensationRetries!: number;
 
   @CreateDateColumn()
   createdAt!: Date;
