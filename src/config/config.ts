@@ -139,4 +139,15 @@ export default {
       ? process.env.ADMIN_ALLOWED_IPS.split(",").map((ip) => ip.trim()).filter(Boolean)
       : [],
   },
+  externalRequest: {
+    defaultBudget: {
+      deadlineMs: parsePositiveInt("EXTERNAL_REQUEST_DEADLINE_MS", "10000"),
+      attempts: Number.parseInt(process.env.EXTERNAL_REQUEST_ATTEMPTS || "3", 10),
+      bytes: Number.parseInt(process.env.EXTERNAL_REQUEST_BYTES || "5242880", 10),
+      downstreamCalls: Number.parseInt(
+        process.env.EXTERNAL_REQUEST_DOWNSTREAM_CALLS || "10",
+        10
+      ),
+    },
+  },
 };
