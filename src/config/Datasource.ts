@@ -23,6 +23,7 @@ import {
   AdminWorkflowInstance,
   AdminWorkflowApproval,
 } from "../Agents/admin/workflow.entity";
+import { OutboxEvent } from "../Reliability/outboxEvent.entity";
 
 const isDev = config.env === "development";
 
@@ -54,6 +55,7 @@ const dbOptions: DataSourceOptions = {
     AdminWorkflowPolicy,
     AdminWorkflowInstance,
     AdminWorkflowApproval,
+    OutboxEvent,
   ],
   migrations: [isDev ? "src/migrations/**/*.ts" : "dist/migrations/**/*.js"],
   subscribers: [],
