@@ -23,6 +23,8 @@ import {
   AdminWorkflowInstance,
   AdminWorkflowApproval,
 } from "../Agents/admin/workflow.entity";
+import { TransactionLifecycle } from "../transactions/TransactionLifecycle.entity";
+import { SequenceLease } from "../services/sequence/SequenceLease.entity";
 
 const isDev = config.env === "development";
 
@@ -54,6 +56,8 @@ const dbOptions: DataSourceOptions = {
     AdminWorkflowPolicy,
     AdminWorkflowInstance,
     AdminWorkflowApproval,
+    TransactionLifecycle,
+    SequenceLease,
   ],
   migrations: [isDev ? "src/migrations/**/*.ts" : "dist/migrations/**/*.js"],
   subscribers: [],
