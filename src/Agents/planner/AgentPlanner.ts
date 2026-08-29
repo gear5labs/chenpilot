@@ -4,13 +4,26 @@ import { toolRegistry } from "../registry/ToolRegistry";
 import { WorkflowPlan, WorkflowStep } from "../types";
 import { parseSorobanIntent } from "./sorobanIntent";
 import { HashedPlan, planHashService } from "./planHash";
+import {
+  toolAuthorizationService,
+  ToolAuthority,
+} from "../policy/ToolAuthorizationService";
 import { riskEngine, RiskEngine } from "../risk/RiskEngine";
+import { TrustLevel, ContextProvenance } from "../context/TrustZone";
+import { AgentContextBuilder } from "../context/AgentContextBuilder";
+import {
+  securityAuditor,
+  SecurityEventType,
+} from "../../Security/promptIsolation/SecurityAuditor";
 import logger from "../../config/logger";
 import { RiskLevel } from "../../Auth/userPreferences.entity";
 
 export interface PlannerContext {
   userId: string;
   userInput: string;
+  contextTrustLevel?: TrustLevel;
+  provenance?: ContextProvenance;
+  contextBuilder?: AgentContextBuilder;
   availableBalance?: Record<string, number>;
   constraints?: PlannerConstraints;
   userPreferences?: {
@@ -75,6 +88,22 @@ export class AgentPlanner {
     });
 
     try {
+      if (context.userInput === null || context.userInput === undefined) {
+        throw new Error("User input is required");
+      }
+
+      if (typeof context.userInput === "string" && !context.userInput.trim()) {
+        return this.createHashedPlan({
+          planId: `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          steps: [],
+          totalSteps: 0,
+          estimatedDuration: 0,
+          riskLevel: "low",
+          requiresApproval: false,
+          summary: "Plan for empty input",
+        });
+      }
+
       const sorobanPlan = parseSorobanIntent(context.userInput);
       if (sorobanPlan) {
         return this.createHashedPlan(
@@ -82,7 +111,38 @@ export class AgentPlanner {
         );
       }
 
-      const workflowPlan = await this.analyzeWithLLM(context);
+      // Pre-compute tool authority strictly outside the model response
+      const toolAuthority = toolAuthorizationService.computeToolAuthority({
+        userId: context.userId,
+        contextTrustLevel:
+          context.contextTrustLevel ?? TrustLevel.AUTHENTICATED_USER,
+        userPreferences: context.userPreferences,
+        explicitAllowedTools: context.constraints?.allowedTools,
+      });
+
+      const workflowPlan = await this.analyzeWithLLM(context, toolAuthority);
+
+      // Post-model authorization gate: verify all steps against computed tool authority
+      const authResult = toolAuthorizationService.authorizePlan(
+        workflowPlan,
+        toolAuthority
+      );
+      if (!authResult.authorized) {
+        securityAuditor.logSecurityEvent({
+          eventType: SecurityEventType.UNAUTHORIZED_TOOL_REJECTED,
+          provenance: context.provenance ?? ContextProvenance.USER_INPUT,
+          trustLevel:
+            context.contextTrustLevel ?? TrustLevel.AUTHENTICATED_USER,
+          rawPayload: JSON.stringify(workflowPlan),
+          threatCategory: "UNAUTHORIZED_TOOL_SELECTION",
+          userId: context.userId,
+          action: authResult.unauthorizedSteps.map((s) => s.action).join(", "),
+        });
+        throw new Error(
+          `Plan authorization failed: ${authResult.errors.join(", ")}`
+        );
+      }
+
       const executionPlan = this.convertToExecutionPlan(workflowPlan, context);
       const validation = this.validatePlan(executionPlan, context);
 
@@ -109,18 +169,38 @@ export class AgentPlanner {
     }
   }
 
-  private async analyzeWithLLM(context: PlannerContext): Promise<WorkflowPlan> {
-    const availableTools = toolRegistry.getToolMetadata();
+  private async analyzeWithLLM(
+    context: PlannerContext,
+    toolAuthority?: ToolAuthority
+  ): Promise<WorkflowPlan> {
+    const allTools = toolRegistry.getToolMetadata();
+    const authorizedTools = toolAuthority
+      ? toolAuthorizationService.filterAuthorizedToolMetadata(
+          allTools,
+          toolAuthority
+        )
+      : allTools;
+
     const prompt = this.buildPlannerPrompt(
-      availableTools,
+      authorizedTools,
       context.userPreferences
     );
-    const response = await agentLLM.callLLM(
-      context.userId,
-      prompt,
-      context.userInput,
-      true
-    );
+
+    let response: unknown;
+    if (context.contextBuilder) {
+      response = await agentLLM.callLLMWithContext(
+        context.userId,
+        context.contextBuilder,
+        { asJson: true }
+      );
+    } else {
+      response = await agentLLM.callLLM(
+        context.userId,
+        prompt,
+        context.userInput,
+        true
+      );
+    }
 
     if (
       !(response as Record<string, unknown>)?.workflow ||
@@ -162,18 +242,20 @@ Output JSON format:
     context: PlannerContext
   ): ExecutionPlan {
     const planId = `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const steps: PlanStep[] = workflowPlan.workflow.map((step, index) => {
-      const isHighRisk = this.isHighRiskAction(step);
-      return {
-        stepNumber: index + 1,
-        action: step.action,
-        payload: step.payload,
-        description: this.generateStepDescription(step),
-        estimatedDuration: 3000,
-        dependencies: [],
-        requiresApproval: isHighRisk,
-      };
-    });
+    const steps: PlanStep[] = (workflowPlan.workflow || []).map(
+      (step, index) => {
+        const isHighRisk = this.isHighRiskAction(step);
+        return {
+          stepNumber: index + 1,
+          action: step.action,
+          payload: step.payload,
+          description: this.generateStepDescription(step),
+          estimatedDuration: 3000,
+          dependencies: [],
+          requiresApproval: isHighRisk,
+        };
+      }
+    );
 
     const riskLevel = this.assessRiskLevel(steps);
 
@@ -213,7 +295,7 @@ Output JSON format:
   }
 
   private generateStepDescription(step: WorkflowStep): string {
-    return `Execute ${step.action}`;
+    return `Execute ${step?.action || "unknown"}`;
   }
 
   private assessRiskLevel(steps: PlanStep[]): "low" | "medium" | "high" {
@@ -278,8 +360,6 @@ Output JSON format:
       planHash,
     };
 
-    // Optionally sign the plan if private key is available
-    // This would be configured via environment variables in production
     const privateKey = process.env.PLAN_SIGNING_KEY;
     if (privateKey) {
       hashedPlan.signature = planHashService.signPlanHash(planHash, privateKey);
