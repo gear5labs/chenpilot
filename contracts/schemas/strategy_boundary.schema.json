@@ -1,0 +1,267 @@
+{
+  "contract": "strategy_boundary",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.781Z",
+  "source_hash": "62f86a34",
+  "data_keys": [
+    {
+      "key": "Admin",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Address",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "UnifiedAuth",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Address",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "StrategyMetadata",
+      "key_kind": "DataKey",
+      "key_params": [
+        "BytesN<32>"
+      ],
+      "value_type": "StrategyMetadata",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "AllocationLimits",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "AllocationLimits",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "RiskLimits",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "RiskLimits",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "StrategyAllocation",
+      "key_kind": "DataKey",
+      "key_params": [
+        "BytesN<32>"
+      ],
+      "value_type": "unknown",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "TotalStrategyAllocation",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "unknown",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "WithdrawalRequest",
+      "key_kind": "DataKey",
+      "key_params": [
+        "Address"
+      ],
+      "value_type": "WithdrawalRequest",
+      "storage_class": "Persistent"
+    },
+    {
+      "key": "StrategyHealth",
+      "key_kind": "DataKey",
+      "key_params": [
+        "BytesN<32>"
+      ],
+      "value_type": "StrategyHealth",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "DisabledStrategy",
+      "key_kind": "DataKey",
+      "key_params": [
+        "BytesN<32>"
+      ],
+      "value_type": "bool",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "ActiveStrategies",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Vec<BytesN<32>>",
+      "storage_class": "Instance"
+    }
+  ],
+  "structs": [
+    {
+      "name": "StrategyMetadata",
+      "fields": [
+        {
+          "name": "strategy_id",
+          "type": "BytesN<32>"
+        },
+        {
+          "name": "strategy_address",
+          "type": "Address"
+        },
+        {
+          "name": "risk_level",
+          "type": "RiskLevel"
+        },
+        {
+          "name": "max_allocation",
+          "type": "i128"
+        },
+        {
+          "name": "min_liquidity",
+          "type": "i128"
+        },
+        {
+          "name": "withdrawal_delay",
+          "type": "u32"
+        },
+        {
+          "name": "audit_report",
+          "type": "BytesN<32>"
+        },
+        {
+          "name": "audit_expiry",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "AllocationLimits",
+      "fields": [
+        {
+          "name": "max_total_allocation",
+          "type": "i128"
+        },
+        {
+          "name": "max_per_strategy",
+          "type": "i128"
+        },
+        {
+          "name": "min_diversification",
+          "type": "u32"
+        },
+        {
+          "name": "max_concentration",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "StrategyHealth",
+      "fields": [
+        {
+          "name": "strategy_id",
+          "type": "BytesN<32>"
+        },
+        {
+          "name": "total_value",
+          "type": "i128"
+        },
+        {
+          "name": "user_funds",
+          "type": "i128"
+        },
+        {
+          "name": "performance",
+          "type": "i64"
+        },
+        {
+          "name": "last_updated",
+          "type": "u64"
+        },
+        {
+          "name": "health_status",
+          "type": "HealthStatus"
+        }
+      ]
+    },
+    {
+      "name": "WithdrawalRequest",
+      "fields": [
+        {
+          "name": "user",
+          "type": "Address"
+        },
+        {
+          "name": "strategy_id",
+          "type": "BytesN<32>"
+        },
+        {
+          "name": "amount",
+          "type": "i128"
+        },
+        {
+          "name": "requested_at",
+          "type": "u64"
+        },
+        {
+          "name": "eligible_at",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "RiskLimits",
+      "fields": [
+        {
+          "name": "max_smart_contract_exposure",
+          "type": "i128"
+        },
+        {
+          "name": "max_market_exposure",
+          "type": "i128"
+        },
+        {
+          "name": "max_liquidity_exposure",
+          "type": "i128"
+        },
+        {
+          "name": "max_single_counterparty",
+          "type": "i128"
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "RiskLevel",
+      "variants": [
+        {
+          "name": "Low"
+        },
+        {
+          "name": "Medium"
+        },
+        {
+          "name": "High"
+        }
+      ]
+    },
+    {
+      "name": "HealthStatus",
+      "variants": [
+        {
+          "name": "Healthy"
+        },
+        {
+          "name": "Degraded"
+        },
+        {
+          "name": "Critical"
+        },
+        {
+          "name": "Compromised"
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    "Could not infer value type for DataKey::StrategyAllocation in strategy_boundary",
+    "Could not infer value type for DataKey::TotalStrategyAllocation in strategy_boundary"
+  ]
+}

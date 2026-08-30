@@ -1,0 +1,118 @@
+{
+  "contract": "por_validator",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.771Z",
+  "source_hash": "2867cc73",
+  "data_keys": [
+    {
+      "key": "Config",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Config",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "CurrentProof",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Option<ProofRecord>",
+      "storage_class": "Instance"
+    }
+  ],
+  "structs": [
+    {
+      "name": "ReserveData",
+      "fields": [
+        {
+          "name": "balance",
+          "type": "i128"
+        },
+        {
+          "name": "circulating_supply",
+          "type": "i128"
+        },
+        {
+          "name": "timestamp",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "ProofRecord",
+      "fields": [
+        {
+          "name": "reserve_data",
+          "type": "ReserveData"
+        },
+        {
+          "name": "is_valid",
+          "type": "bool"
+        },
+        {
+          "name": "verified_ledger",
+          "type": "u32"
+        },
+        {
+          "name": "valid_until_ledger",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "VaultSafetyStatus",
+      "fields": [
+        {
+          "name": "is_safe",
+          "type": "bool"
+        },
+        {
+          "name": "proof_is_fresh",
+          "type": "bool"
+        },
+        {
+          "name": "proof_is_valid",
+          "type": "bool"
+        },
+        {
+          "name": "verified_ledger",
+          "type": "u32"
+        },
+        {
+          "name": "valid_until_ledger",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "Config",
+      "fields": [
+        {
+          "name": "admin",
+          "type": "Address"
+        },
+        {
+          "name": "wbtc_token",
+          "type": "Address"
+        },
+        {
+          "name": "oracle",
+          "type": "Address"
+        },
+        {
+          "name": "tolerance_bps",
+          "type": "u32"
+        },
+        {
+          "name": "proof_cadence_ledgers",
+          "type": "u32"
+        },
+        {
+          "name": "max_stale_ledgers",
+          "type": "u32"
+        }
+      ]
+    }
+  ],
+  "enums": [],
+  "warnings": []
+}

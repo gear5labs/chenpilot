@@ -1,0 +1,110 @@
+{
+  "contract": "liquidity_vault",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.769Z",
+  "source_hash": "0131fd6b",
+  "data_keys": [
+    {
+      "key": "Config",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Config",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "ExecutionContext",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "ExecutionContext",
+      "storage_class": "Instance"
+    }
+  ],
+  "structs": [
+    {
+      "name": "PriceData",
+      "fields": [
+        {
+          "name": "price",
+          "type": "i128"
+        },
+        {
+          "name": "decimals",
+          "type": "u32"
+        },
+        {
+          "name": "timestamp",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "Config",
+      "fields": [
+        {
+          "name": "admin",
+          "type": "Address"
+        },
+        {
+          "name": "oracle",
+          "type": "Address"
+        },
+        {
+          "name": "threshold_bps",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "ExecutionContext",
+      "fields": [
+        {
+          "name": "caller",
+          "type": "Address"
+        },
+        {
+          "name": "operation",
+          "type": "Bytes"
+        },
+        {
+          "name": "intent_price",
+          "type": "i128"
+        },
+        {
+          "name": "min_amount_out",
+          "type": "i128"
+        },
+        {
+          "name": "max_slippage_bps",
+          "type": "u32"
+        },
+        {
+          "name": "deadline_ledger",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "ExecutionResult",
+      "fields": [
+        {
+          "name": "approved",
+          "type": "bool"
+        },
+        {
+          "name": "market_price",
+          "type": "i128"
+        },
+        {
+          "name": "deviation_bps",
+          "type": "u128"
+        },
+        {
+          "name": "reason",
+          "type": "Bytes"
+        }
+      ]
+    }
+  ],
+  "enums": [],
+  "warnings": []
+}

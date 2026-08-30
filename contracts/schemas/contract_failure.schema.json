@@ -1,0 +1,213 @@
+{
+  "contract": "contract_failure",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.745Z",
+  "source_hash": "fb34884c",
+  "data_keys": [],
+  "structs": [],
+  "enums": [
+    {
+      "name": "FailureReason",
+      "variants": [
+        {
+          "name": "Unauthorized"
+        },
+        {
+          "name": "AlreadyInitialized"
+        },
+        {
+          "name": "NotInitialized"
+        },
+        {
+          "name": "InvalidArgument"
+        },
+        {
+          "name": "InvalidState"
+        },
+        {
+          "name": "NotFound"
+        },
+        {
+          "name": "AlreadyExists"
+        },
+        {
+          "name": "AmountNotPositive"
+        },
+        {
+          "name": "InsufficientBalance"
+        },
+        {
+          "name": "SlippageExceeded"
+        },
+        {
+          "name": "BackendOffline"
+        },
+        {
+          "name": "BackendOnline"
+        },
+        {
+          "name": "EmergencyMode"
+        },
+        {
+          "name": "UpgradeMode"
+        },
+        {
+          "name": "TimelockNotExpired"
+        },
+        {
+          "name": "ChallengePeriodNotElapsed"
+        },
+        {
+          "name": "UnbondingPeriodNotMet"
+        },
+        {
+          "name": "ForceExitAlreadyPending"
+        },
+        {
+          "name": "NoPendingForceExit"
+        },
+        {
+          "name": "NoPendingUpgrade"
+        },
+        {
+          "name": "UnifiedAuthNotConfigured"
+        },
+        {
+          "name": "OraclePriceMissing"
+        },
+        {
+          "name": "OracleDataStale"
+        },
+        {
+          "name": "OracleSequenceNotIncreasing"
+        },
+        {
+          "name": "OracleUpdateGapExceeded"
+        },
+        {
+          "name": "SnapshotTooRecent"
+        },
+        {
+          "name": "SnapshotSameLedger"
+        },
+        {
+          "name": "SnapshotTooOld"
+        },
+        {
+          "name": "CircuitBreakerActive"
+        },
+        {
+          "name": "CircuitBreakerTripped"
+        },
+        {
+          "name": "PriceDeviationExceedsThreshold"
+        },
+        {
+          "name": "ConsecutivePriceChangeExceedsThreshold"
+        },
+        {
+          "name": "InvalidBasisPoints"
+        },
+        {
+          "name": "BorrowExceedsLTV"
+        },
+        {
+          "name": "NoDebtToLiquidate"
+        },
+        {
+          "name": "PositionHealthy"
+        },
+        {
+          "name": "SwapAlreadyExists"
+        },
+        {
+          "name": "SwapNotActive"
+        },
+        {
+          "name": "SwapExpired"
+        },
+        {
+          "name": "SwapNotYetExpired"
+        },
+        {
+          "name": "InvalidPreimage"
+        },
+        {
+          "name": "ExpiryNotInFuture"
+        },
+        {
+          "name": "TxAlreadyClaimed"
+        },
+        {
+          "name": "InvalidBlockHeaderLength"
+        },
+        {
+          "name": "ProofOfWorkCheckFailed"
+        },
+        {
+          "name": "InsufficientMerkleProofDepth"
+        },
+        {
+          "name": "MerkleProofInvalid"
+        },
+        {
+          "name": "StrategyDisabled"
+        },
+        {
+          "name": "AuditReportExpired"
+        },
+        {
+          "name": "MaxTotalAllocationExceeded"
+        },
+        {
+          "name": "MaxPerStrategyAllocationExceeded"
+        },
+        {
+          "name": "InsufficientDiversification"
+        },
+        {
+          "name": "MaxConcentrationExceeded"
+        },
+        {
+          "name": "InsufficientAllocation"
+        },
+        {
+          "name": "WithdrawalNotYetEligible"
+        },
+        {
+          "name": "NotInEmergencyMode"
+        },
+        {
+          "name": "NoAllocationToWithdraw"
+        },
+        {
+          "name": "AgentNotAuthorized"
+        },
+        {
+          "name": "PoolNotVerified"
+        },
+        {
+          "name": "SlashedRelayersCannotWithdraw"
+        },
+        {
+          "name": "UnstakeNotRequested"
+        },
+        {
+          "name": "LiquidityProtectionViolation"
+        },
+        {
+          "name": "DepositForceExitMismatch"
+        },
+        {
+          "name": "StorageValueMissing"
+        },
+        {
+          "name": "ArithmeticError"
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    "No DataKey enum found in contract_failure"
+  ]
+}

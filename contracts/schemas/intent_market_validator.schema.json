@@ -1,0 +1,28 @@
+{
+  "contract": "intent_market_validator",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.767Z",
+  "source_hash": "f5b893e2",
+  "data_keys": [
+    {
+      "key": "Config",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "ValidationConfig",
+      "storage_class": "Instance"
+    }
+  ],
+  "structs": [
+    {
+      "name": "ValidationConfig",
+      "fields": [
+        {
+          "name": "threshold_bps",
+          "type": "u32"
+        }
+      ]
+    }
+  ],
+  "enums": [],
+  "warnings": []
+}

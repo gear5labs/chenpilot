@@ -1,0 +1,69 @@
+{
+  "contract": "multi_hop_swap",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.770Z",
+  "source_hash": "ac294554",
+  "data_keys": [
+    {
+      "key": "last_out",
+      "key_kind": "symbol_short",
+      "key_params": [],
+      "value_type": "i128",
+      "storage_class": "Instance"
+    }
+  ],
+  "structs": [
+    {
+      "name": "Hop",
+      "fields": [
+        {
+          "name": "pool",
+          "type": "Address"
+        },
+        {
+          "name": "token_in",
+          "type": "Address"
+        },
+        {
+          "name": "token_out",
+          "type": "Address"
+        },
+        {
+          "name": "amount_in",
+          "type": "i128"
+        },
+        {
+          "name": "min_amount_out",
+          "type": "i128"
+        }
+      ]
+    },
+    {
+      "name": "HopResult",
+      "fields": [
+        {
+          "name": "pool",
+          "type": "Address"
+        },
+        {
+          "name": "token_in",
+          "type": "Address"
+        },
+        {
+          "name": "token_out",
+          "type": "Address"
+        },
+        {
+          "name": "amount_in",
+          "type": "i128"
+        },
+        {
+          "name": "amount_out",
+          "type": "i128"
+        }
+      ]
+    }
+  ],
+  "enums": [],
+  "warnings": []
+}

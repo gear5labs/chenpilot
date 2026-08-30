@@ -1,0 +1,170 @@
+{
+  "contract": "btc_relay",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.754Z",
+  "source_hash": "c51701bd",
+  "data_keys": [
+    {
+      "key": "Config",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Config",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "Claimed",
+      "key_kind": "DataKey",
+      "key_params": [
+        "BytesN<32>"
+      ],
+      "value_type": "unknown",
+      "storage_class": "Instance",
+      "ttl_constant": "_TX_TTL_LEDGERS"
+    },
+    {
+      "key": "Header",
+      "key_kind": "DataKey",
+      "key_params": [
+        "BytesN<32>"
+      ],
+      "value_type": "DataKey, HeaderRecord",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "Checkpoint",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Checkpoint",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "MaxSafeReorgDepth",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "u32",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "MaxStaleDepth",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "u32",
+      "storage_class": "Instance"
+    }
+  ],
+  "structs": [
+    {
+      "name": "Config",
+      "fields": [
+        {
+          "name": "admin",
+          "type": "Address"
+        },
+        {
+          "name": "wrapped_btc_token",
+          "type": "Address"
+        },
+        {
+          "name": "min_confirmations",
+          "type": "u32"
+        },
+        {
+          "name": "crypto_contract",
+          "type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "HeaderRecord",
+      "fields": [
+        {
+          "name": "block_hash",
+          "type": "BytesN<32>"
+        },
+        {
+          "name": "prev_block_hash",
+          "type": "BytesN<32>"
+        },
+        {
+          "name": "height",
+          "type": "u32"
+        },
+        {
+          "name": "header_timestamp",
+          "type": "u64"
+        },
+        {
+          "name": "on_canonical_chain",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "Checkpoint",
+      "fields": [
+        {
+          "name": "block_hash",
+          "type": "BytesN<32>"
+        },
+        {
+          "name": "height",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "SpvProof",
+      "fields": [
+        {
+          "name": "block_header",
+          "type": "Bytes"
+        },
+        {
+          "name": "tx_id",
+          "type": "BytesN<32>"
+        },
+        {
+          "name": "merkle_proof",
+          "type": "Vec<BytesN<32>>"
+        },
+        {
+          "name": "tx_index",
+          "type": "u32"
+        },
+        {
+          "name": "amount_sat",
+          "type": "i128"
+        },
+        {
+          "name": "recipient",
+          "type": "Address"
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "RelayError",
+      "variants": [
+        {
+          "name": "UnknownParentHeader"
+        },
+        {
+          "name": "ReorgBeyondSafetyDepth"
+        },
+        {
+          "name": "ProofReferencesOrphanedBlock"
+        },
+        {
+          "name": "StaleProof"
+        },
+        {
+          "name": "InvalidHeaderHeight"
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    "Could not infer value type for DataKey::Claimed in btc_relay"
+  ]
+}

@@ -18,6 +18,7 @@ members = [
     "strategy_registry",
     "strategy_boundary",
     "unified_auth",
+    "storage_migration",
 ]
 resolver = "2"
 

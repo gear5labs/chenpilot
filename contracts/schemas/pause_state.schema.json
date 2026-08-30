@@ -1,0 +1,66 @@
+{
+  "contract": "pause_state",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.747Z",
+  "source_hash": "289ea129",
+  "data_keys": [],
+  "structs": [
+    {
+      "name": "PauseInfo",
+      "fields": [
+        {
+          "name": "paused",
+          "type": "bool"
+        },
+        {
+          "name": "changed_by",
+          "type": "Option<Address>"
+        },
+        {
+          "name": "changed_at_ledger",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "PauseChangedEvent",
+      "fields": [
+        {
+          "name": "version",
+          "type": "u32"
+        },
+        {
+          "name": "ledger",
+          "type": "u32"
+        },
+        {
+          "name": "actor",
+          "type": "Address"
+        },
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "PauseError",
+      "variants": [
+        {
+          "name": "ContractPaused"
+        },
+        {
+          "name": "ContractNotPaused"
+        },
+        {
+          "name": "DependencyPaused"
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    "No DataKey enum found in pause_state"
+  ]
+}

@@ -1,0 +1,145 @@
+{
+  "contract": "flash_loan_guard",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.766Z",
+  "source_hash": "c7840cd8",
+  "data_keys": [
+    {
+      "key": "Config",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Config",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "LastSnapshotLedger",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "unknown",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "PriceSnapshot",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "DataKey, PriceSnapshot",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "OracleFreshness",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "unknown",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "PriceSequenceHistory",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "unknown",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "CircuitBreaker",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "CircuitBreakerState",
+      "storage_class": "Instance"
+    }
+  ],
+  "structs": [
+    {
+      "name": "Config",
+      "fields": [
+        {
+          "name": "admin",
+          "type": "Address"
+        },
+        {
+          "name": "oracle",
+          "type": "Address"
+        },
+        {
+          "name": "guarded_asset",
+          "type": "Address"
+        },
+        {
+          "name": "max_intra_ledger_deviation_bps",
+          "type": "i128"
+        },
+        {
+          "name": "min_ledger_gap",
+          "type": "u32"
+        },
+        {
+          "name": "max_oracle_staleness_seconds",
+          "type": "u64"
+        },
+        {
+          "name": "max_consecutive_price_change_bps",
+          "type": "i128"
+        },
+        {
+          "name": "max_oracle_update_gap_seconds",
+          "type": "u64"
+        },
+        {
+          "name": "circuit_breaker_threshold_bps",
+          "type": "i128"
+        },
+        {
+          "name": "circuit_breaker_window_seconds",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "PriceSnapshot",
+      "fields": [
+        {
+          "name": "price",
+          "type": "i128"
+        },
+        {
+          "name": "ledger",
+          "type": "u32"
+        },
+        {
+          "name": "oracle_timestamp",
+          "type": "u64"
+        },
+        {
+          "name": "oracle_sequence",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "CircuitBreakerState",
+      "fields": [
+        {
+          "name": "triggered",
+          "type": "bool"
+        },
+        {
+          "name": "trigger_ledger",
+          "type": "u32"
+        },
+        {
+          "name": "trigger_timestamp",
+          "type": "u64"
+        },
+        {
+          "name": "consecutive_violations",
+          "type": "u32"
+        }
+      ]
+    }
+  ],
+  "enums": [],
+  "warnings": [
+    "Could not infer value type for DataKey::LastSnapshotLedger in flash_loan_guard",
+    "Could not infer value type for DataKey::OracleFreshness in flash_loan_guard",
+    "Could not infer value type for DataKey::PriceSequenceHistory in flash_loan_guard"
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "contract": "lending_liquidation",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.768Z",
+  "source_hash": "fc953de1",
+  "data_keys": [
+    {
+      "key": "Config",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Config",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "Position",
+      "key_kind": "DataKey",
+      "key_params": [
+        "Address"
+      ],
+      "value_type": "Position",
+      "storage_class": "Persistent"
+    }
+  ],
+  "structs": [
+    {
+      "name": "Config",
+      "fields": [
+        {
+          "name": "admin",
+          "type": "Address"
+        },
+        {
+          "name": "oracle",
+          "type": "Address"
+        },
+        {
+          "name": "collateral_token",
+          "type": "Address"
+        },
+        {
+          "name": "debt_token",
+          "type": "Address"
+        },
+        {
+          "name": "min_health_factor",
+          "type": "i128"
+        },
+        {
+          "name": "liquidation_bonus_bps",
+          "type": "i128"
+        },
+        {
+          "name": "ltv_bps",
+          "type": "i128"
+        }
+      ]
+    },
+    {
+      "name": "Position",
+      "fields": [
+        {
+          "name": "collateral_amount",
+          "type": "i128"
+        },
+        {
+          "name": "debt_amount",
+          "type": "i128"
+        }
+      ]
+    }
+  ],
+  "enums": [],
+  "warnings": []
+}

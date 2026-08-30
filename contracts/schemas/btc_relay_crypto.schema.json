@@ -1,0 +1,12 @@
+{
+  "contract": "btc_relay_crypto",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.755Z",
+  "source_hash": "84f52b14",
+  "data_keys": [],
+  "structs": [],
+  "enums": [],
+  "warnings": [
+    "No DataKey enum found in btc_relay_crypto"
+  ]
+}

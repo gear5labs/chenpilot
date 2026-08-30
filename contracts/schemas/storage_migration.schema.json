@@ -1,0 +1,30 @@
+{
+  "contract": "storage_migration",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.821Z",
+  "source_hash": "fec52b60",
+  "data_keys": [],
+  "structs": [
+    {
+      "name": "MigrationState",
+      "fields": [
+        {
+          "name": "schema_version",
+          "type": "u32"
+        },
+        {
+          "name": "last_migrated_at",
+          "type": "u32"
+        },
+        {
+          "name": "applied_migrations",
+          "type": "Vec<String>"
+        }
+      ]
+    }
+  ],
+  "enums": [],
+  "warnings": [
+    "No DataKey enum found in storage_migration"
+  ]
+}

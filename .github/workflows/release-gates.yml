@@ -121,6 +121,108 @@ jobs:
       - name: Contract tests
         run: cargo test --manifest-path contracts/Cargo.toml --workspace
 
+  storage-compat:
+    name: Storage schema compatibility gate
+    runs-on: ubuntu-latest
+    # Run in parallel with contract-health; both must pass before merge
+    needs: []
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Step 1: Extract schemas from the proposed source tree ───────────────
+      - name: Extract proposed storage schemas
+        run: npm run storage:extract-schemas -- --out-dir /tmp/proposed-schemas
+        # Produces /tmp/proposed-schemas/<contract>.schema.json for every
+        # workspace member
+
+      # ── Step 2: Compare each proposed schema against the committed baseline ─
+      - name: Compare proposed schemas against baseline
+        id: schema_compare
+        run: |
+          set -euo pipefail
+          FAILURES=0
+          mkdir -p /tmp/schema-reports
+          for BASELINE in contracts/schemas/*.schema.json; do
+            CONTRACT=$(basename "$BASELINE" .schema.json)
+            PROPOSED="/tmp/proposed-schemas/${CONTRACT}.schema.json"
+
+            if [ ! -f "$PROPOSED" ]; then
+              echo "WARN: no proposed schema for $CONTRACT — skipping"
+              continue
+            fi
+
+            MIGRATIONS=""
+            if [ -f "contracts/migrations/${CONTRACT}.migrations.json" ]; then
+              MIGRATIONS="--migrations contracts/migrations/${CONTRACT}.migrations.json"
+            fi
+
+            REPORT="/tmp/schema-reports/${CONTRACT}.report.json"
+            set +e
+            npx ts-node scripts/compare-storage-schemas.ts \
+              --baseline "$BASELINE" \
+              --proposed "$PROPOSED" \
+              $MIGRATIONS \
+              --output "$REPORT"
+            EXIT=$?
+            set -e
+
+            if [ $EXIT -eq 1 ]; then
+              echo "::error::Storage schema BREAKING change detected in $CONTRACT"
+              FAILURES=$((FAILURES + 1))
+            elif [ $EXIT -eq 2 ]; then
+              echo "::warning::Storage schema MIGRATION_REQUIRED in $CONTRACT — ensure migration records are present"
+            fi
+          done
+
+          if [ $FAILURES -gt 0 ]; then
+            echo "::error::$FAILURES contract(s) have breaking storage schema changes. Upgrade blocked."
+            exit 1
+          fi
+
+      # ── Step 3: Simulate upgrade against test snapshots ────────────────────
+      - name: Simulate upgrade against state snapshots
+        run: |
+          npx ts-node scripts/simulate-upgrade.ts \
+            --all \
+            --schemas-dir /tmp/proposed-schemas \
+            --snapshots-root contracts
+        # Non-zero exit if any FAIL; warnings (WARN) are non-fatal
+
+      # ── Step 4: Validate release manifest (if present) ─────────────────────
+      - name: Validate release manifest
+        if: hashFiles('release-manifest.json') != ''
+        run: |
+          npx ts-node scripts/validate-release-manifest.ts \
+            --manifest release-manifest.json \
+            --baseline-schemas-dir contracts/schemas \
+            --output /tmp/schema-reports/manifest-validation.json
+        # Fails (exit 1) if any contract has BREAKING changes or uncovered
+        # MIGRATION_REQUIRED changes
+
+      # ── Step 5: Run schema comparator unit tests ───────────────────────────
+      - name: Schema comparator unit tests
+        run: npm run test:storage -- --no-coverage
+
+      # ── Step 5: Upload reports as artifacts ────────────────────────────────
+      - name: Upload schema comparison reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-schema-reports
+          path: /tmp/schema-reports/
+          retention-days: 14
+
   root-artifact-health:
     name: Backend artifact integrity
     runs-on: ubuntu-latest

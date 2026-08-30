@@ -1,0 +1,99 @@
+{
+  "contract": "relayer_slashing",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.772Z",
+  "source_hash": "4e06c523",
+  "data_keys": [
+    {
+      "key": "Config",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Config",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "Relayer",
+      "key_kind": "DataKey",
+      "key_params": [
+        "Address"
+      ],
+      "value_type": "RelayerInfo",
+      "storage_class": "Persistent"
+    }
+  ],
+  "structs": [
+    {
+      "name": "RelayerInfo",
+      "fields": [
+        {
+          "name": "stake_amount",
+          "type": "i128"
+        },
+        {
+          "name": "status",
+          "type": "RelayerStatus"
+        },
+        {
+          "name": "unstake_requested_at",
+          "type": "u64"
+        },
+        {
+          "name": "dispute_count",
+          "type": "u32"
+        },
+        {
+          "name": "last_transition_at",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "Config",
+      "fields": [
+        {
+          "name": "admin",
+          "type": "Address"
+        },
+        {
+          "name": "staking_token",
+          "type": "Address"
+        },
+        {
+          "name": "treasury",
+          "type": "Address"
+        },
+        {
+          "name": "slashing_bps",
+          "type": "u32"
+        },
+        {
+          "name": "unbonding_period",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "RelayerStatus",
+      "variants": [
+        {
+          "name": "Active"
+        },
+        {
+          "name": "UnstakeRequested"
+        },
+        {
+          "name": "InDispute"
+        },
+        {
+          "name": "Slashed"
+        },
+        {
+          "name": "Withdrawn"
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

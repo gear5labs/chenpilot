@@ -1,0 +1,194 @@
+{
+  "contract": "core_vault",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.760Z",
+  "source_hash": "d9e4f3f7",
+  "data_keys": [
+    {
+      "key": "Admin",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Address",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "UnifiedAuth",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Address",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "PendingUpgrade",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "DataKey, PendingUpgrade",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "BackendOnline",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "bool",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "Deposit",
+      "key_kind": "DataKey",
+      "key_params": [
+        "Address"
+      ],
+      "value_type": "unknown",
+      "storage_class": "Instance",
+      "ttl_constant": "_TTL_LEDGERS"
+    },
+    {
+      "key": "ForceExit",
+      "key_kind": "DataKey",
+      "key_params": [
+        "Address"
+      ],
+      "value_type": "ForceExitRequest",
+      "storage_class": "Persistent",
+      "ttl_constant": "FORCE_EXIT_TTL_LEDGERS",
+      "ttl_ledgers": 360000
+    },
+    {
+      "key": "VaultToken",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Address",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "UpgradeMode",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "bool",
+      "storage_class": "Instance"
+    }
+  ],
+  "structs": [
+    {
+      "name": "PendingUpgrade",
+      "fields": [
+        {
+          "name": "new_wasm_hash",
+          "type": "BytesN<32>"
+        },
+        {
+          "name": "unlock_ledger",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "ForceExitRequest",
+      "fields": [
+        {
+          "name": "amount",
+          "type": "i128"
+        },
+        {
+          "name": "eligible_at",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "DepositEvent",
+      "fields": [
+        {
+          "name": "user",
+          "type": "Address"
+        },
+        {
+          "name": "amount",
+          "type": "i128"
+        },
+        {
+          "name": "total_deposited",
+          "type": "i128"
+        }
+      ]
+    },
+    {
+      "name": "WithdrawalEvent",
+      "fields": [
+        {
+          "name": "user",
+          "type": "Address"
+        },
+        {
+          "name": "amount",
+          "type": "i128"
+        }
+      ]
+    },
+    {
+      "name": "RecoveryEvent",
+      "fields": [
+        {
+          "name": "user",
+          "type": "Address"
+        },
+        {
+          "name": "amount",
+          "type": "i128"
+        },
+        {
+          "name": "reason",
+          "type": "RecoveryReason"
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "UnifiedRole",
+      "variants": [
+        {
+          "name": "SuperAdmin"
+        },
+        {
+          "name": "EmergencyAdmin"
+        },
+        {
+          "name": "VaultAdmin"
+        },
+        {
+          "name": "UpgradeAdmin"
+        },
+        {
+          "name": "StrategyAdmin"
+        },
+        {
+          "name": "RoleAdmin"
+        },
+        {
+          "name": "OracleProvider"
+        },
+        {
+          "name": "AgentOperator"
+        },
+        {
+          "name": "StrategyOperator"
+        }
+      ]
+    },
+    {
+      "name": "RecoveryReason",
+      "variants": [
+        {
+          "name": "ForceExitTimeout"
+        },
+        {
+          "name": "AdminIntervention"
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    "Could not infer value type for DataKey::Deposit in core_vault"
+  ]
+}

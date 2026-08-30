@@ -1,0 +1,145 @@
+{
+  "contract": "unified_auth",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.821Z",
+  "source_hash": "764e0830",
+  "data_keys": [
+    {
+      "key": "SuperAdmin",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Address",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "HasRole",
+      "key_kind": "DataKey",
+      "key_params": [
+        "Address",
+        "UnifiedRole"
+      ],
+      "value_type": "DataKey, bool",
+      "storage_class": "Persistent"
+    },
+    {
+      "key": "RegisteredContract",
+      "key_kind": "DataKey",
+      "key_params": [
+        "ContractId"
+      ],
+      "value_type": "DataKey, bool",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "EmergencyState",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "DataKey, EmergencyState",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "ContractAddress",
+      "key_kind": "DataKey",
+      "key_params": [
+        "ContractId"
+      ],
+      "value_type": "DataKey, Address",
+      "storage_class": "Instance"
+    }
+  ],
+  "structs": [
+    {
+      "name": "EmergencyState",
+      "fields": [
+        {
+          "name": "is_emergency",
+          "type": "bool"
+        },
+        {
+          "name": "triggered_by",
+          "type": "Address"
+        },
+        {
+          "name": "triggered_at",
+          "type": "u64"
+        },
+        {
+          "name": "reason",
+          "type": "EmergencyReason"
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "UnifiedRole",
+      "variants": [
+        {
+          "name": "SuperAdmin"
+        },
+        {
+          "name": "EmergencyAdmin"
+        },
+        {
+          "name": "VaultAdmin"
+        },
+        {
+          "name": "UpgradeAdmin"
+        },
+        {
+          "name": "StrategyAdmin"
+        },
+        {
+          "name": "RoleAdmin"
+        },
+        {
+          "name": "OracleProvider"
+        },
+        {
+          "name": "AgentOperator"
+        },
+        {
+          "name": "StrategyOperator"
+        }
+      ]
+    },
+    {
+      "name": "ContractId",
+      "variants": [
+        {
+          "name": "CoreVault"
+        },
+        {
+          "name": "Rbac"
+        },
+        {
+          "name": "StrategyRegistry"
+        },
+        {
+          "name": "StrategyBoundary"
+        },
+        {
+          "name": "LiquidityVault"
+        }
+      ]
+    },
+    {
+      "name": "EmergencyReason",
+      "variants": [
+        {
+          "name": "ExploitDetected"
+        },
+        {
+          "name": "OracleFailure"
+        },
+        {
+          "name": "BackendOffline"
+        },
+        {
+          "name": "GovernanceDecision"
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

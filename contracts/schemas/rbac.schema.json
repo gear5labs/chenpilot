@@ -1,0 +1,43 @@
+{
+  "contract": "rbac",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.771Z",
+  "source_hash": "17b48c32",
+  "data_keys": [
+    {
+      "key": "SuperAdmin",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Address",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "HasRole",
+      "key_kind": "DataKey",
+      "key_params": [
+        "Address",
+        "Role"
+      ],
+      "value_type": "DataKey, bool",
+      "storage_class": "Instance"
+    }
+  ],
+  "structs": [],
+  "enums": [
+    {
+      "name": "Role",
+      "variants": [
+        {
+          "name": "OracleProvider"
+        },
+        {
+          "name": "AgentOperator"
+        },
+        {
+          "name": "EmergencyAdmin"
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

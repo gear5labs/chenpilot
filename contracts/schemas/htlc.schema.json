@@ -1,0 +1,69 @@
+{
+  "contract": "htlc",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.767Z",
+  "source_hash": "c9feb111",
+  "data_keys": [
+    {
+      "key": "Swap",
+      "key_kind": "DataKey",
+      "key_params": [
+        "BytesN<32>"
+      ],
+      "value_type": "Swap",
+      "storage_class": "Persistent"
+    }
+  ],
+  "structs": [
+    {
+      "name": "Swap",
+      "fields": [
+        {
+          "name": "initiator",
+          "type": "Address"
+        },
+        {
+          "name": "recipient",
+          "type": "Address"
+        },
+        {
+          "name": "token",
+          "type": "Address"
+        },
+        {
+          "name": "amount",
+          "type": "i128"
+        },
+        {
+          "name": "secret_hash",
+          "type": "BytesN<32>"
+        },
+        {
+          "name": "expiry_ledger",
+          "type": "u32"
+        },
+        {
+          "name": "status",
+          "type": "SwapStatus"
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "SwapStatus",
+      "variants": [
+        {
+          "name": "Active"
+        },
+        {
+          "name": "Claimed"
+        },
+        {
+          "name": "Refunded"
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

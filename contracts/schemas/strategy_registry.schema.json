@@ -1,0 +1,62 @@
+{
+  "contract": "strategy_registry",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.775Z",
+  "source_hash": "96767c84",
+  "data_keys": [
+    {
+      "key": "Admin",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Address",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "AiAgent",
+      "key_kind": "DataKey",
+      "key_params": [
+        "Address"
+      ],
+      "value_type": "bool",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "VerifiedPool",
+      "key_kind": "DataKey",
+      "key_params": [
+        "BytesN<32>"
+      ],
+      "value_type": "bool",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "CurrentStrategy",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "unknown",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "Votes",
+      "key_kind": "DataKey",
+      "key_params": [
+        "BytesN<32>"
+      ],
+      "value_type": "unknown",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "VotedPools",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Vec<BytesN<32>>",
+      "storage_class": "Instance"
+    }
+  ],
+  "structs": [],
+  "enums": [],
+  "warnings": [
+    "Could not infer value type for DataKey::CurrentStrategy in strategy_registry",
+    "Could not infer value type for DataKey::Votes in strategy_registry"
+  ]
+}

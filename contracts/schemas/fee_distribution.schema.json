@@ -1,0 +1,97 @@
+{
+  "contract": "fee_distribution",
+  "schema_version": "1",
+  "extracted_at": "2026-08-30T07:46:03.762Z",
+  "source_hash": "69258d95",
+  "data_keys": [
+    {
+      "key": "Config",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "Config",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "DistributionNonce",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "DataKey, u32",
+      "storage_class": "Instance"
+    },
+    {
+      "key": "LastDistribution",
+      "key_kind": "DataKey",
+      "key_params": [],
+      "value_type": "unknown",
+      "storage_class": "Instance"
+    }
+  ],
+  "structs": [
+    {
+      "name": "Config",
+      "fields": [
+        {
+          "name": "admin",
+          "type": "Address"
+        },
+        {
+          "name": "treasury",
+          "type": "Address"
+        },
+        {
+          "name": "ai_agent_pool",
+          "type": "Address"
+        },
+        {
+          "name": "lp_pool",
+          "type": "Address"
+        },
+        {
+          "name": "treasury_bps",
+          "type": "u32"
+        },
+        {
+          "name": "ai_agent_bps",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "DistributionRecord",
+      "fields": [
+        {
+          "name": "nonce",
+          "type": "u32"
+        },
+        {
+          "name": "token",
+          "type": "Address"
+        },
+        {
+          "name": "from",
+          "type": "Address"
+        },
+        {
+          "name": "amount",
+          "type": "i128"
+        },
+        {
+          "name": "treasury_share",
+          "type": "i128"
+        },
+        {
+          "name": "ai_agent_share",
+          "type": "i128"
+        },
+        {
+          "name": "lp_share",
+          "type": "i128"
+        }
+      ]
+    }
+  ],
+  "enums": [],
+  "warnings": [
+    "Could not infer value type for DataKey::LastDistribution in fee_distribution"
+  ]
+}
