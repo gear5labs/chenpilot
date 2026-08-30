@@ -23,6 +23,7 @@ import {
   AdminWorkflowInstance,
   AdminWorkflowApproval,
 } from "../Agents/admin/workflow.entity";
+import { ShadowComparisonRecord } from "../shadow/ShadowComparisonRecord.entity";
 
 const isDev = config.env === "development";
 
@@ -54,6 +55,7 @@ const dbOptions: DataSourceOptions = {
     AdminWorkflowPolicy,
     AdminWorkflowInstance,
     AdminWorkflowApproval,
+    ShadowComparisonRecord,
   ],
   migrations: [isDev ? "src/migrations/**/*.ts" : "dist/migrations/**/*.js"],
   subscribers: [],
