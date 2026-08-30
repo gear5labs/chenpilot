@@ -3,18 +3,12 @@ import config from "../config/config";
 import logger from "../config/logger";
 import { transactionLifecycleService } from "../transactions/TransactionLifecycle.service";
 import { durableOperationService } from "../Reliability/DurableOperationService";
+import { SafeXdrDecoder } from "../utils/xdr";
 
 /**
  * Delay strategy for transaction submission
  */
-export type DelayStrategy =
-  /**
-   * Submit at a specific time
-   */
-export type DelayStrategy = 
-  | "scheduled"
-  | "fee_based"
-  | "congestion_based";
+export type DelayStrategy = "scheduled" | "fee_based" | "congestion_based";
 
 export interface DelayedTransactionConfig {
   strategy: DelayStrategy;
@@ -105,11 +99,14 @@ export class DelayedTransactionService {
 
   constructor() {
     this.server = new StellarSdk.Horizon.Server(config.stellar.horizonUrl);
-    
+
     // Register handler for delayed transactions
-    durableOperationService.registerHandler("delayed_transaction", async (payload) => {
-      return this.executeTransaction(payload.transactionXdr);
-    });
+    durableOperationService.registerHandler(
+      "delayed_transaction",
+      async (payload) => {
+        return this.executeTransaction(payload.transactionXdr);
+      }
+    );
   }
 
   /**
@@ -139,7 +136,9 @@ export class DelayedTransactionService {
       clearInterval(this.checkInterval);
       this.checkInterval = null;
     }
-    logger.info("Delayed transaction service initialized with durable framework");
+    logger.info(
+      "Delayed transaction service initialized with durable framework"
+    );
   }
 
   async createDelayedTransaction(
@@ -150,11 +149,9 @@ export class DelayedTransactionService {
     this.validateConfig(config);
 
     try {
-      const _tx = StellarSdk.Transaction.fromXDR(
-        transactionXdr,
-        "Test SDF Network ; September 2015"
-      );
-      StellarSdk.Transaction.fromXDR(transactionXdr, StellarSdk.Networks.TESTNET);
+      SafeXdrDecoder.decodeTransaction(transactionXdr, {
+        networkPassphrase: config.stellar.networkPassphrase,
+      });
     } catch (error) {
       throw new Error(
         `Invalid transaction XDR: ${error instanceof Error ? error.message : "Unknown error"}`
@@ -166,7 +163,7 @@ export class DelayedTransactionService {
         ? new Date(delayedConfig.scheduledAt)
         : new Date();
 
-    const job = await jobQueueService.enqueueWithContext({
+    await jobQueueService.enqueueWithContext({
       queue: "transactions",
       jobType: "delayed_transaction.submit",
       userId,
@@ -193,14 +190,21 @@ export class DelayedTransactionService {
     return durableOperationService.execute({
       category: "delayed_transaction",
       payload: { userId, transactionXdr },
-      scheduledAt: config.strategy === "scheduled" ? new Date(config.scheduledAt!) : undefined,
+      scheduledAt:
+        config.strategy === "scheduled"
+          ? new Date(config.scheduledAt!)
+          : undefined,
       conditions: config.strategy !== "scheduled" ? config : undefined,
       maxRetries: config.maxRetries,
     });
   }
 
-  private async executeTransaction(xdr: string): Promise<{ hash: string; ledger: number; envelopeXdr: string }> {
-    const tx = StellarSdk.Transaction.fromXDR(xdr, StellarSdk.Networks.TESTNET);
+  private async executeTransaction(
+    xdr: string
+  ): Promise<{ hash: string; ledger: number; envelopeXdr: string }> {
+    const tx = SafeXdrDecoder.decodeTransaction(xdr, {
+      networkPassphrase: config.stellar.networkPassphrase,
+    }) as StellarSdk.Transaction;
     const result = await this.server.submitTransaction(tx);
     return {
       hash: result.hash,
@@ -235,7 +239,6 @@ export class DelayedTransactionService {
         // No specific validation needed
         break;
     }
-    return cancelled;
   }
 
   /**
@@ -261,8 +264,6 @@ export class DelayedTransactionService {
         await this.submitTransaction(id);
       }
     }
-
-    return this.mapJobToDelayedTransaction(job);
   }
 
   /**
@@ -288,12 +289,8 @@ export class DelayedTransactionService {
 
       default:
         return false;
-    if (config.strategy === "scheduled") {
-      if (!config.scheduledAt) throw new Error("scheduledAt is required for 'scheduled' strategy");
-      if (config.scheduledAt < Date.now()) throw new Error("scheduledAt must be in the future");
     }
   }
-}
 
   /**
    * Check if current fee is acceptable
@@ -305,8 +302,9 @@ export class DelayedTransactionService {
 
     const targetFee = config.targetFee || this.DEFAULT_TARGET_FEE;
     const maxFee = config.maxFee || this.DEFAULT_MAX_FEE;
-export const delayedTransactionService = new DelayedTransactionService();
 
+    return feeInfo.fee <= targetFee || feeInfo.fee <= maxFee;
+  }
 
   /**
    * Check if network congestion is acceptable
@@ -351,6 +349,7 @@ export const delayedTransactionService = new DelayedTransactionService();
         lastUpdated: Date.now(),
       };
     }
+  }
 
   /**
    * Submit a delayed transaction
@@ -367,10 +366,9 @@ export const delayedTransactionService = new DelayedTransactionService();
 
     try {
       const networkPassphrase = config.stellar.networkPassphrase;
-      const tx = StellarSdk.Transaction.fromXDR(
-        delayedTx.transactionXdr,
-        networkPassphrase
-      );
+      const tx = SafeXdrDecoder.decodeTransaction(delayedTx.transactionXdr, {
+        networkPassphrase,
+      }) as StellarSdk.Transaction;
 
       const response = await this.server.submitTransaction(tx);
 
@@ -418,30 +416,24 @@ export const delayedTransactionService = new DelayedTransactionService();
   /**
    * Cancel a delayed transaction
    */
-  cancelTransaction(id: string, userId: string): boolean {
+  cancelTransaction(id: string): boolean {
     const delayedTx = this.pendingDelayedTxs.get(id);
 
     if (!delayedTx) {
       return false;
     }
 
-    if (job.status === "completed" || job.status === "dead_letter" || job.status === "cancelled") {
-      return false;
-    }
-
-    payload.config.scheduledAt = newScheduledAt;
-    job.payload = payload;
-    job.availableAt = new Date(newScheduledAt);
-    job.status = "pending";
-    job.leaseExpiresAt = null;
-    job.leasedBy = null;
-
     delayedTx.status = "cancelled";
 
     if (delayedTx.lifecycleId) {
-      transactionLifecycleService.cancel(delayedTx.lifecycleId, "Cancelled by user").catch((err) => {
-        logger.warn("Failed to cancel lifecycle for delayed transaction", { id, err });
-      });
+      transactionLifecycleService
+        .cancel(delayedTx.lifecycleId, "Cancelled by user")
+        .catch((err) => {
+          logger.warn("Failed to cancel lifecycle for delayed transaction", {
+            id,
+            err,
+          });
+        });
     }
 
     logger.info(`Cancelled delayed transaction ${id}`);
@@ -469,27 +461,11 @@ export const delayedTransactionService = new DelayedTransactionService();
   /**
    * Update a scheduled transaction time
    */
-  rescheduleTransaction(
-    id: string,
-    userId: string,
-    newScheduledAt: number
-  ): boolean {
+  rescheduleTransaction(id: string, newScheduledAt: number): boolean {
     const delayedTx = this.pendingDelayedTxs.get(id);
 
     if (!delayedTx) {
       return false;
-    }
-
-    if (job.status === "dead_letter") {
-      return "failed";
-    }
-
-    if (job.status === "cancelled") {
-      return "cancelled";
-    }
-
-    if (job.status === "leased") {
-      return "submitting";
     }
 
     delayedTx.config.scheduledAt = newScheduledAt;
@@ -500,13 +476,6 @@ export const delayedTransactionService = new DelayedTransactionService();
     );
 
     return true;
-  }
-
-    if (strategy === "congestion_based") {
-      return "waiting_for_congestion";
-    }
-
-    return "pending";
   }
 }
 

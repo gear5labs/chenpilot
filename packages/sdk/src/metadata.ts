@@ -10,7 +10,6 @@ import {
   TransactionBuilder,
   Networks,
   Operation,
-  BASE_FEE,
 } from "@stellar/stellar-sdk";
 import { abortableWait, isAbortError } from "./abort";
 import type { AbortSignalLike } from "./types";
@@ -88,8 +87,7 @@ export class StellarMetadataManager {
 
   constructor(config?: MetadataManagerConfig) {
     this.horizonUrl = config?.horizonUrl || "https://horizon.stellar.org";
-    this.networkPassphrase =
-      config?.networkPassphrase || Networks.PUBLIC;
+    this.networkPassphrase = config?.networkPassphrase || Networks.PUBLIC;
     this.baseFee = String(config?.baseFee ?? 100);
     this.defaultSignal = config?.signal;
     this.server = new Horizon.Server(this.horizonUrl);
