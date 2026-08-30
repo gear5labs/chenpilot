@@ -1,7 +1,7 @@
 packages:
   - 'packages/*'
 allowBuilds:
-  '@scarf/scarf': set this to true or false
-  bcrypt: set this to true or false
-  canvas: set this to true or false
-  unrs-resolver: set this to true or false
+  '@scarf/scarf': false
+  bcrypt: false
+  canvas: false
+  unrs-resolver: false
