@@ -13,6 +13,7 @@ members = [
     "liquidity_vault",
     "multi_hop_swap",
     "por_validator",
+    "protocol_conservation",
     "rbac",
     "relayer_slashing",
     "strategy_registry",
