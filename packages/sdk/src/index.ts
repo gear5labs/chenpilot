@@ -1,4 +1,5 @@
 export * from "./networkIntelligence";
+export * from "./networkIdentity";
 export * from "./errors";
 export * from "./errorRegistry";
 export * from "./eventDecoding";
