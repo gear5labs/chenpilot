@@ -8,6 +8,11 @@ import stellarPriceService from "../../services/stellarPrice.service";
 import { flashSwapRiskAnalyzer } from "../../services/flashSwapRiskAnalyzer";
 import { RedisLockService } from "../../services/lock";
 import { transactionLifecycleService } from "../../transactions/TransactionLifecycle.service";
+import {
+  formatAmount,
+  formatPercentage,
+  formatTransactionHash,
+} from "../../utils/SecuritySensitiveFormatter";
 
 interface SwapPayload extends Record<string, unknown> {
   from: string;
@@ -369,17 +374,17 @@ export class SwapTool extends BaseTool<SwapPayload> {
       return this.createSuccessResult("swap", {
         from: payload.from,
         to: payload.to,
-        amount: payload.amount,
-        estimatedOutput: priceQuote.estimatedOutput,
-        price: priceQuote.price,
-        txHash: result.hash,
+        amount: formatAmount(payload.amount, { currencyCode: payload.from, maxDecimals: 7 }),
+        estimatedOutput: formatAmount(priceQuote.estimatedOutput, { currencyCode: payload.to, maxDecimals: 7 }),
+        price: formatAmount(priceQuote.price, { maxDecimals: 7 }),
+        txHash: formatTransactionHash(result.hash),
         timestamp: new Date().toISOString(),
         ledger: result.ledger,
         successful: result.successful,
         lifecycleId: lifecycleId,
         riskAnalysis: {
           level: riskAnalysis.riskLevel,
-          sandwichAttackRisk: riskAnalysis.sandwichAttackRisk,
+          sandwichAttackRisk: formatPercentage(riskAnalysis.sandwichAttackRisk),
           warnings: riskAnalysis.warnings,
           recommendations: riskAnalysis.recommendations,
         },
