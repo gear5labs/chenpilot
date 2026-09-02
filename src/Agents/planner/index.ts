@@ -15,6 +15,8 @@ export {
 } from "./DurableRecoveryService";
 export { ExecutionStatus } from "./DurableExecution.entity";
 export { StepStatus } from "./DurableStep.entity";
+export { DependencyGraph } from "./DependencyGraph";
+export { ParallelScheduler, parallelScheduler } from "./ParallelScheduler";
 
 export type {
   PlannerContext,
@@ -32,3 +34,14 @@ export type {
 
 export type { HashedPlan, PlanHashMetadata } from "./planHash";
 export type { DurableExecutionResult } from "./DurableExecutor";
+export type {
+  ExecutionWave,
+  ResourceKey,
+  StepNode,
+  GraphBuildResult,
+} from "./DependencyGraph";
+export type {
+  WaveRecord,
+  PersistedSchedule,
+  SchedulerOptions,
+} from "./ParallelScheduler";

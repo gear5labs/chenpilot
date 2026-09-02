@@ -1,5 +1,5 @@
 import { ContractCapability, ContractVersionMetadata, ContractCompatibilityMetadata } from './types';
-import { SorobanNetwork } from '../soroban';
+import { SorobanNetwork } from './types';
 
 /**
  * Error thrown when a contract invocation is incompatible with registered metadata.

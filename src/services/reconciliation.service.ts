@@ -5,6 +5,20 @@ import config from "../config/config";
 import logger from "../config/logger";
 import { getObservabilityContext } from "../observability";
 import { buildRpcServer } from "../services/soroban/sdkAdapter";
+import {
+  InvariantResult,
+  InvariantEvaluationContext,
+  InvariantCategory,
+  DataAvailability,
+  evaluateAllInvariants,
+  evaluateInvariantsByCategory,
+  summarizeInvariantResults,
+  BackendTransactionRecord,
+  OnChainTransactionRecord,
+  BackendBalanceRecord,
+  OnChainBalanceRecord,
+  PendingOperationRecord,
+} from "./invariantEngine";
 
 export type DriftSeverity = "none" | "minor" | "major" | "critical";
 export type DriftType =
@@ -24,6 +38,15 @@ export interface DriftItem {
   detectedAt: string;
 }
 
+export interface InvariantSummary {
+  total: number;
+  passing: number;
+  failing: number;
+  indeterminate: number;
+  lagExceeded: number;
+  byRepairSafety: Record<string, number>;
+}
+
 export interface ReconciliationReport {
   id: string;
   userId: string;
@@ -40,6 +63,10 @@ export interface ReconciliationReport {
   };
   status: "clean" | "drifted" | "error";
   errorMessage?: string;
+  /** Invariant evaluation results — populated when scope.invariants is true. */
+  invariantResults?: InvariantResult[];
+  /** Aggregate invariant summary — populated when scope.invariants is true. */
+  invariantSummary?: InvariantSummary;
 }
 
 export interface ReconciliationScope {
@@ -50,6 +77,10 @@ export interface ReconciliationScope {
   contractIds?: string[];
   network?: "testnet" | "mainnet";
   lookbackLedgers?: number;
+  /** When true, evaluate system-level accounting invariants. */
+  invariants?: boolean;
+  /** Filter invariant evaluation to specific categories. If omitted, all are evaluated. */
+  invariantCategories?: InvariantCategory[];
 }
 
 const STELLAR_HORIZON: Record<string, string> = {
@@ -80,6 +111,8 @@ export class ReconciliationService {
     const driftItems: DriftItem[] = [];
     let status: ReconciliationReport["status"] = "clean";
     let errorMessage: string | undefined;
+    let invariantResults: InvariantResult[] | undefined;
+    let invariantSummary: InvariantSummary | undefined;
 
     logger.info("Starting reconciliation", { reportId, correlationId, userId, scope });
 
@@ -104,6 +137,30 @@ export class ReconciliationService {
           scope
         );
         driftItems.push(...contractDrift);
+      }
+
+      if (scope.invariants) {
+        const invCtx = await this.buildInvariantContext(userId, scope);
+        if (scope.invariantCategories?.length) {
+          invariantResults = evaluateInvariantsByCategory(invCtx, scope.invariantCategories);
+        } else {
+          invariantResults = evaluateAllInvariants(invCtx);
+        }
+        invariantSummary = summarizeInvariantResults(invariantResults);
+        // Promote only evaluated failures (not indeterminate) to drift items
+        for (const ir of invariantResults) {
+          if (ir.status === "failing") {
+            driftItems.push({
+              type: "balance_mismatch",
+              severity: "major",
+              entityId: `invariant:${ir.invariantId}`,
+              backendValue: ir.actualValue,
+              onChainValue: ir.expectedValue,
+              description: `[Invariant ${ir.invariantId}] ${ir.invariantName}: ${ir.attributableDifference}` + (ir.lagExceeded ? " (lag exceeded)" : ""),
+              detectedAt: ir.evaluatedAt,
+            });
+          }
+        }
       }
 
       status = driftItems.length > 0 ? "drifted" : "clean";
@@ -132,6 +189,8 @@ export class ReconciliationService {
       summary,
       status,
       errorMessage,
+      invariantResults,
+      invariantSummary,
     };
 
     await this.persistReport(report);
@@ -358,6 +417,217 @@ export class ReconciliationService {
     }
 
     return driftItems;
+  }
+
+  /**
+   * Build the invariant evaluation context from DB and on-chain data.
+   *
+   * This method aggregates backend records into the typed shapes that
+   * the invariant engine expects. It does NOT fabricate data — if a
+   * table or column doesn't exist, the corresponding array is empty.
+   */
+  private async buildInvariantContext(
+    userId: string,
+    scope: ReconciliationScope,
+  ): Promise<InvariantEvaluationContext> {
+    const db = AppDataSource.isInitialized ? AppDataSource : null;
+    const now = Date.now();
+
+    if (!db) {
+      return {
+        backendTransactions: [],
+        onChainTransactions: [],
+        backendBalances: [],
+        onChainBalances: [],
+        pendingOperations: [],
+        dataAvailability: {
+          backendTransactions: false,
+          onChainTransactions: false,
+          backendBalances: false,
+          onChainBalances: false,
+          pendingOperations: false,
+        },
+        snapshotTimestampMs: now,
+        lastAuthoritativeRefreshMs: now,
+        evaluationTimestampMs: now,
+      };
+    }
+
+    // ── Backend transactions ───────────────────────────────────────────
+    let backendTransactions: BackendTransactionRecord[] = [];
+    let backendTxsOk = false;
+    try {
+      const rows: Array<{
+        txHash: string;
+        status: string;
+        amount: string;
+        assetCode: string;
+        createdAt: string;
+      }> = await db.query(
+        `SELECT tx_hash as "txHash", status, amount,
+                COALESCE(asset_code, 'UNKNOWN') as "assetCode",
+                EXTRACT(EPOCH FROM created_at) * 1000 as "createdAt"
+         FROM transactions WHERE user_id = $1
+         ORDER BY created_at DESC LIMIT 100`,
+        [userId],
+      );
+      backendTransactions = rows.map((r) => ({
+        txHash: r.txHash,
+        status: r.status,
+        amount: r.amount,
+        assetCode: r.assetCode,
+        createdAtMs: Number(r.createdAt),
+      }));
+      backendTxsOk = true;
+    } catch {
+      // Query failed — dataAvailability will reflect this
+      logger.warn("Failed to query backend transactions for invariant context", { userId });
+    }
+
+    // ── On-chain transactions ──────────────────────────────────────────
+    const onChainTransactions: OnChainTransactionRecord[] = [];
+    let onChainTxsOk = false;
+    if (scope.network) {
+      const network = scope.network;
+      try {
+        const server = new StellarSdk.Horizon.Server(STELLAR_HORIZON[network]);
+        if (backendTransactions.length > 0) {
+          for (const bt of backendTransactions) {
+            try {
+              const tx = await server.transactions().transaction(bt.txHash).call();
+              onChainTransactions.push({
+                txHash: bt.txHash,
+                successful: tx.successful,
+                ledger: tx.ledger,
+              });
+            } catch {
+              // Not found on-chain — omit from onChainTransactions
+            }
+          }
+        }
+        onChainTxsOk = true;
+      } catch {
+        logger.warn("Horizon unreachable for on-chain transaction query", { network });
+      }
+    }
+
+    // ── Backend balances ───────────────────────────────────────────────
+    let backendBalances: BackendBalanceRecord[] = [];
+    let backendBalancesOk = false;
+    try {
+      const rows: Array<{
+        token: string;
+        balance: string;
+        updated_at: string;
+      }> = await db.query(
+        `SELECT token, balance,
+                COALESCE(EXTRACT(EPOCH FROM updated_at) * 1000, 0) as "updated_at"
+         FROM wallet_balances WHERE user_id = $1`,
+        [userId],
+      );
+      backendBalances = rows.map((r) => ({
+        assetCode: r.token,
+        balance: r.balance,
+        lastUpdatedMs: Number(r.updated_at),
+      }));
+      backendBalancesOk = true;
+    } catch {
+      logger.warn("Failed to query wallet_balances for invariant context", { userId });
+    }
+
+    // ── On-chain balances ──────────────────────────────────────────────
+    const onChainBalances: OnChainBalanceRecord[] = [];
+    let onChainBalancesOk = false;
+    if (scope.walletAddress && backendBalancesOk && backendBalances.length > 0) {
+      try {
+        for (const bb of backendBalances) {
+          try {
+            const contract = new Contract(
+              [
+                {
+                  name: "balanceOf",
+                  type: "function",
+                  inputs: [{ name: "account", type: "felt" }],
+                  outputs: [{ name: "balance", type: "Uint256" }],
+                  stateMutability: "view",
+                },
+              ],
+              bb.assetCode,
+              this.starkProvider,
+            );
+            const result = await contract.balanceOf(scope.walletAddress);
+            const balance = (
+              Number(result.balance.toString()) / 10 ** 18
+            ).toFixed(6);
+            onChainBalances.push({
+              assetCode: bb.assetCode,
+              balance,
+              fetchedAtMs: Date.now(),
+            });
+          } catch {
+            // Individual token query failed
+          }
+        }
+        onChainBalancesOk = true;
+      } catch {
+        logger.warn("StarkNet provider error during on-chain balance query");
+      }
+    }
+
+    // ── Pending operations ─────────────────────────────────────────────
+    let pendingOperations: PendingOperationRecord[] = [];
+    let pendingOpsOk = false;
+    try {
+      const rows: Array<{
+        id: string;
+        category: string;
+        status: string;
+        created_at: string;
+      }> = await db.query(
+        `SELECT id, category, status,
+                EXTRACT(EPOCH FROM created_at) * 1000 as "created_at"
+         FROM durable_operation
+         WHERE status IN ('pending', 'running')
+         ORDER BY created_at DESC LIMIT 200`,
+      );
+      pendingOperations = rows.map((r) => ({
+        id: r.id,
+        category: r.category,
+        status: r.status,
+        createdAtMs: Number(r.created_at),
+      }));
+      pendingOpsOk = true;
+    } catch {
+      logger.warn("Failed to query durable_operation for invariant context");
+    }
+
+    const dataAvailability: DataAvailability = {
+      backendTransactions: backendTxsOk,
+      onChainTransactions: onChainTxsOk,
+      backendBalances: backendBalancesOk,
+      onChainBalances: onChainBalancesOk,
+      pendingOperations: pendingOpsOk,
+    };
+
+    // Compute the earliest authoritative data refresh time
+    const timestamps = [
+      ...backendTransactions.map((t) => t.createdAtMs),
+      ...backendBalances.map((b) => b.lastUpdatedMs),
+      ...onChainBalances.map((b) => b.fetchedAtMs),
+      ...onChainTransactions.map(() => now),
+    ].filter((t) => t > 0);
+
+    return {
+      backendTransactions,
+      onChainTransactions,
+      backendBalances,
+      onChainBalances,
+      pendingOperations,
+      dataAvailability,
+      snapshotTimestampMs: now,
+      lastAuthoritativeRefreshMs: timestamps.length > 0 ? Math.max(...timestamps) : now,
+      evaluationTimestampMs: now,
+    };
   }
 
   /**

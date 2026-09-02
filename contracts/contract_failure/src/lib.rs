@@ -84,6 +84,16 @@ pub enum FailureReason {
 
     StorageValueMissing = 200,
     ArithmeticError = 201,
+
+    InsufficientQuorum = 210,
+    InsufficientQuorumWeight = 211,
+    ExcessiveSourceDisagreement = 212,
+    SourceAlreadyRegistered = 213,
+    SourceNotRegistered = 214,
+    InvalidWeight = 215,
+    InvalidQuorumConfig = 216,
+    NoValidSources = 217,
+    TooManySources = 218,
 }
 
 pub fn fail(env: &Env, reason: FailureReason) -> ! {
