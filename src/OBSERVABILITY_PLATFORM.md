@@ -89,3 +89,12 @@ const result = await idempotencyService.execute({
 - `src/Gateway/webhookIdempotency.service.ts` — legacy webhook dedup
 - `src/Reliability/DurableOperationService.ts` — legacy durable operations
 - Prefer `SignedEventIngestionService` + `IdempotencyService` for new code.
+
+## User-Journey SLOs
+
+Transaction reliability is measured across the complete
+`simulate -> approve -> submit -> confirm` journey, rather than from HTTP
+status codes alone. The required event fields, correctness and latency
+objectives, dependency/failure-class budgets, burn-rate alerts, diagnostic
+queries, and safe mitigations are defined in
+[`docs/TRANSACTION_JOURNEY_SLO.md`](../docs/TRANSACTION_JOURNEY_SLO.md).

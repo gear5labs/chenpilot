@@ -2,9 +2,14 @@
  * Horizon Client for Stellar API interactions with cursor-based pagination support
  */
 
+import { combineSignals, throwIfAborted } from "./abort";
+import type { AbortSignalLike } from "./types";
+
 export interface PaginationOptions {
   cursor?: string;
   limit?: number;
+  /** Optional external signal to cancel the request. */
+  signal?: AbortSignalLike;
 }
 
 export interface AccountOffer {
@@ -94,7 +99,7 @@ export class HorizonClient {
   /**
    * Fetch account offers with cursor-based pagination
    * @param accountId - The account ID to fetch offers for
-   * @param options - Pagination options (cursor and limit)
+   * @param options - Pagination options (cursor, limit, optional signal)
    * @returns Paginated response with account offers
    */
   async getAccountOffers(
@@ -117,39 +122,46 @@ export class HorizonClient {
 
     const url = `${this.baseUrl}/accounts/${accountId}/offers?${params.toString()}`;
 
-    const signal = this.timeout ? AbortSignal.timeout(this.timeout) : undefined;
-    const response = await this.fetch(url, { signal });
+    const combined = combineSignals(this.timeout, options?.signal);
+    try {
+      throwIfAborted(combined.signal);
+      const response = await this.fetch(url, {
+        signal: combined.signal as AbortSignal | undefined,
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `Failed to fetch account offers: ${response.status} ${errorText}`
-      );
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Failed to fetch account offers: ${response.status} ${errorText}`
+        );
+      }
+
+      const data = (await response.json()) as HorizonApiResponse<AccountOffer>;
+
+      // Extract next and previous cursors from Horizon links
+      let nextCursor: string | undefined;
+      let prevCursor: string | undefined;
+
+      if (data._links?.next?.href) {
+        const nextUrl = new URL(data._links.next.href);
+        nextCursor = nextUrl.searchParams.get("cursor") ?? undefined;
+      }
+
+      if (data._links?.prev?.href) {
+        const prevUrl = new URL(data._links.prev.href);
+        prevCursor = prevUrl.searchParams.get("cursor") ?? undefined;
+      }
+
+      const records = data._embedded?.records ?? data.records ?? [];
+
+      return {
+        records,
+        nextCursor,
+        prevCursor,
+      };
+    } finally {
+      combined.cleanup();
     }
-
-    const data = (await response.json()) as HorizonApiResponse<AccountOffer>;
-
-    // Extract next and previous cursors from Horizon links
-    let nextCursor: string | undefined;
-    let prevCursor: string | undefined;
-
-    if (data._links?.next?.href) {
-      const nextUrl = new URL(data._links.next.href);
-      nextCursor = nextUrl.searchParams.get("cursor") ?? undefined;
-    }
-
-    if (data._links?.prev?.href) {
-      const prevUrl = new URL(data._links.prev.href);
-      prevCursor = prevUrl.searchParams.get("cursor") ?? undefined;
-    }
-
-    const records = data._embedded?.records ?? data.records ?? [];
-
-    return {
-      records,
-      nextCursor,
-      prevCursor,
-    };
   }
 
   /**
@@ -157,18 +169,22 @@ export class HorizonClient {
    * Automatically handles pagination using cursors
    * @param accountId - The account ID to fetch offers for
    * @param pageSize - Number of records per page (default: 50, max: 200)
+   * @param signal - Optional external signal to cancel the iteration
    */
   async *iterateAccountOffers(
     accountId: string,
-    pageSize: number = 50
+    pageSize: number = 50,
+    signal?: AbortSignalLike
   ): AsyncGenerator<AccountOffer> {
     let cursor: string | undefined;
     let hasMore = true;
 
     while (hasMore) {
+      throwIfAborted(signal);
       const page = await this.getAccountOffers(accountId, {
         cursor,
         limit: pageSize,
+        signal,
       });
 
       for (const record of page.records) {

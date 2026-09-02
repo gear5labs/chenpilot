@@ -110,6 +110,8 @@
 //! module arguably shouldn't be coupled to one specific consumer's error
 //! enum anyway.
 
+pub mod coordination;
+
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol};
 
 /// Errors this module can raise. Kept deliberately small and independent

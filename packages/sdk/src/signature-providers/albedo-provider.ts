@@ -1,4 +1,5 @@
 import { ChainId } from "../types";
+import { AbortSignalLike } from "../types";
 import { BaseSignatureProvider } from "./interfaces";
 import {
   SignatureRequest,
@@ -68,7 +69,7 @@ export class AlbedoSignatureProvider extends BaseSignatureProvider {
     }];
   }
 
-  async signTransaction(request: SignatureRequest): Promise<SignatureResult> {
+  async signTransaction(request: SignatureRequest, signal?: AbortSignalLike): Promise<SignatureResult> {
     if (request.transactionData.chainId !== ChainId.STELLAR) {
       throw new InvalidTransactionError("Albedo only signs Stellar transactions", this.providerId, request.transactionData.chainId);
     }

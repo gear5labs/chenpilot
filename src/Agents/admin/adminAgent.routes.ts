@@ -10,8 +10,21 @@ import { OperationStatus } from "../../Reliability/DurableOperation.entity";
 import { requireAdminWorkflow } from "./workflow.middleware";
 import { SensitiveActionType } from "./workflow.types";
 import AppDataSource from "../../config/Datasource";
+import interventionRouter from "../planner/intervention.routes";
 
 const router = Router();
+
+/**
+ * Mount intervention routes: /api/admin/agents/interventions/...
+ *
+ * Provides signed operator interventions for stuck/failed durable executions:
+ *   POST /submit       — apply a signed intervention command
+ *   POST /dry-run      — preview state changes without committing
+ *   GET  /executions/:executionId — list interventions for an execution
+ *   GET  /:id          — get a single intervention record
+ *   POST /sign-helper  — compute the canonical signing payload
+ */
+router.use("/interventions", interventionRouter);
 
 /**
  * GET /api/admin/reliability/operations

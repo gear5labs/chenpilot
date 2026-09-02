@@ -25,7 +25,15 @@ export function encrypt(plaintext: string): string {
   const authTag = cipher.getAuthTag();
 
   const combined = Buffer.concat([iv, authTag, encrypted]);
-  return combined.toString("base64");
+  const result = combined.toString("base64");
+
+  // Zeroize all intermediate buffers
+  key.fill(0);
+  iv.fill(0);
+  combined.fill(0);
+  encrypted.fill(0);
+
+  return result;
 }
 
 export function decrypt(ciphertext: string): string {
@@ -44,5 +52,12 @@ export function decrypt(ciphertext: string): string {
     decipher.final(),
   ]);
 
-  return decrypted.toString("utf8");
+  const result = decrypted.toString("utf8");
+
+  // Zeroize intermediate buffers (decrypted content, key material)
+  key.fill(0);
+  combined.fill(0);
+  decrypted.fill(0);
+
+  return result;
 }
