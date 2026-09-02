@@ -28,7 +28,9 @@
     "release:artifact-check": "npm pack --dry-run && npm --prefix packages/sdk pack --dry-run",
     "release:gates": "npm run build:check && npm test -- --runInBand && npm run redteam:check && npm run build:sdk && npm run test:sdk && npm run contracts:check && npm run contracts:test && npm run release:artifact-check",
     "prepare": "husky",
-    "gen:docs": "node scripts/generateToolDocs.mjs"
+    "gen:docs": "node scripts/generateToolDocs.mjs",
+    "verify:supply-chain": "powershell -File scripts/verify-supply-chain.ps1",
+    "verify:supply-chain:bash": "bash scripts/verify-supply-chain.sh"
   },
   "lint-staged": {
     "*.{ts,js,mjs}": "eslint --fix",
