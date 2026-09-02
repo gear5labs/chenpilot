@@ -16,6 +16,7 @@
     "migration:show": "npm run typeorm migration:show -- -d src/config/Datasource.ts",
     "migration:generate": "npm run typeorm migration:generate -- -d src/config/Datasource.ts -p src/migrations/",
     "cleanup:tokens": "ts-node src/scripts/cleanupTokens.ts",
+    "keys:rotate": "ts-node src/scripts/rotateEncryptionKeys.ts",
     "test:webhooks": "jest --runInBand --testPathPattern=webhookIdempotency.integration",
     "redteam": "jest tests/redteam --runInBand --json --outputFile=redteam-report.json",
     "redteam:check": "jest tests/redteam --runInBand",
