@@ -14,6 +14,19 @@ export enum StepStatus {
   COMPLETED = "completed",
   FAILED = "failed",
   AWAITING_APPROVAL = "awaiting_approval",
+  /**
+   * Terminal state set when:
+   *  (a) the parent execution is cancelled and this step has not yet started,
+   *  (b) an upstream step failure causes all downstream dependents to be
+   *      cancelled by the ParallelScheduler, or
+   *  (c) an explicit downstream-cancellation pass touches this step.
+   *
+   * A step that is already RUNNING when cancellation is requested is allowed
+   * to complete the current attempt; the CANCELLED flag on the parent
+   * execution causes the executor to stop before invoking the *next* step's
+   * side effect.
+   */
+  CANCELLED = "cancelled",
 }
 
 @Entity()
@@ -66,6 +79,13 @@ export class DurableStep {
 
   @Column({ type: "timestamp", nullable: true })
   completedAt?: Date;
+
+  /**
+   * Recorded when the step transitions to CANCELLED. Null for all other
+   * terminal and non-terminal states.
+   */
+  @Column({ type: "timestamp", nullable: true })
+  cancelledAt?: Date | null;
 
   @CreateDateColumn()
   createdAt!: Date;

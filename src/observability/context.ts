@@ -28,6 +28,18 @@ export interface ExecutionContext {
   operationName?: string;
   component?: string;
   metadata?: Record<string, unknown>;
+  /**
+   * Workload identity fields — populated by the workload identity middleware
+   * for internal service-to-service calls.  These are propagated into audit
+   * log actor.serviceId so that every event records which internal service
+   * initiated the request.
+   */
+  /** ServiceId of the authenticated internal service caller */
+  workloadServiceId?: string;
+  /** Deployment environment asserted by the workload token */
+  workloadEnvironment?: string;
+  /** Unique jti of the workload token (for correlation across service boundaries) */
+  workloadJti?: string;
 }
 
 export type ObservabilityContext = ExecutionContext;
@@ -164,6 +176,9 @@ export function buildCorrelationHeaders(
     ...(resolved.parentExecutionId
       ? { [PARENT_EXECUTION_ID_HEADER]: resolved.parentExecutionId }
       : {}),
+    ...(resolved.workloadServiceId
+      ? { "x-workload-service": resolved.workloadServiceId }
+      : {}),
   };
 }
 
@@ -215,6 +230,15 @@ export function getLogFields(): Record<string, string> {
   }
   if (context.ip) {
     fields.ip = context.ip;
+  }
+  if (context.workloadServiceId) {
+    fields.workloadServiceId = context.workloadServiceId;
+  }
+  if (context.workloadEnvironment) {
+    fields.workloadEnvironment = context.workloadEnvironment;
+  }
+  if (context.workloadJti) {
+    fields.workloadJti = context.workloadJti;
   }
 
   return fields;

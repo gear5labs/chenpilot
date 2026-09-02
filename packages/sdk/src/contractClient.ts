@@ -1,4 +1,6 @@
 import { SorobanNetwork } from "./types";
+import { throwIfAborted } from "./abort";
+import type { AbortSignalLike } from "./types";
 
 export type ContractFunctionKind = "query" | "simulate" | "execute";
 export type ApprovalCheckpoint =
@@ -30,18 +32,21 @@ export interface ContractCall<Args extends readonly unknown[] = unknown[]> {
 
 export interface QueryRequest<TDecoded = unknown> extends ContractCall {
   decoder?: ResultDecoder<TDecoded>;
+  signal?: AbortSignalLike;
 }
 
 export interface SimulationRequest<TDecoded = unknown> extends ContractCall {
   sourceAccount?: string;
   transactionXdr?: string;
   decoder?: ResultDecoder<TDecoded>;
+  signal?: AbortSignalLike;
 }
 
 export interface ExecuteRequest<TDecoded = unknown> extends ContractCall {
   signedTransactionXdr: string;
   idempotencyKey?: string;
   decoder?: ResultDecoder<TDecoded>;
+  signal?: AbortSignalLike;
 }
 
 export type ResultDecoder<T> = (value: unknown) => T;
@@ -151,9 +156,15 @@ export class ContractClient {
     request: QueryRequest<TDecoded>
   ): Promise<ContractResult<TDecoded>> {
     this.validateCall(request);
-    const raw = await this.rpc("getLedgerEntries", {
-      keys: [this.ledgerEntryKey(request.contractId, request.method, request.args)],
-    });
+    throwIfAborted(request.signal);
+    const raw = await this.rpc(
+      "getLedgerEntries",
+      {
+        keys: [this.ledgerEntryKey(request.contractId, request.method, request.args)],
+      },
+      {},
+      request.signal
+    );
     return this.toContractResult(raw, request.decoder);
   }
 
@@ -161,13 +172,19 @@ export class ContractClient {
     request: SimulationRequest<TDecoded>
   ): Promise<SimulationResult<TDecoded>> {
     this.validateCall(request);
-    const raw = await this.rpc<Record<string, unknown>>("simulateTransaction", {
-      transaction: request.transactionXdr,
-      contractId: request.contractId,
-      method: request.method,
-      args: request.args ?? [],
-      sourceAccount: request.sourceAccount,
-    });
+    throwIfAborted(request.signal);
+    const raw = await this.rpc<Record<string, unknown>>(
+      "simulateTransaction",
+      {
+        transaction: request.transactionXdr,
+        contractId: request.contractId,
+        method: request.method,
+        args: request.args ?? [],
+        sourceAccount: request.sourceAccount,
+      },
+      {},
+      request.signal
+    );
 
     const base = await this.toContractResult(raw, request.decoder);
     const authEntries = extractArray(raw, ["result", "auth"]);
@@ -192,6 +209,7 @@ export class ContractClient {
     request: ExecuteRequest<TDecoded>
   ): Promise<ExecutionResult<TDecoded>> {
     this.validateCall(request);
+    throwIfAborted(request.signal);
     if (!request.signedTransactionXdr) {
       throw new Error("signedTransactionXdr is required for execution");
     }
@@ -204,7 +222,8 @@ export class ContractClient {
     const raw = await this.rpc<Record<string, unknown>>(
       "sendTransaction",
       { xdr: request.signedTransactionXdr },
-      { "Idempotency-Key": idempotencyKey }
+      { "Idempotency-Key": idempotencyKey },
+      request.signal
     );
     const base = await this.toContractResult(raw, request.decoder);
 
@@ -256,12 +275,15 @@ export class ContractClient {
   private async rpc<T>(
     method: string,
     params: unknown,
-    headers: Record<string, string> = {}
+    headers: Record<string, string> = {},
+    signal?: AbortSignalLike
   ): Promise<T> {
+    throwIfAborted(signal);
     const response = await this.fetcher(this.rpcUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      signal: signal as AbortSignal | undefined,
     });
 
     if (!response.ok) {

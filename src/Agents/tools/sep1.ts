@@ -1,7 +1,7 @@
 import { BaseTool } from "./base/BaseTool";
 import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 import logger from "../../config/logger";
-import { createBudget, budgetedFetch, BudgetExhaustedError } from "../../utils/budget";
+import { secureFetch } from "../../Security/egress";
 
 /**
  * SEP-1 Stellar.toml metadata structure
@@ -71,8 +71,6 @@ interface AssetMetadataPayload extends Record<string, unknown> {
  * Tool for retrieving and parsing stellar.toml metadata (SEP-1) to provide token information
  */
 export class Sep1Tool extends BaseTool<AssetMetadataPayload> {
-  private fetch: typeof globalThis.fetch;
-
   metadata: ToolMetadata = {
     name: "sep1_tool",
     description:
@@ -104,28 +102,31 @@ export class Sep1Tool extends BaseTool<AssetMetadataPayload> {
     ],
     category: "metadata",
     version: "1.0.0",
+    // SEP-1 fetches arbitrary user-supplied domains by design, so the
+    // egress manifest allows all public FQDNs over HTTPS. The egress layer
+    // still blocks loopback/link-local/private/metadata/mixed-encoding
+    // addresses, defends against DNS rebinding, and re-validates redirects.
+    egress: {
+      allowedHosts: ["*"],
+      allowedProtocols: ["https:", "http:"],
+      maxConcurrentRequests: 4,
+      budget: { timeLimitMs: 15_000, maxRedirects: 3 },
+    },
   };
 
   /**
-   * Initialize the SEP-1 tool with global fetch
+   * Initialize the SEP-1 tool. Outbound requests route through the egress
+   * layer (loopback/private/metadata/IPv6 denial, DNS rebinding defence,
+   * redirect re-validation).
    */
   constructor() {
     super();
-    this.fetch = globalThis.fetch.bind(globalThis);
   }
 
   private readonly domainPattern =
     /^(?=.{1,253}$)(?!-)(?:[a-z0-9-]{1,63}(?<!-)\.)+[a-z]{2,63}$/i;
   private readonly assetPattern =
     /^[A-Z0-9]{1,12}:[GABCDEF0-9]{10,56}$/i;
-
-  private readonly tomlBudget = createBudget({
-    deadlineMs: 10000,
-    attempts: 2,
-    bytes: 256 * 1024,
-    downstreamCalls: 3,
-    path: "sep1.toml",
-  });
 
   /**
    * Execute a SEP-1 operation
@@ -388,20 +389,28 @@ export class Sep1Tool extends BaseTool<AssetMetadataPayload> {
         ? `https://${domain}/stellar.toml`
         : `https://${domain}/.well-known/stellar.toml`;
 
-      const response = await budgetedFetch(this.tomlBudget, url, {
-        headers: {
-          Accept: "text/plain",
+      const response = await secureFetch(
+        url,
+        {
+          headers: {
+            Accept: "text/plain",
+          },
         },
-      });
+        { egress: this.metadata.egress }
+      );
 
       if (!response.ok) {
         // Try alternative path
         const altUrl = `https://${domain}/stellar.toml`;
-        const altResponse = await budgetedFetch(this.tomlBudget, altUrl, {
-          headers: {
-            Accept: "text/plain",
+        const altResponse = await secureFetch(
+          altUrl,
+          {
+            headers: {
+              Accept: "text/plain",
+            },
           },
-        });
+          { egress: this.metadata.egress }
+        );
 
         if (!altResponse.ok) {
           logger.warn(
@@ -417,12 +426,6 @@ export class Sep1Tool extends BaseTool<AssetMetadataPayload> {
       const text = await response.text();
       return this.parseToml(text);
     } catch (error) {
-      if (error instanceof BudgetExhaustedError) {
-        logger.error(`Budget exhausted fetching stellar.toml from ${domain}:`, {
-          resource: error.resource,
-        });
-        return null;
-      }
       logger.error(`Error fetching stellar.toml from ${domain}:`, error);
       return null;
     }

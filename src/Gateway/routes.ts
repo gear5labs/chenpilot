@@ -9,6 +9,7 @@ import { User } from "../Auth/user.entity";
 import UserService from "../Auth/user.service";
 import { stellarWebhookService } from "./webhook.service";
 import { platformWebhookService } from "./platformWebhook.service";
+import { webhookAuth } from "./middleware/webhookAuthMiddleware";
 import { SponsorshipTransactionBuilder } from "../../packages/sdk/src/sponsorship";
 import logger from "../config/logger";
 import authRoutes from "../Auth/auth.routes";
@@ -18,6 +19,7 @@ import dataExportRoutes from "../services/dataExport.routes";
 import contractMetadataRoutes from "../services/contracts/contractMetadata.routes";
 import horizonProxyRoutes from "./horizonProxy.routes";
 import auditLogRoutes from "../AuditLog/auditLog.routes";
+import rlsAuditRoutes from "../Security/rlsAudit.routes";
 import adminAgentRoutes from "../Agents/admin/adminAgent.routes";
 import governanceRoutes from "../Agents/admin/governance.routes";
 import experimentRoutes from "../Agents/admin/experiment.routes";
@@ -31,6 +33,10 @@ import { getSocketManager } from "./socketManager";
 import { BotSessionService } from "../Bot/botSession.service";
 import { BotSessionType, BotPlatform } from "../Bot/botSession.entity";
 import { operatorReportingService } from "../services/operatorReporting.service";
+import { authenticateToken } from "../Auth/auth.middleware";
+import { requireAdmin, requireOwnerOrElevated } from "./middleware/rbac.middleware";
+import { requireAdminAuth } from "./middleware/adminAuth";
+import { verifyWebhookSignature } from "./middleware/webhookSignature";
 
 const router = Router();
 router.use(helmet());
@@ -63,6 +69,9 @@ router.use("/horizon", horizonProxyRoutes);
 
 // Audit logs
 router.use("/audit", auditLogRoutes);
+
+// RLS bypass audit logs (admin only)
+router.use("/security/rls-audit", rlsAuditRoutes);
 
 // Admin agent routes
 router.use("/admin/agents", adminAgentRoutes);
@@ -387,7 +396,7 @@ router.delete(
 // Public webhook endpoint for Stellar funding notifications
 router.post(
   "/webhook/stellar/funding",
-  verifyWebhookSignature,
+  webhookAuth("stellar"),
   async (req: Request, res: Response) => {
     try {
       const result = await stellarWebhookService.processFundingWebhook(req);
@@ -418,7 +427,7 @@ router.post(
 // Public webhook endpoint for Telegram
 router.post(
   "/webhook/telegram",
-  verifyWebhookSignature,
+  webhookAuth("telegram"),
   async (req: Request, res: Response) => {
     try {
       const result = await platformWebhookService.processTelegramWebhook(req);
@@ -456,7 +465,7 @@ router.post(
 // Public webhook endpoint for Discord
 router.post(
   "/webhook/discord",
-  verifyWebhookSignature,
+  webhookAuth("discord"),
   async (req: Request, res: Response) => {
     try {
       const result = await platformWebhookService.processDiscordWebhook(req);
