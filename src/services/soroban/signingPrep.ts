@@ -11,6 +11,7 @@
 
 import { StellarSdk, NETWORK_PASSPHRASES, SorobanNetwork } from "./sdkAdapter";
 import { AuthRequiredError, SigningError } from "./errors";
+import { SecretBuffer } from "../../utils/secretBuffer";
 import type { SimulationSuccess } from "./sdkAdapter";
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -52,15 +53,21 @@ export function prepareSignedTransaction(
   sim: SimulationSuccess,
   context: SigningContext
 ): AssembledTransaction {
-  const keypair = parseKeypair(context.secretKey);
+  // Wrap the secret key to minimize its lifetime and prevent accidental
+  // exposure through logging, serialization, or error propagation.
+  const secret = SecretBuffer.fromString(context.secretKey, "stellar-secret-key");
+  try {
+    const keypair = parseKeypair(secret);
+    const assembled = assembleWithSimulation(unsignedTx, sim, context.network);
+    assembled.sign(keypair);
 
-  const assembled = assembleWithSimulation(unsignedTx, sim, context.network);
-  assembled.sign(keypair);
-
-  return {
-    signedXdr: assembled.toEnvelope().toXDR("base64"),
-    signerPublicKey: keypair.publicKey(),
-  };
+    return {
+      signedXdr: assembled.toEnvelope().toXDR("base64"),
+      signerPublicKey: keypair.publicKey(),
+    };
+  } finally {
+    secret.destroy();
+  }
 }
 
 /**
@@ -78,10 +85,13 @@ export function assertSigningNotRequired(
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
-function parseKeypair(secretKey: string): StellarSdk.Keypair {
+function parseKeypair(secret: SecretBuffer): StellarSdk.Keypair {
   try {
-    return StellarSdk.Keypair.fromSecret(secretKey);
+    // Keypair.fromSecret requires a plaintext string — this is the narrowest
+    // possible scope for the string conversion.
+    return secret.consumeString((plainKey) => StellarSdk.Keypair.fromSecret(plainKey));
   } catch (err) {
+    // Do not include the secret key value in the error message.
     throw new SigningError(
       `Invalid secret key: ${err instanceof Error ? err.message : String(err)}`,
       err

@@ -577,7 +577,7 @@ export class MultiSignatureCoordinator {
     // For now, return the first signed transaction
     // In a real implementation, this would properly combine signatures
     // based on the specific blockchain's multi-signature format
-    const firstSigned = completedSignatures[0].signedTransaction;
+    const firstSigned = completedSignatures[0].signedTransaction as Record<string, unknown>;
 
     return {
       ...firstSigned,

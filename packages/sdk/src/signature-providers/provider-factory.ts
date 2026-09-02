@@ -266,6 +266,9 @@ export class SignatureProviderFactory {
     } = {}
   ): Promise<SignatureProvider> {
     const registry = this.config.defaultRegistry;
+    if (!registry) {
+      throw new Error("No default registry configured");
+    }
     const candidates = registry.resolveProviders(
       chainId,
       preferences as ProviderSelectionPreferences

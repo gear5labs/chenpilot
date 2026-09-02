@@ -23,7 +23,8 @@ import {
   AdminWorkflowInstance,
   AdminWorkflowApproval,
 } from "../Agents/admin/workflow.entity";
-import { AssetRevocation } from "../Security/assetRevocation.entity";
+import { TransactionLifecycle } from "../transactions/TransactionLifecycle.entity";
+import { LedgerObservation } from "../transactions/LedgerObservation.entity";
 
 const isDev = config.env === "development";
 
@@ -55,7 +56,8 @@ const dbOptions: DataSourceOptions = {
     AdminWorkflowPolicy,
     AdminWorkflowInstance,
     AdminWorkflowApproval,
-    AssetRevocation,
+    TransactionLifecycle,
+    LedgerObservation,
   ],
   migrations: [isDev ? "src/migrations/**/*.ts" : "dist/migrations/**/*.js"],
   subscribers: [],
