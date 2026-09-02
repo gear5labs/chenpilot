@@ -99,7 +99,7 @@ export class PolicyEnforcer {
     }
 
     // 2. Asset trust check — any asset referenced in payload must be trusted
-    const assetTrustResult = this.checkAssetTrust(action, payload);
+    const assetTrustResult = await this.checkAssetTrust(action, payload);
     if (!assetTrustResult.allowed) {
       logger.warn("Policy denied: asset trust", {
         userId,
@@ -218,7 +218,23 @@ export class PolicyEnforcer {
     for (const field of assetFields) {
       const value = payload[field];
       if (typeof value === "string" && value.trim()) {
-        if (!TRUSTED_ASSETS.has(value.toUpperCase())) {
+        const upper = value.toUpperCase();
+
+        // Check revocation feed first — a revoked asset is never trusted
+        try {
+          const revocation = await assetRevocationService.isRevoked(upper, "asset");
+          if (revocation.revoked) {
+            return {
+              allowed: false,
+              reason: `Asset '${value}' in field '${field}' is revoked: ${revocation.reason}.`,
+            };
+          }
+        } catch {
+          // Revocation service unavailable — log and continue
+          logger.warn("Revocation check failed during policy enforcement", { asset: upper, field });
+        }
+
+        if (!WELL_KNOWN_ASSETS.has(upper)) {
           return {
             allowed: false,
             reason: `Asset '${value}' in field '${field}' is not on the trusted asset list.`,
