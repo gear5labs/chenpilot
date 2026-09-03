@@ -12,6 +12,7 @@ import {
   TradePath,
 } from "../../services/multiHopPathFinder";
 import logger from "../../config/logger";
+import { sequenceLeaseService } from "../../services/sequence";
 
 interface MultiHopTradePayload extends Record<string, unknown> {
   /** "evaluate" returns the best path without executing. "execute" submits the trade. */
@@ -247,8 +248,21 @@ export class MultiHopTradeTool extends BaseTool<MultiHopTradePayload> {
 
       const bestPath = result.bestPath;
       const keypair = this.getKeypair(userId);
-      const sourceAccount = await this.horizonServer.loadAccount(
-        keypair.publicKey()
+      const publicKey = keypair.publicKey();
+
+      // Acquire a durable sequence lease to prevent sequence races across instances
+      const leaseResult = await sequenceLeaseService.acquireLease(
+        publicKey,
+        userId,
+        60_000,
+        this.horizonServer
+      );
+      const { lease } = leaseResult;
+
+      // Build account with leased sequence to prevent races across instances
+      const sourceAccount = new StellarSdk.Account(
+        publicKey,
+        leaseResult.sequenceNumber.toString()
       );
 
       // 1% slippage tolerance on destination minimum
@@ -277,7 +291,14 @@ export class MultiHopTradeTool extends BaseTool<MultiHopTradePayload> {
         .build();
 
       tx.sign(keypair);
+
+      // Validate lease fencing token immediately before submission
+      await sequenceLeaseService.validateLease(lease.id, leaseResult.fencingToken);
+
       const submitted = await this.horizonServer.submitTransaction(tx);
+
+      // Mark lease consumed after successful submission
+      await sequenceLeaseService.consumeLease(lease.id, userId, submitted.hash);
 
       logger.info("Multi-hop trade submitted", {
         userId,

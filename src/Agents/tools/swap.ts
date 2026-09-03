@@ -9,6 +9,7 @@ import stellarPriceService from "../../services/stellarPrice.service";
 import { flashSwapRiskAnalyzer } from "../../services/flashSwapRiskAnalyzer";
 import { RedisLockService } from "../../services/lock";
 import { transactionLifecycleService } from "../../transactions/TransactionLifecycle.service";
+import { sequenceLeaseService } from "../../services/sequence";
 
 interface SwapPayload extends Record<string, unknown> {
   from: string;
@@ -329,15 +330,30 @@ export class SwapTool extends BaseTool<SwapPayload> {
       const sourceKeypair = this.getStellarAccount(userId);
       const sourcePublicKey = sourceKeypair.publicKey();
 
+      // Acquire a durable sequence lease to prevent sequence races across instances
+      const leaseResult = await sequenceLeaseService.acquireLease(
+        sourcePublicKey,
+        userId,
+        60_000,
+        this.server
+      );
+      const { lease } = leaseResult;
+
       logger.info("Initiating swap", {
         userId,
         amount: payload.amount,
         from: payload.from,
         to: payload.to,
         riskLevel: riskAnalysis.riskLevel,
+        sequenceNumber: leaseResult.sequenceNumber,
+        fencingToken: leaseResult.fencingToken,
       });
 
-      const sourceAccount = await this.server.loadAccount(sourcePublicKey);
+      // Build account with leased sequence to prevent races across instances
+      const sourceAccount = new StellarSdk.Account(
+        sourcePublicKey,
+        leaseResult.sequenceNumber.toString()
+      );
       const sendAmount = payload.amount.toFixed(7);
       const minDestAmount = (priceQuote.estimatedOutput * 0.99).toFixed(7);
 
@@ -359,8 +375,9 @@ export class SwapTool extends BaseTool<SwapPayload> {
 
       transaction.sign(sourceKeypair);
 
-      // Submission phase
+      // Submission phase — validate lease fencing token immediately before submission
       await transactionLifecycleService.transition(lifecycleId, "submitting");
+      await sequenceLeaseService.validateLease(lease.id, leaseResult.fencingToken);
 
       const result = await this.server.submitTransaction(transaction);
 
