@@ -1,1 +1,10 @@
 .env.local
+redteam-report.json
+
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+logs/
+*.log
+

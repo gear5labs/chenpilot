@@ -10,8 +10,8 @@ import {
 import { agentLLM } from "../../agent";
 import { toolRegistry } from "../../registry/ToolRegistry";
 import { planHashService } from "../planHash";
+import { RiskLevel } from "../../admin/workflow.types";
 import logger from "../../../config/logger";
-// import { RiskLevel } from "../../../Auth/userPreferences.entity";
 
 // Mock dependencies
 jest.mock("../../agent");
@@ -24,7 +24,7 @@ describe("AgentPlanner - Edge Cases and Multi-Agent Flows", () => {
 
   beforeEach(() => {
     planner = new AgentPlanner();
-    jest.clearAllMocks();
+    jest.resetAllMocks();
   });
 
   // ============================================================

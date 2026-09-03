@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, symbol_short};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Vec, symbol_short};
 use contract_failure::{fail, FailureReason};
 
 #[contracttype]
@@ -12,12 +12,14 @@ pub struct ValidationConfig {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Config,
+    TrustedSources,
 }
 
 #[contractclient(name = "IntentMarketValidatorClient")]
 pub trait IntentMarketValidatorTrait {
     fn initialize(env: Env, threshold_bps: u32);
-    fn validate(env: Env, intent_value: i128, market_value: i128) -> bool;
+    fn validate(env: Env, intent_value: i128, market_value: i128, market_source: Address) -> bool;
+    fn register_trusted_source(env: Env, source: Address);
     fn update_config(env: Env, config: ValidationConfig);
     fn get_config(env: Env) -> ValidationConfig;
 }
@@ -49,6 +51,7 @@ pub struct EvtDevAlert {
     pub market_value: i128,
     pub intent_value: i128,
     pub deviation_bps: i128,
+    pub source: Address,
 }
 
 #[contract]
@@ -62,6 +65,7 @@ impl IntentMarketValidatorContract {
         }
         let config = ValidationConfig { threshold_bps };
         env.storage().instance().set(&DataKey::Config, &config);
+        env.storage().instance().set(&DataKey::TrustedSources, &Vec::<Address>::new(&env));
 
         env.events().publish(
             (symbol_short!("intent"), symbol_short!("init")),
@@ -74,8 +78,13 @@ impl IntentMarketValidatorContract {
         );
     }
 
-    pub fn validate(env: Env, intent_value: i128, market_value: i128) -> bool {
+    pub fn validate(env: Env, intent_value: i128, market_value: i128, market_source: Address) -> bool {
         if intent_value <= 0 || market_value <= 0 {
+            fail(&env, FailureReason::InvalidArgument);
+        }
+
+        let trusted_sources: Vec<Address> = env.storage().instance().get(&DataKey::TrustedSources).unwrap_or_else(|| Vec::new(&env));
+        if !trusted_sources.iter().any(|s| s == &market_source) {
             fail(&env, FailureReason::InvalidArgument);
         }
 
@@ -107,12 +116,21 @@ impl IntentMarketValidatorContract {
                     market_value,
                     intent_value,
                     deviation_bps,
+                    source: market_source,
                 },
             );
             fail(&env, FailureReason::PriceDeviationExceedsThreshold);
         }
 
         true
+    }
+
+    pub fn register_trusted_source(env: Env, source: Address) {
+        let mut sources: Vec<Address> = env.storage().instance().get(&DataKey::TrustedSources).unwrap_or_else(|| Vec::new(&env));
+        if !sources.iter().any(|s| s == &source) {
+            sources.push_back(source);
+            env.storage().instance().set(&DataKey::TrustedSources, &sources);
+        }
     }
 
     pub fn update_config(env: Env, config: ValidationConfig) {

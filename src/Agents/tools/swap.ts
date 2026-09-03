@@ -3,6 +3,7 @@ import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import config from "../../config/config";
 import { accountSecretStore } from "../../Auth/accountSecretStore";
+import { SecretBuffer } from "../../utils/secretBuffer";
 import logger from "../../config/logger";
 import stellarPriceService from "../../services/stellarPrice.service";
 import { flashSwapRiskAnalyzer } from "../../services/flashSwapRiskAnalyzer";
@@ -90,7 +91,8 @@ export class SwapTool extends BaseTool<SwapPayload> {
   }
 
   /**
-   * Get a Stellar keypair for the user from stored account data
+   * Get a Stellar keypair for the user from stored account data.
+   * The secret key is wrapped in a SecretBuffer and zeroized after use.
    * @param userId - The user ID
    * @returns Stellar keypair
    * @throws Error if account not found
@@ -103,7 +105,12 @@ export class SwapTool extends BaseTool<SwapPayload> {
       throw new Error(`Stellar account not found for user: ${userId}`);
     }
 
-    return StellarSdk.Keypair.fromSecret(accountData.secretKey);
+    const secret = SecretBuffer.fromString(accountData.secretKey, `swap-key:${userId}`);
+    try {
+      return secret.consumeString((plainKey) => StellarSdk.Keypair.fromSecret(plainKey));
+    } finally {
+      secret.destroy();
+    }
   }
 
   /**
@@ -374,17 +381,26 @@ export class SwapTool extends BaseTool<SwapPayload> {
 
       const result = await this.server.submitTransaction(transaction);
 
-      // Mark lease consumed after successful submission
-      await sequenceLeaseService.consumeLease(lease.id, userId, result.hash);
-
-      // Confirmed
+      // Submitted - start reorg-aware finality tracking instead of immediately confirming
       await transactionLifecycleService.transition(lifecycleId, "submitted", {
         correlationId: result.hash,
         metadata: { txHash: result.hash, ledger: result.ledger },
       });
-      await transactionLifecycleService.transition(lifecycleId, "confirmed", {
-        metadata: { successful: result.successful },
-      });
+
+      // Start reorg-aware finality tracking (does NOT immediately trigger confirmation events)
+      const { getFinalizationManager } = await import("../services/finality/FinalizationManager");
+      const finalizationManager = getFinalizationManager();
+      await finalizationManager.startTracking(
+        lifecycleId,
+        result.hash,
+        result.ledger,
+        result.ledger_attr?.hash || "",
+        config.stellar.horizonUrl
+      );
+
+      // NOTE: Balance updates and confirmation events will be triggered when finality is declared
+      // (finality_status = FINAL), not here. The finalizationManager will emit finality:declared
+      // event which consuming services should listen to.
 
       return this.createSuccessResult("swap", {
         from: payload.from,

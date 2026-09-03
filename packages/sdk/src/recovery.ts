@@ -10,16 +10,14 @@ import {
   RecoveryInstructions,
   FailureAnalysis,
 } from "./types";
+import type { AbortSignalLike } from "./types";
+import { abortableSleep, isAbortError } from "./abort";
 import {
   SignatureProviderErrorRecovery,
   signatureProviderErrorRecovery,
   ErrorRecoveryContext,
   ErrorRecoveryResult,
 } from "./signature-providers";
-
-function delay(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
-}
 
 /**
  * Engine responsible for handling recovery and cleanup of cross-chain operations.
@@ -31,6 +29,7 @@ export class RecoveryEngine {
   private retryHandler?: RetryHandler;
   private refundHandler?: RefundHandler;
   private errorRecovery: SignatureProviderErrorRecovery;
+  private defaultSignal?: AbortSignalLike;
 
   constructor(options?: RecoveryEngineOptions) {
     this.maxRetries = options?.maxRetries ?? 3;
@@ -38,6 +37,7 @@ export class RecoveryEngine {
     this.retryHandler = options?.retryHandler;
     this.refundHandler = options?.refundHandler;
     this.errorRecovery = signatureProviderErrorRecovery;
+    this.defaultSignal = options?.signal;
   }
 
   /**
@@ -132,9 +132,14 @@ export class RecoveryEngine {
    * or refunding the locked assets based on configured handlers.
    *
    * @param context - The context of the failed operation.
+   * @param signal - Optional signal to cancel the cleanup. Retry backoff
+   *                 delays are interrupted and the pending abort rejects.
    * @returns A promise resolving to the result of the recovery attempt.
    */
-  async cleanup(context: RecoveryContext): Promise<RecoveryResult> {
+  async cleanup(
+    context: RecoveryContext,
+    signal?: AbortSignalLike
+  ): Promise<RecoveryResult> {
     // 1) Attempt retries of the mint step if a retry handler is provided
     if (this.retryHandler?.retryMint) {
       for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
@@ -149,10 +154,16 @@ export class RecoveryEngine {
             } as RecoveryResult;
           }
           // if handler returned failure, wait and retry
-        } catch {
-          // swallow and retry
+        } catch (error: unknown) {
+          // Cancellation must propagate unmasked, not be swallowed.
+          if (isAbortError(error)) {
+            throw error;
+          }
+          // Otherwise swallow and retry
         }
-        if (attempt < this.maxRetries) await delay(this.retryDelayMs);
+        if (attempt < this.maxRetries) {
+          await abortableSleep(this.retryDelayMs, signal ?? this.defaultSignal);
+        }
       }
     }
 

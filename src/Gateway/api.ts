@@ -16,6 +16,7 @@ import {
 } from "../Security";
 
 import { observabilityMiddleware, updateObservabilityContext } from "../observability";
+import { setTenantContext, setOptionalTenantContext } from "../Auth/tenantContext.middleware";
 
 import { authenticate } from "../Auth/auth";
 import UserService from "../Auth/user.service";
@@ -24,6 +25,7 @@ import { intentAgent } from "../Agents/agents/intentagent";
 import { ErrorHandler } from "./middleware/errorHandler";
 import { UnauthorizedError, ValidationError, BadError } from "../utils/error";
 import { healthService } from "../services/healthService";
+import { rawBodyCapture } from "./middleware/rawBodyCapture.middleware";
 
 declare module "express" {
   interface Request {
@@ -53,6 +55,9 @@ app.use(
   })
 );
 
+// CRITICAL: Raw body capture MUST come before express.json()
+// This preserves original request bytes for webhook signature verification
+app.use(rawBodyCapture);
 app.use(express.json());
 app.use(observabilityMiddleware);
 app.use(requestLogger);

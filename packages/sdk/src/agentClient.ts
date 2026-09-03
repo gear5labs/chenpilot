@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "crypto";
-import { 
-  AgentResponse, 
-  ChainId, 
+import {
+  AgentResponse,
+  ChainId,
   CrossChainSwapRequest,
   RequestOptions,
   SimulationRequest,
@@ -12,6 +12,8 @@ import {
   VaultOperationResult,
   AbortSignalLike,
 } from "./types";
+import { abortableSleep, combineSignals, isAbortError } from "./abort";
+import { ErrorCategory, SdkError } from "./errors";
 
 export interface IdempotencyKeyInput {
   namespace: string;
@@ -25,11 +27,6 @@ export interface AgentClientOptions {
   defaultMaxRetries?: number;
   defaultRetryDelayMs?: number;
   fetchFn?: FetchLike;
-}
-
-interface AbortControllerLike {
-  signal: AbortSignalLike;
-  abort: () => void;
 }
 
 export interface AgentQueryRequest {
@@ -48,7 +45,7 @@ export interface AgentQueryResult<T = AgentResponse> {
   result: T;
 }
 
-export class AgentRequestError extends Error {
+export class AgentRequestError extends SdkError {
   readonly idempotencyKey: string;
   readonly attempts: number;
   readonly statusCode?: number;
@@ -108,8 +105,50 @@ function categorizeHttpStatus(status: number): ErrorCategory {
   return ErrorCategory.TRANSPORT;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+interface CategorizedError {
+  category: ErrorCategory;
+  code: string;
+  message: string;
+  recoverable: boolean;
+}
+
+/**
+ * Parses a non-2xx response body into a structured `CategorizedError`.
+ * Tolerates JSON and plain-text bodies, falling back to the HTTP status.
+ */
+function parseCategorizedError(body: string, status: number): CategorizedError {
+  let message = body;
+  let category: ErrorCategory = categorizeHttpStatus(status);
+  let code = `HTTP_${status}`;
+
+  try {
+    const parsed = JSON.parse(body) as {
+      message?: unknown;
+      category?: unknown;
+      code?: unknown;
+    };
+    if (typeof parsed.message === "string" && parsed.message.trim() !== "") {
+      message = parsed.message;
+    }
+    if (typeof parsed.category === "string") {
+      const candidate = parsed.category.toUpperCase() as ErrorCategory;
+      if (Object.values<string>(ErrorCategory).includes(candidate)) {
+        category = candidate;
+      }
+    }
+    if (typeof parsed.code === "string") {
+      code = parsed.code;
+    }
+  } catch {
+    // Not JSON — keep the raw body as the message.
+  }
+
+  return {
+    category,
+    code,
+    message,
+    recoverable: RETRIABLE_STATUS_CODES.has(status),
+  };
 }
 
 function canonicalize(value: unknown): unknown {
@@ -154,37 +193,13 @@ export function createBtcToStellarSwapIdempotencyKey(
     clientRequestId,
   });
 }
-
-function toSwapQuery(request: CrossChainSwapRequest): string {
+  function toSwapQuery(request: CrossChainSwapRequest): string {
   return [
     `Swap ${request.amount} ${request.fromToken}`,
     `from ${request.fromChain}`,
     `to ${request.toToken} on ${request.toChain}`,
     `for destination ${request.destinationAddress}`,
   ].join(" ");
-}
-
-function createTimedSignal(
-  timeoutMs: number,
-  externalSignal?: AbortSignalLike
-) {
-  const controller = new AbortController() as unknown as AbortControllerLike;
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  if (externalSignal) {
-    if (externalSignal.aborted) {
-      controller.abort();
-    } else {
-      externalSignal.addEventListener?.("abort", () => controller.abort(), {
-        once: true,
-      });
-    }
-  }
-
-  return {
-    signal: controller.signal,
-    clear: () => clearTimeout(timeoutId),
-  };
 }
 
 export class AgentClient {
@@ -228,7 +243,7 @@ export class AgentClient {
 
     let attempts = 0;
     let lastCategorizedError: CategorizedError = {
-      category: "TRANSPORT",
+      category: ErrorCategory.TRANSPORT,
       code: "UNKNOWN",
       message: "Request failed",
       recoverable: false,
@@ -237,7 +252,7 @@ export class AgentClient {
 
     while (attempts < maxRetries) {
       attempts += 1;
-      const timedSignal = createTimedSignal(timeoutMs, request.signal);
+      const timed = combineSignals(timeoutMs, request.signal);
 
       try {
         const response = await this.fetchFn(`${this.baseUrl}/query`, {
@@ -250,7 +265,7 @@ export class AgentClient {
             userId: request.userId,
             query: request.query,
           }),
-          signal: timedSignal.signal,
+          signal: timed.signal as AbortSignalLike,
         });
 
         if (!response.ok) {
@@ -270,7 +285,10 @@ export class AgentClient {
             );
           }
 
-          await sleep(retryDelayMs * attempts);
+          await abortableSleep(
+            retryDelayMs * attempts,
+            timed.signal as AbortSignalLike
+          );
           continue;
         }
 
@@ -285,26 +303,25 @@ export class AgentClient {
           throw error;
         }
 
-        const isAbort =
-          error instanceof Error &&
-          (error.name === "AbortError" || error.message.includes("aborted"));
+        // Caller-initiated cancellation (or a timeout) must propagate as an
+        // abort error, never be wrapped or retried.
+        if (isAbortError(error)) {
+          throw error;
+        }
+
         const isNetwork =
           error instanceof TypeError ||
           (error instanceof Error &&
             error.message.toLowerCase().includes("network"));
 
         lastCategorizedError = {
-          category: isAbort
-            ? "TRANSPORT"
-            : isNetwork
-              ? "TRANSPORT"
-              : "UNKNOWN",
-          code: isAbort ? "REQUEST_ABORTED" : isNetwork ? "NETWORK_ERROR" : "UNKNOWN",
+          category: isNetwork ? ErrorCategory.TRANSPORT : ErrorCategory.UNKNOWN,
+          code: isNetwork ? "NETWORK_ERROR" : "UNKNOWN",
           message: error instanceof Error ? error.message : String(error),
-          recoverable: isNetwork || isAbort,
+          recoverable: isNetwork,
         };
 
-        if (!(isAbort || isNetwork) || attempts >= maxRetries) {
+        if (!isNetwork || attempts >= maxRetries) {
           throw new AgentRequestError(
             `Agent query failed: ${lastCategorizedError.message}`,
             idempotencyKey,
@@ -313,9 +330,12 @@ export class AgentClient {
           );
         }
 
-        await sleep(retryDelayMs * attempts);
+        await abortableSleep(
+          retryDelayMs * attempts,
+          timed.signal as AbortSignalLike
+        );
       } finally {
-        timedSignal.clear();
+        timed.cleanup();
       }
     }
 

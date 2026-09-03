@@ -10,6 +10,16 @@ export enum SensitiveActionType {
   UPDATE_IP_BLACKLIST = "update_ip_blacklist",
   MODIFY_RATE_LIMITS = "modify_rate_limits",
   UPDATE_ADMIN_ALLOWED_IPS = "update_admin_allowed_ips",
+  /**
+   * Operator intervention: compensate a completed execution step with an
+   * on-chain compensating transaction.  HIGH-RISK: requires 2 approvals.
+   */
+  INTERVENTION_COMPENSATE = "intervention_compensate",
+  /**
+   * Operator intervention: freeze a running/failed execution for investigation.
+   * HIGH-RISK: requires 2 approvals.
+   */
+  INTERVENTION_QUARANTINE = "intervention_quarantine",
 }
 
 export enum WorkflowStatus {

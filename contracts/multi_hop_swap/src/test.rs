@@ -5,6 +5,16 @@ extern crate std;
 use super::*;
 use soroban_sdk::{testutils::Address as _, vec, Env, Address, contract, contractimpl, token::{Client as TokenClient, StellarAssetClient}};
 
+// Trust assumptions for privileged cross-contract calls:
+// - `MultiHopSwap::swap` is always invoked with an explicit `caller` address.
+//   That address MUST have authorized *this exact invocation* (contract, function,
+//   hop arguments, and nonce where applicable) before any token movement happens.
+// - Each hop's `pool` is a trusted external contract for the corresponding
+//   token pair; it is expected to transfer `token_out` to `caller` after receiving `token_in`.
+// - No intermediary contract may reuse a caller's authorization for `swap` unless the
+//   caller has separately authorized the nested `MultiHopSwap` invocation with identical
+//   arguments.
+
 // Mock pool contract for testing
 #[contract]
 pub struct MockPool;
@@ -26,6 +36,47 @@ impl MockPool {
         }
 
         // Transfer tokens to recipient from pool
+        TokenClient::new(&env, &token_out).transfer(&env.current_contract_address(), &to, &amount_out);
+
+        amount_out
+    }
+}
+
+// Adversarial intermediary contract used to prove that a nested invocation cannot
+// reuse the caller's authorization for the outer call.
+#[contract]
+pub struct BadIntermediary;
+
+#[contractimpl]
+impl BadIntermediary {
+    pub fn invoke_swap(env: Env, multi_hop: Address, caller: Address, hops: Vec<Hop>) {
+        MultiHopSwapClient::new(&env, &multi_hop).swap(&caller, &hops);
+    }
+}
+
+// Malicious pool that attempts to reenter MultiHopSwap inside a swap.
+#[contract]
+pub struct ReentrantPool;
+
+#[contractimpl]
+impl ReentrantPool {
+    pub fn initialize(env: Env, multi_hop: Address, bad_hops: Vec<Hop>) {
+        env.storage().instance().set(&symbol_short!("multi_hop"), &multi_hop);
+        env.storage().instance().set(&symbol_short!("bad_hops"), &bad_hops);
+    }
+
+    pub fn swap(env: Env, to: Address, _token_in: Address, token_out: Address, amount_in: i128, min_amount_out: i128) -> i128 {
+        let amount_out = amount_in; // 1:1
+
+        if amount_out < min_amount_out {
+            panic!("slippage exceeded");
+        }
+
+        // Attempt to reenter MultiHopSwap with the same caller but different hop arguments.
+        let multi_hop: Address = env.storage().instance().get(&symbol_short!("multi_hop")).unwrap();
+        let bad_hops: Vec<Hop> = env.storage().instance().get(&symbol_short!("bad_hops")).unwrap();
+        MultiHopSwapClient::new(&env, &multi_hop).swap(&to, &bad_hops);
+
         TokenClient::new(&env, &token_out).transfer(&env.current_contract_address(), &to, &amount_out);
 
         amount_out
@@ -180,4 +231,81 @@ fn test_slippage_guard() {
         min_amount_out: 999, // Too high
     }];
     multi_hop_client.swap(&caller, &hops);
+}
+
+#[test]
+#[should_panic]
+fn test_nested_invocation_requires_direct_authorization() {
+    let env = Env::default();
+    // No mock_all_auths() -- the caller has not authorized this nested swap.
+
+    let token_admin = Address::generate(&env);
+    let token_a = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
+    let token_b = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
+
+    let pool_id = env.register(MockPool, ());
+    let pool_client = MockPoolClient::new(&env, &pool_id);
+    pool_client.initialize(&1, &1);
+
+    let multi_hop_id = env.register(MultiHopSwap, ());
+    let bad_id = env.register(BadIntermediary, ());
+    let bad_client = BadIntermediaryClient::new(&env, &bad_id);
+
+    let caller = Address::generate(&env);
+    // No tokens minted and no auth provided: the nested `swap` must not succeed.
+
+    let hops = vec![&env, Hop {
+        pool: pool_id,
+        token_in: token_a,
+        token_out: token_b,
+        amount_in: 100,
+        min_amount_out: 1,
+    }];
+
+    bad_client.invoke_swap(&multi_hop_id, &caller, &hops);
+}
+
+#[test]
+#[should_panic]
+fn test_reentrant_swap_is_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let token_a = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
+    let token_b = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
+
+    // A good pool that the reentrant attempt will try to use.
+    let good_pool_id = env.register(MockPool, ());
+    let good_pool_client = MockPoolClient::new(&env, &good_pool_id);
+    good_pool_client.initialize(&1, &1);
+    StellarAssetClient::new(&env, &token_b).mint(&good_pool_id, &1000);
+
+    let multi_hop_id = env.register(MultiHopSwap, ());
+
+    // Malicious pool that reenters MultiHopSwap during swap.
+    let reentrant_pool_id = env.register(ReentrantPool, ());
+    let reentrant_pool_client = ReentrantPoolClient::new(&env, &reentrant_pool_id);
+    let bad_hops = vec![&env, Hop {
+        pool: good_pool_id,
+        token_in: token_a.clone(),
+        token_out: token_b.clone(),
+        amount_in: 1,
+        min_amount_out: 1,
+    }];
+    reentrant_pool_client.initialize(&multi_hop_id, &bad_hops);
+    StellarAssetClient::new(&env, &token_b).mint(&reentrant_pool_id, &1000);
+
+    let caller = Address::generate(&env);
+    StellarAssetClient::new(&env, &token_a).mint(&caller, &100);
+
+    let hops = vec![&env, Hop {
+        pool: reentrant_pool_id,
+        token_in: token_a.clone(),
+        token_out: token_b.clone(),
+        amount_in: 10,
+        min_amount_out: 1,
+    }];
+
+    MultiHopSwapClient::new(&env, &multi_hop_id).swap(&caller, &hops);
 }
