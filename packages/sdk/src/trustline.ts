@@ -249,8 +249,8 @@ export class TrustlineWorkflowBuilder {
     this.config = {
       horizonUrl: config.horizonUrl || "https://horizon.stellar.org",
       networkPassphrase: config.networkPassphrase || StellarSdk.Networks.PUBLIC,
-      sourceSecret: config.sourceSecret,
-      source: config.source,
+      sourceSecret: config.sourceSecret ?? "",
+      source: config.source ?? "",
     };
   }
 

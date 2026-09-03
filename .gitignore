@@ -1,5 +1,10 @@
+node_modules
+packages/*/node_modules
+dist
+.env
 .env.local
 redteam-report.json
+src/Auth/accounts.json
 
 # Dependencies and build output
 node_modules/
@@ -7,4 +12,21 @@ dist/
 coverage/
 logs/
 *.log
+compile_error.log
+
+# Agent/tooling artifacts
+.agent/
+.agents/
+.asset-cache/
+packages/*/.asset-cache/
+
+# Scratch/working files
+issue.md
+COMMIT.md
+fix.md
+
+# Compiled targets
+contracts/target
+target
+.DS_Store
 
