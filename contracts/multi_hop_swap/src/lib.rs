@@ -165,3 +165,5 @@ impl MultiHopSwap {
 }
 
 mod test;
+#[cfg(test)]
+mod test_diff_fuzz;

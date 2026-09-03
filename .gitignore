@@ -7,4 +7,6 @@ dist/
 coverage/
 logs/
 *.log
+target/
+contracts/target/
 

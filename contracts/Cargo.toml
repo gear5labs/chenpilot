@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "diff_fuzz_engine",
     "contract_failure",
     "pause_state",
     "btc_relay",
