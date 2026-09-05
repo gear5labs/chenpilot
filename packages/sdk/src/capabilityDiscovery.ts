@@ -22,6 +22,9 @@
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+import { combineSignals, isAbortError, throwIfAborted } from "./abort";
+import type { AbortSignalLike } from "./types";
+
 /** Versions of backend contracts/components. */
 export interface ContractVersions {
   /** Stellar protocol version (e.g. 21). */
@@ -117,6 +120,8 @@ export interface CapabilityDiscoveryConfig {
   cacheTtlMs?: number;
   /** Request timeout in ms. Default: 10 000 ms. */
   timeout?: number;
+  /** Optional external signal to cancel capability discovery requests. */
+  signal?: AbortSignalLike;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -159,7 +164,9 @@ function semverSatisfies(required: string, available: string): boolean {
  * `cacheTtlMs` milliseconds to avoid hammering the RPC on every call.
  */
 export class CapabilityDiscovery {
-  private readonly config: Required<CapabilityDiscoveryConfig>;
+  private readonly config: Required<Omit<CapabilityDiscoveryConfig, "signal">> & {
+    signal?: AbortSignalLike;
+  };
   private cache: BackendCapabilities | null = null;
   private cacheTime = 0;
 
@@ -170,6 +177,7 @@ export class CapabilityDiscovery {
       rpcUrl: config.rpcUrl ?? RPC_URLS[config.network] ?? RPC_URLS["testnet"],
       cacheTtlMs: config.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS,
       timeout: config.timeout ?? DEFAULT_TIMEOUT_MS,
+      signal: config.signal,
     };
   }
 
@@ -181,20 +189,35 @@ export class CapabilityDiscovery {
    *   2. Soroban RPC getLatestLedger — confirms Soroban reachability.
    *
    * Falls back gracefully: if Soroban is unreachable, sorobanEnabled = false.
+   * Cancellation is never masked — an aborted fetch rejects with `AbortError`
+   * instead of being reported as a capability gap.
+   *
+   * @param signal - Optional signal to cancel the discovery requests.
    */
-  async getCapabilities(): Promise<BackendCapabilities> {
+  async getCapabilities(
+    signal?: AbortSignalLike
+  ): Promise<BackendCapabilities> {
     if (this.cache && Date.now() - this.cacheTime < this.config.cacheTtlMs) {
       return this.cache;
     }
 
+    throwIfAborted(signal ?? this.config.signal);
+
     const [horizonInfo, rpcInfo] = await Promise.allSettled([
-      this._fetchHorizonRoot(),
-      this._fetchRpcLedger(),
+      this._fetchHorizonRoot(signal ?? this.config.signal),
+      this._fetchRpcLedger(signal ?? this.config.signal),
     ]);
 
-    const protocol = horizonInfo.status === "fulfilled"
-      ? (horizonInfo.value.core_supported_protocol_version ?? 0)
-      : 0;
+    for (const result of [horizonInfo, rpcInfo]) {
+      if (result.status === "rejected" && isAbortError(result.reason)) {
+        throw result.reason;
+      }
+    }
+
+    const protocol =
+      horizonInfo.status === "fulfilled"
+        ? Number(horizonInfo.value.core_supported_protocol_version ?? 0)
+        : 0;
 
     const sorobanEnabled = rpcInfo.status === "fulfilled";
 
@@ -242,8 +265,11 @@ export class CapabilityDiscovery {
    * if (!result.compatible) throw new Error(result.reason);
    * ```
    */
-  async negotiate(req: NegotiationRequest): Promise<NegotiationResult> {
-    const caps = await this.getCapabilities();
+  async negotiate(
+    req: NegotiationRequest,
+    signal?: AbortSignalLike
+  ): Promise<NegotiationResult> {
+    const caps = await this.getCapabilities(signal);
     const reasons: string[] = [];
 
     if (req.minProtocol !== undefined && caps.versions.protocol < req.minProtocol) {
@@ -279,23 +305,37 @@ export class CapabilityDiscovery {
 
   // ─── Private helpers ───────────────────────────────────────────────────────
 
-  private async _fetchHorizonRoot(): Promise<Record<string, unknown>> {
-    const signal = AbortSignal.timeout(this.config.timeout);
-    const res = await fetch(this.config.horizonUrl, { signal });
-    if (!res.ok) throw new Error(`Horizon root ${res.status}`);
-    return res.json() as Promise<Record<string, unknown>>;
+  private async _fetchHorizonRoot(
+    signal?: AbortSignalLike
+  ): Promise<Record<string, unknown>> {
+    const combined = combineSignals(this.config.timeout, signal);
+    try {
+      throwIfAborted(combined.signal);
+      const res = await fetch(this.config.horizonUrl, {
+        signal: combined.signal as AbortSignal | undefined,
+      });
+      if (!res.ok) throw new Error(`Horizon root ${res.status}`);
+      return (await res.json()) as Record<string, unknown>;
+    } finally {
+      combined.cleanup();
+    }
   }
 
-  private async _fetchRpcLedger(): Promise<unknown> {
-    const signal = AbortSignal.timeout(this.config.timeout);
-    const res = await fetch(this.config.rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getLatestLedger", params: [] }),
-      signal,
-    });
-    if (!res.ok) throw new Error(`RPC ${res.status}`);
-    return res.json();
+  private async _fetchRpcLedger(signal?: AbortSignalLike): Promise<unknown> {
+    const combined = combineSignals(this.config.timeout, signal);
+    try {
+      throwIfAborted(combined.signal);
+      const res = await fetch(this.config.rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getLatestLedger", params: [] }),
+        signal: combined.signal as AbortSignal | undefined,
+      });
+      if (!res.ok) throw new Error(`RPC ${res.status}`);
+      return res.json();
+    } finally {
+      combined.cleanup();
+    }
   }
 }
 

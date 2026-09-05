@@ -11,6 +11,11 @@ import logger from "../../config/logger";
 import { UserRole } from "../../Auth/roles";
 import { AppDataSource } from "../../config/Datasource";
 import { User } from "../../Auth/user.entity";
+import { CapabilityValidator } from "../capability/CapabilityValidator";
+import {
+  CapabilityGrant,
+  CapabilityValidationContext,
+} from "../capability/types";
 
 export class ToolRegistry {
   // name -> version -> Entry
@@ -171,14 +176,26 @@ export class ToolRegistry {
   }
 
   /**
-   * Execute a tool with governance checks
+   * Execute a tool with governance and capability checks
    */
   async executeTool(
     toolName: string,
     payload: ToolPayload,
     userId: string,
-    timeoutMs?: number
+    timeoutMsOrOptions?:
+      | number
+      | {
+          timeoutMs?: number;
+          grant?: CapabilityGrant | string;
+          context?: Partial<CapabilityValidationContext>;
+          requireGrant?: boolean;
+        }
   ): Promise<ToolResult> {
+    const options =
+      typeof timeoutMsOrOptions === "number"
+        ? { timeoutMs: timeoutMsOrOptions }
+        : timeoutMsOrOptions || {};
+
     let actualToolName = toolName;
     let version: string | undefined;
 
@@ -218,6 +235,18 @@ export class ToolRegistry {
     // Governance: Authorization check
     await this.authorizeTool(tool, userId);
 
+    // Capability Attenuation Check: Validate and consume grant before tool side-effects
+    if (options.grant || options.requireGrant) {
+      await CapabilityValidator.validateToolCall(
+        actualToolName,
+        payload,
+        userId,
+        options.grant,
+        options.context,
+        { requireGrant: options.requireGrant }
+      );
+    }
+
     // Validate payload
     if (tool.validate) {
       const validation = tool.validate(payload);
@@ -228,7 +257,7 @@ export class ToolRegistry {
       }
     }
 
-    const timeout = timeoutMs || config.agent.timeouts.toolExecution;
+    const timeout = options.timeoutMs || config.agent.timeouts.toolExecution;
     logger.info("Governed tool execution starting", {
       toolName: actualToolName,
       version: entry.version,

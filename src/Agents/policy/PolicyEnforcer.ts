@@ -1,12 +1,21 @@
 import { toolRegistry } from "../registry/ToolRegistry";
 import { userPreferencesService } from "../../Auth/userPreferences.service";
 import { riskEngine, RiskEngine } from "../risk/RiskEngine";
+import { capabilityManager } from "../capability/CapabilityManager";
+import { CapabilityGrant } from "../capability/types";
 import logger from "../../config/logger";
 
 export interface PolicyContext {
   userId: string;
   action: string;
   payload: Record<string, unknown>;
+  /** Optional capability grant to enforce */
+  grant?: CapabilityGrant | string;
+  planId?: string;
+  subPlanId?: string;
+  stepNumber?: number;
+  targetAgent?: string;
+  network?: string;
   /** Optional pre-fetched market data — passed through to RiskEngine */
   marketData?: {
     liquidityDepth?: number;
@@ -25,10 +34,23 @@ export interface PolicyResult {
 }
 
 // Assets considered trusted (well-known, liquid)
-const TRUSTED_ASSETS = new Set(["XLM", "USDC", "BTC", "ETH", "STRK"]);
+const TRUSTED_ASSETS = new Set([
+  "XLM",
+  "USDC",
+  "BTC",
+  "ETH",
+  "STRK",
+  "DAI",
+  "USDT",
+]);
 
 // Tools that are always considered high-risk and require explicit approval
-const HIGH_RISK_TOOLS = new Set(["swap_tool", "wallet_tool", "soroban_invoke", "strategyRegistry"]);
+const HIGH_RISK_TOOLS = new Set([
+  "swap_tool",
+  "wallet_tool",
+  "soroban_invoke",
+  "strategyRegistry",
+]);
 
 export class PolicyEnforcer {
   /**
@@ -38,22 +60,59 @@ export class PolicyEnforcer {
   async enforce(ctx: PolicyContext): Promise<PolicyResult> {
     const { userId, action, payload } = ctx;
 
+    // 0. Capability grant check if grant is attached
+    if (ctx.grant) {
+      const grantValidation = capabilityManager.validateGrant(ctx.grant, {
+        action,
+        payload,
+        userId,
+        planId: ctx.planId,
+        subPlanId: ctx.subPlanId,
+        stepNumber: ctx.stepNumber,
+        targetAgent: ctx.targetAgent,
+        network: ctx.network,
+      });
+
+      if (!grantValidation.valid) {
+        logger.warn("Policy denied: capability grant violation", {
+          userId,
+          action,
+          reason: grantValidation.error,
+          errorCode: grantValidation.errorCode,
+        });
+        return {
+          allowed: false,
+          reason: `Capability grant violation (${grantValidation.errorCode}): ${grantValidation.error}`,
+        };
+      }
+    }
+
     // 1. Tool capability check — tool must exist and be enabled
     const toolCapabilityResult = this.checkToolCapability(action);
     if (!toolCapabilityResult.allowed) {
-      logger.warn("Policy denied: tool capability", { userId, action, reason: toolCapabilityResult.reason });
+      logger.warn("Policy denied: tool capability", {
+        userId,
+        action,
+        reason: toolCapabilityResult.reason,
+      });
       return toolCapabilityResult;
     }
 
     // 2. Asset trust check — any asset referenced in payload must be trusted
     const assetTrustResult = this.checkAssetTrust(action, payload);
     if (!assetTrustResult.allowed) {
-      logger.warn("Policy denied: asset trust", { userId, action, reason: assetTrustResult.reason });
+      logger.warn("Policy denied: asset trust", {
+        userId,
+        action,
+        reason: assetTrustResult.reason,
+      });
       return assetTrustResult;
     }
 
     // 3. Risk engine assessment — replaces static RISK_TOOL_MAP
-    let userPreferences: Parameters<typeof riskEngine.assess>[0]["userPreferences"];
+    let userPreferences: Parameters<
+      typeof riskEngine.assess
+    >[0]["userPreferences"];
     try {
       const prefs = await userPreferencesService.getPreferencesForAgent(userId);
       userPreferences = {
@@ -76,9 +135,17 @@ export class PolicyEnforcer {
     // 4. Risk threshold check — block if score exceeds user tolerance
     const riskTier = RiskEngine.toPreferenceTier(assessment.tier);
     try {
-      const toleranceCheck = await userPreferencesService.checkRiskTolerance(userId, riskTier);
+      const toleranceCheck = await userPreferencesService.checkRiskTolerance(
+        userId,
+        riskTier
+      );
       if (!toleranceCheck.allowed) {
-        logger.warn("Policy denied: risk threshold", { userId, action, score: assessment.score, tier: assessment.tier });
+        logger.warn("Policy denied: risk threshold", {
+          userId,
+          action,
+          score: assessment.score,
+          tier: assessment.tier,
+        });
         return {
           allowed: false,
           reason: toleranceCheck.reason,
@@ -98,14 +165,28 @@ export class PolicyEnforcer {
 
     // 5. Approval check — high/critical risk requires explicit approval unless auto-approved
     if (assessment.requiresApproval) {
-      const approvalResult = await this.checkApprovalRequirement(userId, action, payload, assessment);
+      const approvalResult = await this.checkApprovalRequirement(
+        userId,
+        action,
+        payload,
+        assessment
+      );
       if (!approvalResult.allowed) {
-        logger.warn("Policy denied: approval required", { userId, action, score: assessment.score });
+        logger.warn("Policy denied: approval required", {
+          userId,
+          action,
+          score: assessment.score,
+        });
         return { ...approvalResult, riskAssessment: assessment };
       }
     }
 
-    logger.debug("Policy allowed", { userId, action, score: assessment.score, tier: assessment.tier });
+    logger.debug("Policy allowed", {
+      userId,
+      action,
+      score: assessment.score,
+      tier: assessment.tier,
+    });
     return { allowed: true, riskAssessment: assessment };
   }
 
@@ -120,10 +201,20 @@ export class PolicyEnforcer {
     return { allowed: true };
   }
 
-  private checkAssetTrust(action: string, payload: Record<string, unknown>): PolicyResult {
+  private checkAssetTrust(
+    action: string,
+    payload: Record<string, unknown>
+  ): PolicyResult {
     if (!HIGH_RISK_TOOLS.has(action)) return { allowed: true };
 
-    const assetFields = ["from", "to", "asset", "token", "fromToken", "toToken"];
+    const assetFields = [
+      "from",
+      "to",
+      "asset",
+      "token",
+      "fromToken",
+      "toToken",
+    ];
     for (const field of assetFields) {
       const value = payload[field];
       if (typeof value === "string" && value.trim()) {
@@ -167,7 +258,10 @@ export class PolicyEnforcer {
     for (const field of ["amount", "value", "quantity"]) {
       const val = payload[field];
       if (typeof val === "number" && isFinite(val)) return val;
-      if (typeof val === "string") { const n = parseFloat(val); if (isFinite(n)) return n; }
+      if (typeof val === "string") {
+        const n = parseFloat(val);
+        if (isFinite(n)) return n;
+      }
     }
     return null;
   }

@@ -60,6 +60,9 @@ jobs:
       - name: Backend unit tests
         run: npm test -- --runInBand
 
+      - name: Adversarial red-team evaluation gate (#634)
+        run: npm run redteam:check
+
       - name: Webhook idempotency integration tests
         run: npm test -- --testPathPattern="webhookIdempotency.integration" --runInBand
         env:

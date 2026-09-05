@@ -7,6 +7,7 @@ import logger from "../config/logger";
 import { DeploymentEventBridge, TransactionEventBridge } from "../Gateway/eventBridges";
 import { QueueJob } from "./job.entity";
 import { JobHandler, JobHandlerResult, NonRetryableJobError } from "./jobWorker";
+import { getFinalizationManager } from "../services/finality/FinalizationManager";
 
 interface DelayedTransactionPayload {
   userId: string;
@@ -63,19 +64,42 @@ class DelayedTransactionJobHandler implements JobHandler {
       );
       const response = await this.server.submitTransaction(tx);
 
-      TransactionEventBridge.notifyTransactionConfirmed(
+      // Instead of immediately calling notifyConfirmed, start reorg-aware finality tracking
+      // The finalization manager will emit finality:declared event when finality is reached
+      const finalizationManager = getFinalizationManager();
+      
+      // Start finality tracking (does NOT yet trigger balance updates or downstream events)
+      await finalizationManager.startTracking(
         job.id,
         response.hash,
-        undefined,
-        undefined,
-        userId,
+        response.ledger,
+        response.ledger_attr?.hash || "",
+        config.stellar.horizonUrl
       );
+
+      // Wire up finality listener for this transaction to trigger side effects when FINAL
+      const onFinalityDeclared = (data: any) => {
+        if (data.transactionId === job.id) {
+          // NOW trigger balance updates and downstream events (only when truly final)
+          TransactionEventBridge.notifyTransactionConfirmed(
+            job.id,
+            response.hash,
+            undefined,
+            undefined,
+            userId,
+          );
+          finalizationManager.removeListener("finality:declared", onFinalityDeclared);
+        }
+      };
+
+      finalizationManager.once("finality:declared", onFinalityDeclared);
 
       return {
         outcome: "completed",
         result: {
           txHash: response.hash,
           submittedAt: new Date().toISOString(),
+          finalityTracking: true,
         },
       };
     } catch (error) {

@@ -16,7 +16,33 @@ export enum ExecutionStatus {
   FAILED = "failed",
   PAUSED = "paused",
   AWAITING_APPROVAL = "awaiting_approval",
+  /**
+   * Terminal state: execution was explicitly cancelled by a user or operator
+   * before all irreversible steps were committed. Once durably written, this
+   * status is immutable — the record must never transition back to any other
+   * state.
+   */
+  CANCELLED = "cancelled",
 }
+
+/**
+ * The set of statuses from which an execution may legally be cancelled.
+ *
+ * COMPLETED and FAILED are excluded because they are terminal states that
+ * reflect irreversible outcomes already recorded on-chain or in external
+ * systems.  Accepting a cancellation request for those states would create a
+ * false historical record.
+ *
+ * CANCELLED itself is excluded from this set — attempting to cancel an
+ * already-cancelled execution is handled as an idempotent no-op in
+ * DurableExecutor.cancelExecution rather than an error.
+ */
+export const CANCELLABLE_EXECUTION_STATUSES = new Set<ExecutionStatus>([
+  ExecutionStatus.PENDING,
+  ExecutionStatus.RUNNING,
+  ExecutionStatus.PAUSED,
+  ExecutionStatus.AWAITING_APPROVAL,
+]);
 
 @Entity()
 export class DurableExecution {
@@ -61,6 +87,31 @@ export class DurableExecution {
 
   @Column({ type: "text", nullable: true })
   errorMessage?: string;
+
+  // ---------------------------------------------------------------------------
+  // Cancellation audit fields
+  // ---------------------------------------------------------------------------
+
+  /**
+   * When the execution entered the CANCELLED state. Null unless status is
+   * CANCELLED.
+   */
+  @Column({ type: "timestamp", nullable: true })
+  cancelledAt?: Date | null;
+
+  /**
+   * The userId (or operator identifier) that requested cancellation. Null
+   * unless status is CANCELLED.
+   */
+  @Column({ type: "uuid", nullable: true })
+  cancelledBy?: string | null;
+
+  /**
+   * Optional human-readable reason supplied by the caller. Null unless the
+   * caller provided one.
+   */
+  @Column({ type: "text", nullable: true })
+  cancellationReason?: string | null;
 
   @CreateDateColumn()
   createdAt!: Date;

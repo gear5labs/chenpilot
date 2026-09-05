@@ -7,8 +7,10 @@ import {
   LifecycleState,
   VALID_TRANSITIONS,
   TERMINAL_STATES,
+  FinalityStatus,
 } from "./TransactionLifecycle.entity";
 import { TransactionUpdateHelper } from "../Gateway/realtimeIntegration";
+import { getFinalizationManager } from "../services/finality/FinalizationManager";
 
 export interface TransitionOptions {
   reason?: string;
@@ -119,7 +121,8 @@ export class TransactionLifecycleService {
   /** Emit Socket.io realtime events so the frontend stays in sync. */
   private emitRealtimeEvent(record: TransactionLifecycle): void {
     try {
-      if (record.state === "confirmed") {
+      // Only emit confirmation events if finality is FINAL
+      if (record.state === "confirmed" && record.finalityStatus === "FINAL") {
         TransactionUpdateHelper.notifyConfirmed(
           record.id,
           record.correlationId ?? record.id,
@@ -151,6 +154,42 @@ export class TransactionLifecycleService {
       // Realtime emission is best-effort; never block the lifecycle
       logger.warn("TransactionLifecycle realtime emit failed", { id: record.id, err });
     }
+  }
+
+  /**
+   * Mark transaction as confirmed in the ledger and start reorg-aware finality tracking.
+   * Does NOT emit confirmation events yet - those wait until finality_status = FINAL.
+   */
+  async markConfirmedInLedger(
+    id: string,
+    txHash: string,
+    ledgerSequence: number,
+    ledgerHash: string,
+    provider: string
+  ): Promise<TransactionLifecycle> {
+    const record = await this.repo.findOneOrFail({ where: { id } });
+
+    // Transition to "submitted" state if not already there
+    if (record.state !== "submitted") {
+      record.state = "submitted";
+      record.correlationId = txHash;
+    }
+
+    // Start finality tracking
+    const finalizationManager = getFinalizationManager();
+    await finalizationManager.startTracking(id, txHash, ledgerSequence, ledgerHash, provider);
+
+    // Store as-is for audit trail
+    const saved = await this.repo.save(record);
+
+    logger.info("TransactionLifecycle marked confirmed in ledger, finality tracking started", {
+      id,
+      txHash,
+      ledgerSequence,
+      state: record.state,
+    });
+
+    return saved;
   }
 }
 

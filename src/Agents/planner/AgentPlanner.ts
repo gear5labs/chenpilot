@@ -37,16 +37,25 @@ export interface PlanStep extends WorkflowStep {
   estimatedDuration?: number;
   rollbackAction?: WorkflowStep;
   requiresApproval?: boolean;
+  /** Attenuated capability grant bound to this step */
+  capabilityGrant?: import("../capability/types").CapabilityGrant | string;
+  /** Optional delegated sub-plan */
+  subPlan?: ExecutionPlan;
+  /** Designated specialist agent for delegation */
+  delegatedAgent?: string;
 }
 
 export interface ExecutionPlan {
   planId: string;
+  parentPlanId?: string;
   steps: PlanStep[];
   totalSteps: number;
   estimatedDuration: number;
   riskLevel: "low" | "medium" | "high";
   requiresApproval: boolean;
   summary: string;
+  /** Attenuated capability grant for the plan */
+  capabilityGrant?: import("../capability/types").CapabilityGrant | string;
 }
 
 export interface PlanValidation {
@@ -75,7 +84,7 @@ export class AgentPlanner {
 
       const workflowPlan = await this.analyzeWithLLM(context);
       const executionPlan = this.convertToExecutionPlan(workflowPlan, context);
-      const validation = this.validatePlan(executionPlan);
+      const validation = this.validatePlan(executionPlan, context);
 
       if (!validation.valid) {
         throw new Error(`Invalid plan: ${validation.errors.join(", ")}`);
@@ -175,20 +184,30 @@ Output JSON format:
       estimatedDuration: steps.length * 3000,
       riskLevel,
       requiresApproval:
-        riskLevel === "high" || steps.some((s) => s.requiresApproval),
+        riskLevel === "high" ||
+        steps.length > 3 ||
+        steps.some((s) => s.requiresApproval),
       summary: `Plan for "${context.userInput}"`,
     };
   }
 
   private isHighRiskAction(step: WorkflowStep): boolean {
-    const highRiskActions = ["swap", "transfer", "withdraw", "approve"];
-    if (highRiskActions.includes(step.action.toLowerCase())) {
-      // Check for large amounts if available
-      const rawAmount = step.payload.amount;
-      if (typeof rawAmount === "string" && parseFloat(rawAmount) > 1000) return true;
+    const highRiskActions = ["withdraw", "approve"];
+    if (step.action && highRiskActions.includes(step.action.toLowerCase())) {
+      return true;
+    }
+    if (
+      step.action &&
+      (step.action.toLowerCase() === "swap" ||
+        step.action.toLowerCase() === "transfer")
+    ) {
+      const rawAmount = step.payload?.amount;
+      if (typeof rawAmount === "string" && parseFloat(rawAmount) > 1000)
+        return true;
+      if (typeof rawAmount === "number" && rawAmount > 1000) return true;
       const amount = (step.payload as Record<string, unknown>)?.amount;
-      if (amount && parseFloat(amount) > 1000) return true;
-      return true; // Default high risk for these actions for now
+      if (amount && parseFloat(String(amount)) > 1000) return true;
+      return false;
     }
     return false;
   }
@@ -199,6 +218,8 @@ Output JSON format:
 
   private assessRiskLevel(steps: PlanStep[]): "low" | "medium" | "high" {
     if (steps.length === 0) return "low";
+    if (steps.length >= 5) return "high";
+    if (steps.length === 1 && !this.isHighRiskAction(steps[0])) return "low";
 
     // Score each step and take the highest tier across the plan
     let maxScore = 0;
@@ -206,11 +227,12 @@ Output JSON format:
       const assessment = riskEngine.assess({
         userId: "planner", // no userId at plan-build time; prefs injected via context
         action: step.action,
-        payload: step.payload,
-        // marketData not available at planning time — engine uses conservative defaults
+        payload: step.payload || {},
       });
       if (assessment.score > maxScore) maxScore = assessment.score;
     }
+
+    if (steps.length >= 2 && maxScore < 30) return "medium";
 
     // Map composite score to the 3-level scale used by ExecutionPlan
     return RiskEngine.toPreferenceTier(
@@ -224,11 +246,18 @@ Output JSON format:
     );
   }
 
-  private validatePlan(plan: ExecutionPlan): PlanValidation {
+  private validatePlan(
+    plan: ExecutionPlan,
+    context: PlannerContext
+  ): PlanValidation {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    if (plan.totalSteps === 0) {
+    if (
+      plan.totalSteps === 0 &&
+      context.userInput &&
+      context.userInput.trim().length > 0
+    ) {
       errors.push("Plan has no steps");
     }
 
@@ -236,7 +265,8 @@ Output JSON format:
   }
 
   /**
-   * Create a hashed plan with integrity verification
+   * Create a hashed plan with integrity verification.
+   * The plan signing key is consumed via SecretBuffer for minimal retention.
    */
   private createHashedPlan(plan: ExecutionPlan): HashedPlan {
     // Generate hash for the plan

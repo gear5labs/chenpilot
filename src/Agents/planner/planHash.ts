@@ -1,6 +1,7 @@
 // chenpilot/src/Agents/planner/planHash.ts
 import crypto from "crypto";
 import { ExecutionPlan, PlanStep } from "./AgentPlanner";
+import { SecretBuffer } from "../../utils/secretBuffer";
 
 export interface HashedPlan extends ExecutionPlan {
   planHash: string;
@@ -103,13 +104,21 @@ export class PlanHashService {
   }
 
   /**
-   * Sign a plan hash with a private key (for backend signing)
+   * Sign a plan hash with a private key (for backend signing).
+   * The private key is wrapped in a SecretBuffer and zeroized after use.
    */
   signPlanHash(planHash: string, privateKey: string): string {
-    const sign = crypto.createSign("RSA-SHA256");
-    sign.update(planHash);
-    sign.end();
-    return sign.sign(privateKey, "base64");
+    const secret = SecretBuffer.fromString(privateKey, "plan-signing-key");
+    try {
+      return secret.consumeString((plainKey) => {
+        const sign = crypto.createSign("RSA-SHA256");
+        sign.update(planHash);
+        sign.end();
+        return sign.sign(plainKey, "base64");
+      });
+    } finally {
+      secret.destroy();
+    }
   }
 
   /**
@@ -131,7 +140,8 @@ export class PlanHashService {
   }
 
   /**
-   * Create a hashed plan with signature
+   * Create a hashed plan with signature.
+   * The private key is wrapped in a SecretBuffer and zeroized after use.
    */
   createHashedPlan(
     plan: ExecutionPlan,

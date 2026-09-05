@@ -5,9 +5,11 @@ import { SignatureProviderRegistry } from "./registry";
 import { SignatureProviderFactory } from "./provider-factory";
 import { SignatureRequest } from "./types";
 import { SignatureProviderErrorUtils } from "./errors";
+import { throwIfAborted } from "../abort";
+import type { AbortSignalLike } from "../types";
 
 export interface TransactionWorkflowSubmitter {
-  submit(chainId: ChainId, signedTransaction: unknown): Promise<{ success: boolean; transactionId?: string; rawResult?: unknown }>;
+  submit(chainId: ChainId, signedTransaction: unknown, signal?: AbortSignalLike): Promise<{ success: boolean; transactionId?: string; rawResult?: unknown }>;
 }
 
 export class TransactionWorkflowEngine {
@@ -17,7 +19,8 @@ export class TransactionWorkflowEngine {
     private readonly submitter?: TransactionWorkflowSubmitter
   ) {}
 
-  async execute(request: TransactionWorkflowRequest): Promise<TransactionWorkflowResult> {
+  async execute(request: TransactionWorkflowRequest, signal?: AbortSignalLike): Promise<TransactionWorkflowResult> {
+    throwIfAborted(signal);
     const provider = await this.selectProvider(request.chainId, request.providerPreferences);
     if (!provider.isConnected()) {
       await provider.connect();
@@ -30,9 +33,9 @@ export class TransactionWorkflowEngine {
     };
 
     try {
-      const signature = await provider.signTransaction(signatureRequest);
+      const signature = await provider.signTransaction(signatureRequest, signal);
       const submitted = request.submit && this.submitter && signature.signedTransaction
-        ? await this.submitter.submit(request.chainId, signature.signedTransaction)
+        ? await this.submitter.submit(request.chainId, signature.signedTransaction, signal)
         : undefined;
 
       return { providerId: provider.providerId, chainId: request.chainId, signature, submitted, metadata: request.metadata };

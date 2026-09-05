@@ -1,4 +1,8 @@
 import { ChainId } from "../types";
+import { ProviderType, ProviderConfig } from "./provider-factory";
+
+// Re-exported (canonical definitions live in ./provider-factory)
+export { ProviderType, ProviderConfig };
 
 // Base transaction types for different chains
 export interface BitcoinTransaction {
@@ -98,13 +102,6 @@ export interface SignatureProviderMetadata {
   website?: string;
 }
 
-// Provider types enum
-export enum ProviderType {
-  MOCK = "mock",
-  LEDGER = "ledger",
-  ALBEDO = "albedo",
-}
-
 // SDK Configuration
 export interface SignatureProviderSDKConfig {
   defaultProviders?: ProviderType[];
@@ -114,12 +111,6 @@ export interface SignatureProviderSDKConfig {
   connectionTimeout?: number;
   maxRetries?: number;
   registry?: Record<string, unknown>; // SignatureProviderRegistry type
-}
-
-// Provider configuration for factory
-export interface ProviderConfig {
-  type: ProviderType;
-  config?: Record<string, unknown>;
 }
 
 export interface ProviderSelectionPreferences {

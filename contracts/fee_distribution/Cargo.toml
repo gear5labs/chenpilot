@@ -12,3 +12,5 @@ contract_failure = { path = "../contract_failure" }
 
 [dev-dependencies]
 soroban-sdk = { version = "22.0.0", features = ["testutils"] }
+num-bigint = "0.4"
+num-traits = "0.2"
