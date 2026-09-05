@@ -203,6 +203,7 @@ impl FlashLoanGuardContract {
         if env.storage().instance().has(&DataKey::Config) {
             fail(&env, FailureReason::AlreadyInitialized);
         }
+        validate_config(&env, &config);
         env.storage().instance().set(&DataKey::Config, &config);
         env.storage().instance().set(
             &DataKey::CircuitBreaker,
@@ -239,6 +240,7 @@ impl FlashLoanGuardContract {
             .get(&DataKey::Config)
             .unwrap_or_else(|| fail(&env, FailureReason::NotInitialized));
         current.admin.require_auth();
+        validate_config(&env, &config);
         env.storage().instance().set(&DataKey::Config, &config);
 
         env.events().publish(
@@ -257,6 +259,15 @@ impl FlashLoanGuardContract {
                 max_oracle_update_gap_seconds: config.max_oracle_update_gap_seconds,
             },
         );
+    }
+
+    /// Validate that all external contract addresses in the config are existing contracts.
+    /// This prevents hallucinated or fabricated asset/contract addresses from being
+    /// accepted into the guard's configuration.
+    fn validate_config(env: &Env, config: &Config) {
+        if !env.is_contract(config.oracle.clone()) || !env.is_contract(config.guarded_asset.clone()) {
+            fail(env, FailureReason::InvalidConfig);
+        }
     }
 
     // ── Emergency pause (see the `pause_state` crate for the standard) ─────────

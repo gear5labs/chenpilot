@@ -1,7 +1,10 @@
 // ────────────────────────────────────────────────────────────────────────────────
 
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Env, Address, BytesN, token, symbol_short, Symbol};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, token, Address, BytesN, Env, IntoVal, Symbol, Val, Vec,
+    symbol_short,
+};
 use contract_failure::{fail, unwrap_or_fail, FailureReason};
 use pause_state;
 
@@ -59,6 +62,8 @@ pub enum DataKey {
     VaultToken,
     // Upgrade mode flag
     UpgradeMode,
+    // Per-admin nonce to bind each privileged authorization to a single use.
+    AuthNonce(Address),
 }
 
 #[contracttype]
@@ -203,6 +208,12 @@ impl CoreVaultContract {
         if env.storage().instance().has(&DataKey::Admin) {
             fail(&env, FailureReason::AlreadyInitialized);
         }
+        // Reject hallucinated or non-contract addresses.
+        assert!(vault_token.as_contract().is_some(), "unresolved asset");
+        assert!(unified_auth.as_contract().is_some(), "unresolved authority");
+        // Verify the vault token is a valid token contract.
+        let token_client = token::Client::new(&env, &vault_token);
+        let _ = token_client.decimals();
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::VaultToken, &vault_token);
         env.storage().instance().set(&DataKey::UnifiedAuth, &unified_auth);
@@ -219,7 +230,12 @@ impl CoreVaultContract {
     /// Admin marks the backend as offline, enabling force-exit requests.
     /// Trust boundary: VAULT_ADMIN or EMERGENCY_ADMIN - users cannot manipulate backend status.
     pub fn set_backend_status(env: Env, online: bool) {
-        Self::require_vault_or_emergency_admin(&env);
+        let args: Vec<Val> = (online,).into_val(&env);
+        let admin = Self::require_vault_or_emergency_admin(
+            &env,
+            Symbol::new(&env, "set_backend_status"),
+            args,
+        );
         
         // Check emergency state - cannot change backend status during emergency
         if Self::is_emergency_active(&env) {
@@ -231,7 +247,6 @@ impl CoreVaultContract {
             fail(&env, FailureReason::UpgradeMode);
         }
         
-        let caller = env.current_contract_address();
         env.storage().instance().set(&DataKey::BackendOnline, &online);
 
         env.events().publish(
@@ -241,7 +256,7 @@ impl CoreVaultContract {
             EvtBackendStatus {
                 version: 1,
                 ledger: env.ledger().sequence(),
-                actor: caller,
+                actor: admin,
                 online,
             },
         );
@@ -265,18 +280,24 @@ impl CoreVaultContract {
     /// `set_backend_status`.
     /// Emits the standard `pause_state` `pause_chg` event.
     pub fn pause(env: Env) {
-        Self::require_vault_or_emergency_admin(&env);
-        let caller = env.current_contract_address();
-        pause_state::pause(&env, caller);
+        let admin = Self::require_vault_or_emergency_admin(
+            &env,
+            symbol_short!("pause"),
+            Vec::new(&env),
+        );
+        pause_state::pause(&env, admin);
     }
 
     /// Unpause the vault, re-enabling `deposit()`.
     /// Trust boundary: VAULT_ADMIN or EMERGENCY_ADMIN.
     /// Emits the standard `pause_state` `pause_chg` event.
     pub fn unpause(env: Env) {
-        Self::require_vault_or_emergency_admin(&env);
-        let caller = env.current_contract_address();
-        pause_state::unpause(&env, caller);
+        let admin = Self::require_vault_or_emergency_admin(
+            &env,
+            symbol_short!("unpause"),
+            Vec::new(&env),
+        );
+        pause_state::unpause(&env, admin);
     }
 
     /// Whether the vault is currently paused. Safe to call from another
@@ -431,7 +452,12 @@ impl CoreVaultContract {
     /// during force_exit_complete. This function cancels the pending request without
     /// modifying the deposit balance.
     pub fn recovery(env: Env, user: Address) {
-        Self::require_vault_or_emergency_admin(&env);
+        let args: Vec<Val> = (user.clone(),).into_val(&env);
+        Self::require_vault_or_emergency_admin(
+            &env,
+            Symbol::new(&env, "recovery"),
+            args,
+        );
 
         let req: ForceExitRequest = env.storage().persistent()
             .get(&DataKey::ForceExit(user.clone()))
@@ -471,7 +497,12 @@ impl CoreVaultContract {
     /// Enters upgrade mode which restricts critical state changes.
     /// Emits `upg_prop` event on success.
     pub fn propose_upgrade(env: Env, new_wasm_hash: BytesN<32>) {
-        Self::require_upgrade_admin(&env);
+        let args: Vec<Val> = (new_wasm_hash.clone(),).into_val(&env);
+        let caller = Self::require_upgrade_admin(
+            &env,
+            Symbol::new(&env, "propose_upgrade"),
+            args,
+        );
         
         // Check emergency state - cannot upgrade during emergency
         if Self::is_emergency_active(&env) {
@@ -485,7 +516,6 @@ impl CoreVaultContract {
         // Enter upgrade mode - restricts critical state changes
         env.storage().instance().set(&DataKey::UpgradeMode, &true);
 
-        let caller = env.current_contract_address();
         env.events().publish(
             (EVT_UPG_PROP, caller),
             pending,
@@ -497,13 +527,16 @@ impl CoreVaultContract {
     /// Exits upgrade mode and restores normal operations.
     /// Emits `upg_cncl` event on success.
     pub fn cancel_upgrade(env: Env) {
-        Self::require_upgrade_admin(&env);
+        let caller = Self::require_upgrade_admin(
+            &env,
+            Symbol::new(&env, "cancel_upgrade"),
+            Vec::new(&env),
+        );
         env.storage().instance().remove(&DataKey::PendingUpgrade);
         
         // Exit upgrade mode
         env.storage().instance().set(&DataKey::UpgradeMode, &false);
 
-        let caller = env.current_contract_address();
         env.events().publish(
             (EVT_UPG_CNCL, caller.clone()),
             caller,
@@ -543,9 +576,12 @@ impl CoreVaultContract {
     /// Trust boundary: CURRENT ADMIN ONLY (legacy) - use UnifiedAuth for role management.
     /// Emits `adm_xfer` event on success.
     pub fn transfer_admin(env: Env, new_admin: Address) {
-        let admin: Address =
-            unwrap_or_fail(&env, env.storage().instance().get(&DataKey::Admin), FailureReason::StorageValueMissing);
-        admin.require_auth();
+        let args: Vec<Val> = (new_admin.clone(),).into_val(&env);
+        let admin = Self::require_legacy_admin(
+            &env,
+            Symbol::new(&env, "transfer_admin"),
+            args,
+        );
 
         let old_admin = admin.clone();
         env.storage().instance().set(&DataKey::Admin, &new_admin);
@@ -559,9 +595,12 @@ impl CoreVaultContract {
     /// Set the UnifiedAuth contract address.
     /// Trust boundary: CURRENT ADMIN ONLY.
     pub fn set_unified_auth(env: Env, unified_auth: Address) {
-        let admin: Address =
-            unwrap_or_fail(&env, env.storage().instance().get(&DataKey::Admin), FailureReason::StorageValueMissing);
-        admin.require_auth();
+        let args: Vec<Val> = (unified_auth.clone(),).into_val(&env);
+        Self::require_legacy_admin(
+            &env,
+            Symbol::new(&env, "set_unified_auth"),
+            args,
+        );
         env.storage().instance().set(&DataKey::UnifiedAuth, &unified_auth);
     }
     
@@ -572,27 +611,43 @@ impl CoreVaultContract {
             .unwrap_or_else(|| fail(env, FailureReason::UnifiedAuthNotConfigured))
     }
     
-    fn require_vault_or_emergency_admin(env: &Env) {
-        let unified_auth = Self::get_unified_auth_internal(env);
-        let caller = env.current_contract_address();
-        
-        // Try VaultAdmin first, then EmergencyAdmin
-        // In production, this would call UnifiedAuth contract
-        // For now, fall back to legacy admin check
+    /// Authenticate the legacy admin for the exact `function` and `args`.
+    ///
+    /// Trust assumptions:
+    /// - The legacy admin is the current trust anchor until UnifiedAuth is wired.
+    /// - The auth payload binds vault address, function symbol, arguments, and a
+    ///   per-admin nonce, preventing confused-deputy and replay attacks.
+    fn require_legacy_admin(env: &Env, function: Symbol, args: Vec<Val>) -> Address {
         let admin: Address =
             unwrap_or_fail(env, env.storage().instance().get(&DataKey::Admin), FailureReason::StorageValueMissing);
-        admin.require_auth();
+        let nonce: u32 = env.storage().instance()
+            .get(&DataKey::AuthNonce(admin.clone()))
+            .unwrap_or(0);
+        env.storage().instance()
+            .set(&DataKey::AuthNonce(admin.clone()), &(nonce + 1));
+
+        let mut auth: Vec<Val> = Vec::new(env);
+        auth.push_back(env.current_contract_address().into_val(env));
+        auth.push_back(function.into_val(env));
+        for arg in args.iter() {
+            auth.push_back(*arg);
+        }
+        auth.push_back(nonce.into_val(env));
+
+        admin.require_auth_for_args(&auth);
+        admin
+    }
+
+    fn require_vault_or_emergency_admin(env: &Env, function: Symbol, args: Vec<Val>) -> Address {
+        let _unified_auth = Self::get_unified_auth_internal(env);
+        // TODO: enforce VaultAdmin/EmergencyAdmin roles via UnifiedAuth.
+        Self::require_legacy_admin(env, function, args)
     }
     
-    fn require_upgrade_admin(env: &Env) {
-        let unified_auth = Self::get_unified_auth_internal(env);
-        let caller = env.current_contract_address();
-        
-        // In production, call UnifiedAuth::require_role(UnifiedRole::UpgradeAdmin)
-        // For now, fall back to legacy admin check
-        let admin: Address =
-            unwrap_or_fail(env, env.storage().instance().get(&DataKey::Admin), FailureReason::StorageValueMissing);
-        admin.require_auth();
+    fn require_upgrade_admin(env: &Env, function: Symbol, args: Vec<Val>) -> Address {
+        let _unified_auth = Self::get_unified_auth_internal(env);
+        // TODO: enforce UpgradeAdmin role via UnifiedAuth.
+        Self::require_legacy_admin(env, function, args)
     }
     
     /// Now backed by the real `pause_state` standard rather than a

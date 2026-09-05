@@ -102,6 +102,9 @@ Failure paths that emit events before reverting MUST use the same topic/data sta
 | `fee_distribution` | `initialize` | `("fees", "init")` | `version`, `ledger`, `actor`, `admin`, `treasury`, `ai_agent_pool`, `lp_pool`, `treasury_bps`, `ai_agent_bps` |
 | `fee_distribution` | `update_config` | `("fees", "cfg_upd")` | `version`, `ledger`, `actor`, `admin`, `treasury`, `ai_agent_pool`, `lp_pool`, `treasury_bps`, `ai_agent_bps` |
 | `fee_distribution` | `distribute` | `("fees", "split")` | `version`, `ledger`, `actor`, `nonce`, `token`, `from`, `amount`, `treasury_share`, `ai_agent_share`, `lp_share` |
+| `fee_distribution` | `stake` | `("fees", "stake")` | `version`, `ledger`, `actor`, `token`, `user`, `amount`, `total_shares` |
+| `fee_distribution` | `unstake` | `("fees", "unstake")` | `version`, `ledger`, `actor`, `token`, `user`, `amount`, `total_shares` |
+| `fee_distribution` | `claim` | `("fees", "claim")` | `version`, `ledger`, `actor`, `token`, `user`, `amount` |
 | `btc_relay` | `initialize` | `("btc", "init")` | `version`, `ledger`, `actor`, `admin`, `wrapped_btc_token`, `min_confirmations`, `crypto_contract` |
 | `btc_relay` | `update_config` | `("btc", "cfg_upd")` | `version`, `ledger`, `actor`, `admin`, `wrapped_btc_token`, `min_confirmations`, `crypto_contract` |
 | `btc_relay` | `verify_and_claim` | `("btc", "relay_ok")` | `version`, `ledger`, `actor`, `tx_id`, `recipient`, `amount_sat` |

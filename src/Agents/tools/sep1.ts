@@ -1,6 +1,7 @@
 import { BaseTool } from "./base/BaseTool";
 import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 import logger from "../../config/logger";
+import { secureFetch } from "../../Security/egress";
 
 /**
  * SEP-1 Stellar.toml metadata structure
@@ -70,8 +71,6 @@ interface AssetMetadataPayload extends Record<string, unknown> {
  * Tool for retrieving and parsing stellar.toml metadata (SEP-1) to provide token information
  */
 export class Sep1Tool extends BaseTool<AssetMetadataPayload> {
-  private fetch: typeof globalThis.fetch;
-
   metadata: ToolMetadata = {
     name: "sep1_tool",
     description:
@@ -103,14 +102,25 @@ export class Sep1Tool extends BaseTool<AssetMetadataPayload> {
     ],
     category: "metadata",
     version: "1.0.0",
+    // SEP-1 fetches arbitrary user-supplied domains by design, so the
+    // egress manifest allows all public FQDNs over HTTPS. The egress layer
+    // still blocks loopback/link-local/private/metadata/mixed-encoding
+    // addresses, defends against DNS rebinding, and re-validates redirects.
+    egress: {
+      allowedHosts: ["*"],
+      allowedProtocols: ["https:", "http:"],
+      maxConcurrentRequests: 4,
+      budget: { timeLimitMs: 15_000, maxRedirects: 3 },
+    },
   };
 
   /**
-   * Initialize the SEP-1 tool with global fetch
+   * Initialize the SEP-1 tool. Outbound requests route through the egress
+   * layer (loopback/private/metadata/IPv6 denial, DNS rebinding defence,
+   * redirect re-validation).
    */
   constructor() {
     super();
-    this.fetch = globalThis.fetch.bind(globalThis);
   }
 
   private readonly domainPattern =
@@ -379,20 +389,28 @@ export class Sep1Tool extends BaseTool<AssetMetadataPayload> {
         ? `https://${domain}/stellar.toml`
         : `https://${domain}/.well-known/stellar.toml`;
 
-      const response = await this.fetch(url, {
-        headers: {
-          Accept: "text/plain",
+      const response = await secureFetch(
+        url,
+        {
+          headers: {
+            Accept: "text/plain",
+          },
         },
-      });
+        { egress: this.metadata.egress }
+      );
 
       if (!response.ok) {
         // Try alternative path
         const altUrl = `https://${domain}/stellar.toml`;
-        const altResponse = await this.fetch(altUrl, {
-          headers: {
-            Accept: "text/plain",
+        const altResponse = await secureFetch(
+          altUrl,
+          {
+            headers: {
+              Accept: "text/plain",
+            },
           },
-        });
+          { egress: this.metadata.egress }
+        );
 
         if (!altResponse.ok) {
           logger.warn(
