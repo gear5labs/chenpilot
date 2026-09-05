@@ -133,6 +133,25 @@ export class JobWorker {
       attempt: job.attempts + 1,
     });
 
+    // ---------------------------------------------------------------------------
+    // Safe-point check: re-read the job status from the database before starting
+    // the handler.  This prevents invoking an irreversible side effect on a job
+    // that was cancelled after it was leased but before the handler ran.
+    //
+    // The check window is intentionally narrow (between lease acquisition and
+    // handler invocation) so that jobs already mid-handler are not interrupted —
+    // handlers must manage their own internal cancellation if needed.
+    // ---------------------------------------------------------------------------
+    const freshJob = await this.queueService.getJob(job.id);
+    if (!freshJob || freshJob.status === "cancelled") {
+      logger.info("Job cancelled before handler invocation — skipping", {
+        jobId: job.id,
+        jobType: job.jobType,
+        status: freshJob?.status ?? "not_found",
+      });
+      return;
+    }
+
     const keepAlive = setInterval(() => {
       void this.queueService
         .renewLease(job.id, this.options.workerId, this.leaseMs)

@@ -1,51 +1,15 @@
 import { Router, Request, Response } from "express";
-import * as crypto from "crypto";
 import { stellarWebhookService } from "./webhook.service";
 import { platformWebhookService } from "./platformWebhook.service";
 import logger from "../config/logger";
+import { webhookAuth } from "./middleware/webhookAuthMiddleware";
 
 const router = Router();
 
-function verifyWebhookSignature(
-  req: Request,
-  res: Response,
-  next: () => void
-): void {
-  const secret = process.env.WEBHOOK_SECRET;
-  if (!secret) {
-    logger.warn("WEBHOOK_SECRET not configured — skipping webhook signature verification");
-    next();
-    return;
-  }
-
-  const signature = req.headers["x-webhook-signature"] as string | undefined;
-  if (!signature) {
-    res.status(401).json({ success: false, message: "Missing webhook signature" });
-    return;
-  }
-
-  const rawBody = JSON.stringify(req.body);
-  const expected = "sha256=" + crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
-
-  const sigBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expected);
-
-  if (
-    sigBuffer.length !== expectedBuffer.length ||
-    !crypto.timingSafeEqual(sigBuffer, expectedBuffer)
-  ) {
-    logger.warn("Webhook signature mismatch", { receivedSignature: signature });
-    res.status(401).json({ success: false, message: "Invalid webhook signature" });
-    return;
-  }
-
-  next();
-}
-
-// Stellar funding webhook
+// Stellar funding webhook - now using edge signature verification
 router.post(
   "/stellar/funding",
-  verifyWebhookSignature,
+  webhookAuth("stellar"),
   async (req: Request, res: Response) => {
     try {
       const result = await stellarWebhookService.processFundingWebhook(req);
@@ -71,10 +35,10 @@ router.post(
   }
 );
 
-// Telegram webhook
+// Telegram webhook - now using edge signature verification
 router.post(
   "/telegram",
-  verifyWebhookSignature,
+  webhookAuth("telegram"),
   async (req: Request, res: Response) => {
     try {
       const result = await platformWebhookService.processTelegramWebhook(req);
@@ -95,10 +59,10 @@ router.post(
   }
 );
 
-// Discord webhook
+// Discord webhook - now using edge signature verification
 router.post(
   "/discord",
-  verifyWebhookSignature,
+  webhookAuth("discord"),
   async (req: Request, res: Response) => {
     try {
       const result = await platformWebhookService.processDiscordWebhook(req);

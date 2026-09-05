@@ -98,6 +98,7 @@ pub enum DataKey {
     StrategyHealth(BytesN<32>),
     DisabledStrategy(BytesN<32>),
     ActiveStrategies,
+    AuthorizedStrategies,
 }
 
 // ─── Events ───────────────────────────────────────────────────────────────
@@ -225,6 +226,9 @@ impl StrategyBoundaryContract {
         };
         env.storage().instance().set(&DataKey::RiskLimits, &default_risk);
 
+        // Initialize authorized strategy registry
+        env.storage().instance().set(&DataKey::AuthorizedStrategies, &Vec::<Address>::new(&env));
+
         env.events().publish(
             (EVT_INIT,),
             EvtInit {
@@ -253,6 +257,14 @@ impl StrategyBoundaryContract {
 
         // Verify auditor signature (simplified - in production, verify against known auditors)
         Self::verify_audit_signature(&env, &metadata, auditor_signature);
+
+        // Ensure strategy address is authorized (cannot be a fabricated address)
+        let authorized: Vec<Address> = env.storage().instance()
+            .get(&DataKey::AuthorizedStrategies)
+            .unwrap_or(Vec::new(&env));
+        if !authorized.contains(&metadata.strategy_address) {
+            panic!("Strategy address is not authorized");
+        }
 
         // Store strategy metadata
         env.storage().instance().set(
@@ -301,6 +313,17 @@ impl StrategyBoundaryContract {
                 strategy_id,
             },
         );
+    }
+
+    pub fn authorize_strategy_address(env: Env, strategy_address: Address) {
+        Self::check_strategy_admin(&env);
+        let mut authorized: Vec<Address> = env.storage().instance()
+            .get(&DataKey::AuthorizedStrategies)
+            .unwrap_or(Vec::new(&env));
+        if !authorized.contains(&strategy_address) {
+            authorized.push_back(strategy_address);
+            env.storage().instance().set(&DataKey::AuthorizedStrategies, &authorized);
+        }
     }
 
     pub fn is_strategy_disabled(env: Env, strategy_id: BytesN<32>) -> bool {

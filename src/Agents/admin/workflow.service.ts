@@ -166,6 +166,33 @@ const DEFAULT_POLICIES: Omit<
     enabled: true,
     autoExecuteOnApproval: true,
   },
+  {
+    actionType: SensitiveActionType.INTERVENTION_COMPENSATE,
+    name: "Intervention: Compensate Step",
+    description:
+      "Apply a compensating transaction to undo the side-effects of a completed execution step. " +
+      "Requires proof of an on-chain compensating transaction.",
+    riskLevel: RiskLevel.CRITICAL,
+    requiredApprovals: 2,
+    allowedApproverRoles: ["admin"],
+    approvalTimeoutMinutes: 120,
+    requireMfa: true,
+    enabled: true,
+    autoExecuteOnApproval: true,
+  },
+  {
+    actionType: SensitiveActionType.INTERVENTION_QUARANTINE,
+    name: "Intervention: Quarantine Execution",
+    description:
+      "Freeze a running or failed execution to prevent automated retries while an investigation is conducted.",
+    riskLevel: RiskLevel.CRITICAL,
+    requiredApprovals: 2,
+    allowedApproverRoles: ["admin"],
+    approvalTimeoutMinutes: 120,
+    requireMfa: true,
+    enabled: true,
+    autoExecuteOnApproval: true,
+  },
 ];
 
 export class AdminWorkflowService {
@@ -606,6 +633,21 @@ export class AdminWorkflowService {
           promptId,
           rollbackVersionId
         );
+        break;
+      }
+      case SensitiveActionType.INTERVENTION_COMPENSATE:
+      case SensitiveActionType.INTERVENTION_QUARANTINE: {
+        // Lazy-require to avoid circular imports at module load time
+        const { interventionService } = await import(
+          "../planner/intervention.service"
+        );
+        const interventionId = payload.interventionId as string | undefined;
+        if (!interventionId) {
+          throw new Error(
+            "Missing interventionId in workflow payload for intervention action"
+          );
+        }
+        await interventionService.applyApproved(interventionId, instance.id);
         break;
       }
       default:

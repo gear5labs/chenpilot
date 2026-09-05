@@ -4,6 +4,7 @@ import {
   reconciliationService,
   ReconciliationScope,
 } from "../../services/reconciliation.service";
+import { InvariantCategory } from "../../services/invariantEngine";
 import logger from "../../config/logger";
 
 interface ReconciliationPayload extends Record<string, unknown> {
@@ -15,6 +16,10 @@ interface ReconciliationPayload extends Record<string, unknown> {
     walletAddress?: string;
     contractIds?: string[];
     network?: "testnet" | "mainnet";
+    /** Enable system-level accounting invariant evaluation. */
+    invariants?: boolean;
+    /** Filter to specific invariant categories. */
+    invariantCategories?: InvariantCategory[];
   };
   limit?: number;
 }
@@ -26,7 +31,7 @@ export class ReconciliationTool extends BaseTool<ReconciliationPayload> {
   metadata: ToolMetadata = {
     name: "reconciliation_tool",
     description:
-      "Detect and surface drift between backend records and on-chain reality. Checks transaction status, wallet balances, and contract state for inconsistencies.",
+      "Detect and surface drift between backend records and on-chain reality. Checks transaction status, wallet balances, contract state for inconsistencies. Optionally evaluates system-level accounting invariants for aggregate balance integrity, pending operation health, and completeness.",
     parameters: {
       operation: {
         type: "string",
@@ -101,6 +106,8 @@ export class ReconciliationTool extends BaseTool<ReconciliationPayload> {
         walletAddress: payload.scope?.walletAddress,
         contractIds: payload.scope?.contractIds,
         network: payload.scope?.network ?? "testnet",
+        invariants: payload.scope?.invariants ?? false,
+        invariantCategories: payload.scope?.invariantCategories,
       };
 
       const report = await reconciliationService.reconcile(userId, scope);
@@ -122,6 +129,21 @@ export class ReconciliationTool extends BaseTool<ReconciliationPayload> {
           description: d.description,
           repairAction: d.repairAction,
         })),
+        invariantResults: report.invariantResults?.map((ir) => ({
+          invariantId: ir.invariantId,
+          invariantName: ir.invariantName,
+          category: ir.category,
+          status: ir.status,
+          holds: ir.holds,
+          dataAvailable: ir.dataAvailable,
+          expectedValue: ir.expectedValue,
+          actualValue: ir.actualValue,
+          attributableDifference: ir.attributableDifference,
+          lagExceeded: ir.lagExceeded,
+          driftSources: ir.driftSources,
+          repairSafety: ir.repairSafety,
+        })),
+        invariantSummary: report.invariantSummary,
         completedAt: report.completedAt,
       });
     } catch (err) {

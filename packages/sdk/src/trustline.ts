@@ -1,6 +1,7 @@
-/// @ts-ignore: dependency is provided at the workspace root
-import { Server, Asset, Operation } from "stellar-sdk";
+import { Horizon, Asset, Operation, xdr } from "@stellar/stellar-sdk";
 import * as StellarSdk from "@stellar/stellar-sdk";
+import { combineSignals, isAbortError, throwIfAborted } from "./abort";
+import type { AbortSignalLike } from "./types";
 
 export interface TrustlineCheckResult {
   exists: boolean;
@@ -9,7 +10,7 @@ export interface TrustlineCheckResult {
 }
 
 export interface TrustlinePreview {
-  operations: Operation[];
+  operations: xdr.Operation[];
   transactionXdr: string;
 }
 
@@ -58,7 +59,7 @@ export enum TrustlineWorkflowStep {
 export interface TrustlineWorkflowPreview {
   assetsToTrust: AssetToTrust[];
   existingTrustlines: TrustlineInfo[];
-  operations: Operation[];
+  operations: xdr.Operation[];
   transactionXdr: string;
   sourceAccount?: string;
   trustlinesToRemove?: TrustlineInfo[];
@@ -85,39 +86,51 @@ export interface TrustlineWorkflowResourceEstimate {
 export interface TrustlineWorkflowResult {
   transactionXdr: string;
   signedTransactionXdr?: string;
-  operations: Operation[];
+  operations: xdr.Operation[];
   resourceEstimate: TrustlineWorkflowResourceEstimate;
 }
 
 export async function resolveIssuerFromDomain(
   domain: string,
   assetCode: string,
-  timeout?: number
+  timeout?: number,
+  signal?: AbortSignalLike
 ): Promise<string | undefined> {
   try {
     const url = `https://${domain}/.well-known/stellar.toml`;
-    const signal = timeout ? AbortSignal.timeout(timeout) : undefined;
-    const response = await fetch(url, { signal });
-    if (!response.ok) return undefined;
+    const combined = combineSignals(timeout, signal);
+    try {
+      throwIfAborted(combined.signal);
+      const response = await fetch(url, {
+        signal: combined.signal as AbortSignal | undefined,
+      });
+      if (!response.ok) return undefined;
 
-    const text = await response.text();
-    const currenciesMatch = text.match(/\[\[CURRENCIES\]\]([\s\S]*?)(?=\[\[|$)/g);
-    if (!currenciesMatch) return undefined;
+      const text = await response.text();
+      const currenciesMatch = text.match(/\[\[CURRENCIES\]\]([\s\S]*?)(?=\[\[|$)/g);
+      if (!currenciesMatch) return undefined;
 
-    for (const currencyBlock of currenciesMatch) {
-      const codeMatch = currencyBlock.match(/code\s*=\s*["'](.+?)["']/);
-      const issuerMatch = currencyBlock.match(/issuer\s*=\s*["'](.+?)["']/);
+      for (const currencyBlock of currenciesMatch) {
+        const codeMatch = currencyBlock.match(/code\s*=\s*["'](.+?)["']/);
+        const issuerMatch = currencyBlock.match(/issuer\s*=\s*["'](.+?)["']/);
 
-      if (
-        codeMatch &&
-        codeMatch[1].toUpperCase() === assetCode.toUpperCase() &&
-        issuerMatch
-      ) {
-        return issuerMatch[1];
+        if (
+          codeMatch &&
+          codeMatch[1].toUpperCase() === assetCode.toUpperCase() &&
+          issuerMatch
+        ) {
+          return issuerMatch[1];
+        }
       }
+      return undefined;
+    } finally {
+      combined.cleanup();
     }
-    return undefined;
   } catch (error) {
+    // Cancellation must propagate unmasked.
+    if (isAbortError(error)) {
+      throw error;
+    }
     console.error(`Error resolving issuer from domain ${domain}:`, error);
     return undefined;
   }
@@ -129,13 +142,13 @@ export async function hasValidStellarTrustline(
   assetCode: string,
   assetIssuer?: string
 ): Promise<TrustlineCheckResult> {
-  const server = new Server(horizonUrl || "https://horizon.stellar.org");
+  const server = new Horizon.Server(horizonUrl || "https://horizon.stellar.org");
 
   if (!assetCode || assetCode.toUpperCase() === "XLM") {
     return { exists: true, authorized: true };
   }
 
-  let account: Record<string, unknown>;
+  let account: any;
   try {
     account = await server.accounts().accountId(accountId).call();
   } catch (err) {
@@ -146,7 +159,7 @@ export async function hasValidStellarTrustline(
     };
   }
 
-  const balances: Record<string, unknown>[] = (account.balances as Record<string, unknown>[]) || [];
+  const balances: Record<string, unknown>[] = (account.balances as unknown as Record<string, unknown>[]) || [];
   const match = balances.find((b) => {
     return (
       b['asset_code'] === assetCode &&
@@ -171,9 +184,9 @@ export async function findZeroBalanceTrustlines(
   horizonUrl: string | undefined,
   accountId: string
 ): Promise<TrustlineInfo[]> {
-  const server = new Server(horizonUrl || "https://horizon.stellar.org");
+  const server = new Horizon.Server(horizonUrl || "https://horizon.stellar.org");
   const account = await server.accounts().accountId(accountId).call();
-  const balances: Record<string, unknown>[] = (account.balances as Record<string, unknown>[]) || [];
+  const balances: Record<string, unknown>[] = (account.balances as unknown as Record<string, unknown>[]) || [];
 
   return balances
     .filter((b) => b['asset_type'] !== "native" && parseFloat(b['balance'] as string) === 0)
@@ -186,7 +199,7 @@ export async function findZeroBalanceTrustlines(
 
 export function buildTrustlineRemovalOps(
   trustlines: TrustlineInfo[]
-): Operation[] {
+): xdr.Operation[] {
   return trustlines.map((t) =>
     Operation.changeTrust({
       asset: new Asset(t.assetCode, t.assetIssuer),
@@ -199,15 +212,17 @@ export async function createTrustlineOperation(
   assetCode: string,
   assetIssuer: string,
   limit?: string,
-  timeout?: number
-): Promise<Operation> {
+  timeout?: number,
+  signal?: AbortSignalLike
+): Promise<xdr.Operation> {
   let issuer = assetIssuer;
 
   if (assetIssuer.includes(".") && !assetIssuer.startsWith("G")) {
     const resolvedIssuer = await resolveIssuerFromDomain(
       assetIssuer,
       assetCode,
-      timeout
+      timeout,
+      signal
     );
     if (!resolvedIssuer) {
       throw new Error(
@@ -227,7 +242,7 @@ export async function createTrustlineOperation(
 export class TrustlineWorkflowBuilder {
   private assets: AssetToTrust[] = [];
   private trustlinesToRemove: TrustlineInfo[] = [];
-  private config: Required<TrustlineWorkflowConfig>;
+  private config: TrustlineWorkflowConfig;
   private step: TrustlineWorkflowStep = TrustlineWorkflowStep.IDLE;
 
   constructor(config: TrustlineWorkflowConfig = {}) {
@@ -260,14 +275,16 @@ export class TrustlineWorkflowBuilder {
   async preview(): Promise<TrustlineWorkflowPreview> {
     this.step = TrustlineWorkflowStep.PREVIEWING;
 
-    const server = new Server(this.config.horizonUrl);
+    const server = new Horizon.Server(
+      this.config.horizonUrl || "https://horizon.stellar.org"
+    );
     const existingTrustlines: TrustlineInfo[] = [];
     let sourceAccount: string | undefined;
 
     if (this.config.source) {
       try {
         const account = await server.accounts().accountId(this.config.source).call();
-        const trustlines = (account.balances as Record<string, unknown>[])
+        const trustlines = (account.balances as unknown as Record<string, unknown>[])
           .filter((b) => b['asset_type'] !== "native")
           .map((b) => ({
             assetCode: b['asset_code'] as string,
@@ -291,7 +308,7 @@ export class TrustlineWorkflowBuilder {
       })
     );
 
-    const operations: Operation[] = [
+    const operations: xdr.Operation[] = [
       ...resolvedAssets.map((a) =>
         Operation.changeTrust({
           asset: new Asset(a.assetCode, a.assetIssuer),
@@ -336,12 +353,14 @@ export class TrustlineWorkflowBuilder {
     const warnings: string[] = [];
     let accountExists = false;
     const existingTrustlines: TrustlineInfo[] = [];
-    const server = new Server(this.config.horizonUrl);
+    const server = new Horizon.Server(
+      this.config.horizonUrl || "https://horizon.stellar.org"
+    );
 
     if (this.config.source) {
       try {
         const account = await server.accounts().accountId(this.config.source).call();
-        const trustlines = (account.balances as Record<string, unknown>[])
+        const trustlines = (account.balances as unknown as Record<string, unknown>[])
           .filter((b) => b['asset_type'] !== "native")
           .map((b) => ({
             assetCode: b['asset_code'] as string,
@@ -398,9 +417,10 @@ export class TrustlineWorkflowBuilder {
     this.step = TrustlineWorkflowStep.ESTIMATING;
 
     const preview = previewResult || { assetsToTrust: [], trustlinesToRemove: [] };
-    const operationCount = preview.assetsToTrust.length + preview.trustlinesToRemove.length;
+    const trustlinesToRemove = preview.trustlinesToRemove ?? [];
+    const operationCount = preview.assetsToTrust.length + trustlinesToRemove.length;
     const trustlinesCreated = preview.assetsToTrust.length;
-    const trustlinesRemoved = preview.trustlinesToRemove.length;
+    const trustlinesRemoved = trustlinesToRemove.length;
     const reservesRequired = trustlinesCreated.toString();
 
     return {

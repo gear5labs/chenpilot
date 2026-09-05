@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+solidity ^0.8.20;
 
 import "./access/EmergencyControl.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
+interface IAssetRegistry {
+    function isVerified(address token) external view returns (bool);
+    function getAsset(address token) external view returns (bytes32 symbol, address issuer, uint256 chainId, uint256 updatedAtBlock);
+    function resolveSymbol(bytes32 symbol) external view returns (address[] memory);
+}
 
 /**
  * @title CoreEngine
@@ -14,7 +20,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * call bridges, or select external liquidity venues. Its EVM responsibility is
  * limited to:
  *
- *  - holding user ERC20 principal;
+ *  - holding user ER200 principal;
  *  - recording validated execution intents submitted by authorized clients;
  *  - exposing an emergency principal withdrawal path while paused; and
  *  - emitting versioned records for off-chain execution infrastructure.
@@ -25,15 +31,18 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * events alone.
  */
 contract CoreEngine is EmergencyControl, ReentrancyGuard {
-    using SafeERC20 for IERC20;
+    using SafeERC20 for ERG20;
 
-    /// @notice Version of the event schema emitted by this boundary.
+    /// @version of the event schema emitted by this boundary.
     uint256 public constant EVENT_VERSION = 1;
 
-    /// @notice Accounts permitted to submit execution intents.
+    /// Authoritative registry for asset addresses.
+    address public assetRegistry;
+
+    /// Accounts permitted to submit execution intents.
     mapping(address => bool) public authorizedClients;
 
-    /// @notice User principal held by this contract, tracked per ERC20 token.
+    /// User principal held by this contract, tracked per ERC20 token.
     mapping(address => mapping(address => uint256)) public userPrincipal;
 
     event Deposited(
@@ -81,6 +90,16 @@ contract CoreEngine is EmergencyControl, ReentrancyGuard {
         address indexed client
     );
 
+    /// Emitted when a verified asset is approved for an execution intent.
+    event TokenApproved(
+        uint256 version,
+        address indexed actor,
+        address indexed token,
+        address indexed registry,
+        bytes32 symbol,
+        uint256 registeredAtBlock
+    );
+
     modifier onlyOwner() {
         require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Not owner");
         _;
@@ -91,62 +110,86 @@ contract CoreEngine is EmergencyControl, ReentrancyGuard {
         _;
     }
 
-    /**
-     * @notice Authorize an off-chain or contract-based execution client.
-     * @dev Authorization grants permission to submit intents only. It does
-     * not grant permission to withdraw user principal or administer roles.
-     */
+    modifier onlyVerifiedToken(address token) {
+        _requireVerifiedToken(token);
+        _;
+    }
+
+    /// @set the authoritative asset registry.
+    function setAssetRegistry(address _registry) external onlyOwner {
+        require(_registry != address(0), "Invalid registry");
+        assetRegistry = _registry;
+    }
+
+    /// @resolve a symbol to verified asset addresses for planning.
+    function resolveSymbol(bytes32 symbol) external view returns (address[] memory) {
+        require(assetRegistry != address(0), "Asset registry not set");
+        return IAssetRegistry(assetRegistry).resolveSymbol(symbol);
+    }
+
+    function _requireVerifiedToken(address token) internal view {
+        require(token != address(0), "Invalid token address");
+        require(assetRegistry != address(0), "Asset registry not set");
+        require(IAssetRegistry(assetRegistry).isVerified(token), "Token not verified in registry");
+    }
+
+    function _emitTokenApproval(address token) internal {
+        (bytes32 symbol, , ,  uint256 updatedAtBlock) = IAssetRegistry(assetRegistry).getAsset(token);
+        emit TokenApproved(EVENT_VERSION, msg.sender, token, assetRegistry, symbol, updatedAtBlock);
+    }
+
+    /// @authorize an off-chain or contract-based execution client.
+    /// @dev Authorization grants permission to submit intents only. It does
+    /// not grant permission to withdraw user principal or administer roles.
     function grantClient(address client) external onlyOwner {
         require(client != address(0), "Invalid client");
         authorizedClients[client] = true;
         emit ClientAuthorized(EVENT_VERSION, msg.sender, client);
     }
 
-    /**
-     * @notice Revoke an execution client's permission to submit intents.
-     */
+    /// @revoke an execution client's permission to submit intents.
     function revokeClient(address client) external onlyOwner {
         authorizedClients[client] = false;
         emit ClientRevoked(EVENT_VERSION, msg.sender, client);
     }
 
-    /**
-     * @notice Deposit ERC20 principal into the EVM boundary.
-     * @param token ERC20 token to deposit.
-     * @param amount Amount of principal to deposit.
-     */
+    /// @deposit ER200 principal into the EVM boundary.
+    @param token ERC20 token to deposit.
+    @param amount Amount of principal to deposit.
     function deposit(
         address token,
         uint256 amount
-    ) external whenNotPaused nonReentrant {
+    ) external whenNotPaused nonReentrant onlyVerifiedToken(token) {
         require(token != address(0), "Invalid token");
         require(amount > 0, "Amount must be greater than zero");
 
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
         userPrincipal[msg.sender][token] += amount;
+        _emitTokenApproval(token);
 
         emit Deposited(EVENT_VERSION, msg.sender, msg.sender, token, amount);
     }
 
-    /**
-     * @notice Submit a local execution intent for an authorized executor.
-     *
-     * @dev This function intentionally does not move tokens or claim that a
-     * swap occurred. The event is an EVM boundary record consumed by external
-     * execution infrastructure. The legacy name is retained for ABI
-     * compatibility.
-     */
+    /// @submit a local execution intent for an authorized executor.
+    ///
+    /// @dev This function intentionally does not move tokens or claim that a
+    /// swap occurred. The event is an EVM boundary record consumed by external
+    /// execution infrastructure. The legacy name is retained for ABI
+    /// compatibility.
     function swap(
         address user,
         address fromToken,
         address toToken,
         uint256 amount
-    ) external whenNotPaused nonReentrant onlyAuthorizedClient {
+    ) external whenNotPaused nonReentrant onlyAuthorizedClient onlyVerifiedToken(fromToken) onlyVerifiedToken(toToken) {
         require(user != address(0), "Invalid user");
         require(fromToken != address(0), "Invalid source token");
         require(toToken != address(0), "Invalid destination token");
         require(fromToken != toToken, "Tokens must differ");
         require(amount > 0, "Amount must be greater than zero");
+
+        _emitTokenApproval(fromToken);
+        _emitTokenApproval(toToken);
 
         emit Swapped(
             EVENT_VERSION,
@@ -158,35 +201,38 @@ contract CoreEngine is EmergencyControl, ReentrancyGuard {
         );
     }
 
-    /**
-     * @notice Submit a local portfolio rebalance intent.
-     *
-     * @dev No asset movement occurs here. Execution and settlement belong to
-     * the authorized client and the external venue it integrates with.
-     * The legacy name is retained for ABI compatibility.
-     */
+    /// @submit a local portfolio rebalance intent.
+    ///
+    /// @dev No asset movement occurs here. Execution and settlement belong to
+    /// the authorized client and the external venue it integrates with.
+    /// The legacy name is retained for ABI compatibility.
     function rebalance(
         address user,
-        address[] calldata tokens,
-        uint256[] calldata amounts
+        address[] caldata tokens,
+        uint256[] caldata amounts
     ) external whenNotPaused nonReentrant onlyAuthorizedClient {
         require(user != address(0), "Invalid user");
         require(tokens.length == amounts.length, "Invalid input lengths");
         require(tokens.length > 0, "Empty rebalance");
 
         for (uint256 i = 0; i < tokens.length; i++) {
-            require(tokens[i] != address(0), "Invalid token");
+            _requireVerifiedToken(tokens[i]);
             require(amounts[i] > 0, "Amount must be greater than zero");
+            _emitTokenApproval(tokens[i]);
         }
 
-        emit Rebalanced(EVENT_VERSION, msg.sender, user, tokens, amounts);
+        emit Rebalanced(
+            EVENT_VERSION,
+            msg.sender,
+            user,
+            tokens,
+            amounts
+        );
     }
 
-    /**
-     * @notice Withdraw all recorded principal for a token during an emergency.
-     * @dev Only the caller's recorded principal is returned. No yield or
-     * unaccounted balance is distributed by this function.
-     */
+    /// @withdraw all recorded principal for a token during an emergency.
+    /// @dev Only the caller's recorded principal is returned. No yield or
+    /// unaccounted balance is distributed by this function.
     function emergencyWithdraw(
         address token
     ) external whenPaused nonReentrant {
