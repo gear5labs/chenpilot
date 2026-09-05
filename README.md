@@ -1,5 +1,4 @@
 # Chen Pilot — Autonomous AI Agent for Multi-Chain DeFi
-//WIP
 Chen Pilot is a sophisticated AI-driven gateway that enables seamless interaction with blockchain networks and DeFi protocols through natural language. It provides a unified, professional interface for managing Bitcoin assets, Stellar operations, cross-chain liquidity swaps, and lending protocols.
 
 ---
@@ -344,6 +343,38 @@ payload, rather than being collapsed into a single boolean.
 For contributor-facing operational detail, see
 `docs/SYSTEMS_HANDBOOK.md#health-and-readiness-endpoints`.
 
+## WebSocket Flow Control and Slow-Consumer Eviction
+
+The Gateway realtime API uses bounded per-socket buffers. Each connected
+client has a fixed `maxBufferSize` (default 1000 events) and a per-subscription
+cursor. When a client stops reading, the socket buffer fills and the Gateway:
+
+- Pauses event delivery to that socket.
+- Marks the consumer as stalled after `stallTimeoutMs` (default 30s).
+- Disconnects stalled consumers with a `4408` close code and `slow-consumer`
+  reason.
+- Retains the last delivered cursor so the client can resume after reconnect.
+
+Event classes are documented as either critical or lossy:
+
+- Critical events (transaction status, user balance updates, execution
+  results) are retained in Redis Streams and replayed from the validated
+  cursor after reconnect.
+- Lossy events (ticker prices, order book snapshots, non-critical
+  notifications) are delivered best-effort; a stalled consumer may miss them
+  and must resubscribe for the latest snapshot.
+
+Reconnect resumes from a validated cursor:
+
+- The client sends `{ cursor }` in the subscribe frame.
+- The Gateway validates that the cursor belongs to the authenticated user's
+  session before replay.
+- Replay is bounded by `maxReplayEventsPerSocket`; older events require a
+  fresh snapshot.
+
+Load tests cover fan-out, disconnect storms, and stalled consumers under
+`test/load/realtime-flow-control.load.ts`.
+
 ## Rate Limiting In Multi-Instance Deployments
 
 Gateway rate limiting is configured in
@@ -368,6 +399,12 @@ Redis connectivity before relying on cluster-wide request ceilings.
 - Create a feature branch
 - Make your changes
 - Ensure pre-commit and commit message checks pass
+- Run `npm audit fix` and commit the lockfile if the dependency audit check
+  fails.
+- Run `npx prettier --write "src/Agents/**"` if the Prettier CI check fails.
+- Run `npx eslint src/Agents/sandbox/ src/Agents/registry/ src/Agents/planner/ --max-warnings 0`
+  if the ESLint CI check fails; resolve all reported `prefer-const` and
+  `@typescript-eslint/no-unused-vars` errors before submitting.
 - Add tests if applicable
 - Submit a pull request
 
