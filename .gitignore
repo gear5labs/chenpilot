@@ -1,4 +1,9 @@
+node_modules/
+dist/
+build/
+logs/
 .env.local
+.env
 redteam-report.json
 
 # Dependencies and build output
@@ -7,4 +12,3 @@ dist/
 coverage/
 logs/
 *.log
-
