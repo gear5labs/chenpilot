@@ -25,6 +25,7 @@ import {
 } from "../Agents/admin/workflow.entity";
 import { TransactionLifecycle } from "../transactions/TransactionLifecycle.entity";
 import { LedgerObservation } from "../transactions/LedgerObservation.entity";
+import { OutboxEvent } from "../Reliability/outboxEvent.entity";
 
 const isDev = config.env === "development";
 
@@ -58,6 +59,7 @@ const dbOptions: DataSourceOptions = {
     AdminWorkflowApproval,
     TransactionLifecycle,
     LedgerObservation,
+    OutboxEvent,
   ],
   migrations: [isDev ? "src/migrations/**/*.ts" : "dist/migrations/**/*.js"],
   subscribers: [],
