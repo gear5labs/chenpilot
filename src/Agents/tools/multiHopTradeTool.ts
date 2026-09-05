@@ -3,6 +3,7 @@ import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import config from "../../config/config";
 import accountsData from "../../Auth/accounts.json";
+import { SecretBuffer } from "../../utils/secretBuffer";
 import {
   multiHopPathFinder,
   RoutePolicy,
@@ -339,7 +340,8 @@ export class MultiHopTradeTool extends BaseTool<MultiHopTradePayload> {
   }
 
   /**
-   * Get Stellar keypair for a user from stored accounts
+   * Get Stellar keypair for a user from stored accounts.
+   * The secret key is wrapped in a SecretBuffer and zeroized after use.
    * @param userId - The user ID
    * @returns Stellar keypair
    * @throws Error if account not found
@@ -349,7 +351,13 @@ export class MultiHopTradeTool extends BaseTool<MultiHopTradePayload> {
     const account = accounts.find((a) => a.userId === userId);
     if (!account)
       throw new Error(`Stellar account not found for user: ${userId}`);
-    return StellarSdk.Keypair.fromSecret(account.secretKey);
+
+    const secret = SecretBuffer.fromString(account.secretKey, `multihop-key:${userId}`);
+    try {
+      return secret.consumeString((plainKey) => StellarSdk.Keypair.fromSecret(plainKey));
+    } finally {
+      secret.destroy();
+    }
   }
 }
 

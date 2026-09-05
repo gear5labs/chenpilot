@@ -10,6 +10,7 @@ import { priceSpikeAlertService } from "./services/priceSpikeAlert.service";
 import { durableRecoveryService } from "./Agents/planner/DurableRecoveryService";
 import { idempotencyService } from "./Reliability/IdempotencyService";
 import { adminWorkflowService } from "./Agents/admin/workflow.service";
+import { initializeModelRegistry } from "./Agents/models/modelInitialization";
 
 class Server {
   private server: http.Server;
@@ -54,6 +55,11 @@ class Server {
       await AppDataSource.initialize();
       console.log("DB connection established!");
       logger.info("Database connected successfully");
+
+      // Initialize model registry with certified models
+      logger.info("Initializing model registry...");
+      initializeModelRegistry();
+      logger.info("Model registry initialized successfully");
 
       // Initialize default admin workflow policies
       await adminWorkflowService.initializeDefaultPolicies();

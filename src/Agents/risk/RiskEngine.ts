@@ -49,7 +49,7 @@ export interface RiskAssessment {
 // ── Static knowledge tables ────────────────────────────────────────────────────
 
 /** Trusted, well-audited assets — score 0 (no risk). Unknown assets score 1. */
-const TRUSTED_ASSETS = new Set(["XLM", "USDC", "USDT", "BTC", "ETH", "STRK"]);
+const TRUSTED_ASSETS = new Set(["XLM", "USDC", "USDT", "BTC", "ETH", "STRK", "DAI"]);
 
 /** Protocol trust scores: 0 = fully trusted, 1 = unknown/unaudited */
 const PROTOCOL_TRUST: Record<string, number> = {
@@ -63,11 +63,18 @@ const PROTOCOL_TRUST: Record<string, number> = {
   qa: 0,
   meta: 0,
   "risk_analysis_tool": 0,
+  checkBalance: 0,
+  getData: 0,
   // Moderate — multi-hop routing adds complexity
   "multi-hop-trade": 0.4,
   // High-trust execution tools (audited, in production)
   swap_tool: 0.2,
+  swap: 0.2,
   wallet_tool: 0.3,
+  transfer: 0.3,
+  approveSpender: 0.3,
+  provideLiquidity: 0.4,
+  stake: 0.3,
   // Soroban: arbitrary contract execution — trust depends on contract
   soroban_invoke: 0.6,
   // Strategy registry: governance-level action
@@ -86,11 +93,18 @@ const ACTION_TYPE_RISK: Record<string, number> = {
   qa: 0,
   meta: 0,
   "risk_analysis_tool": 0,
+  checkBalance: 0,
+  getData: 0,
   // Write — moderate
   "multi-hop-trade": 0.45,
   wallet_tool: 0.5,
+  transfer: 0.3,
+  approveSpender: 0.3,
+  provideLiquidity: 0.4,
+  stake: 0.3,
   // Write — high
   swap_tool: 0.6,
+  swap: 0.3,
   soroban_invoke: 0.65,
   strategyRegistry: 0.75,
 };

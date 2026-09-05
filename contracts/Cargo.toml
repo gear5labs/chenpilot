@@ -12,6 +12,7 @@ members = [
     "lending_liquidation",
     "liquidity_vault",
     "multi_hop_swap",
+    "oracle_aggregator",
     "por_validator",
     "rbac",
     "relayer_slashing",

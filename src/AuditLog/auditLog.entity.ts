@@ -80,6 +80,12 @@ export enum AuditAction {
   BOT_IDENTITY_UNLINKED = "bot_identity_unlinked",
   BOT_LINK_TOKEN_GENERATED = "bot_link_token_generated",
   BOT_LINK_TOKEN_VERIFIED = "bot_link_token_verified",
+
+  // Wallet ownership challenges
+  WALLET_CHALLENGE_ISSUED = "wallet_challenge_issued",
+  WALLET_CHALLENGE_VERIFIED = "wallet_challenge_verified",
+  WALLET_CHALLENGE_REPLAY = "wallet_challenge_replay",
+  WALLET_CHALLENGE_SIGNATURE_FAILED = "wallet_challenge_signature_failed",
 }
 
 export enum AuditSeverity {
