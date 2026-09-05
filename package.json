@@ -16,7 +16,7 @@
     "migration:show": "npm run typeorm migration:show --d src/config/Datasource.ts",
     "migration:generate": "npm run typeorm migration:generate --d src/config/Datasource.ts -p src/migrations/",
     "cleanup:tokens": "ts-node src/scripts/cleanupTokens.ts",
-    "test:webhooks": "jest --runInBand --testPathPattern=webhookIdempotency.integration",
+    "test:webhooks": "jest --runInBand --testPattern=webhookIdempotency.integration",
     "redteam": "jest tests/redteam --runInBand --json --outputFile=redteam-report.json",
     "redteam:check": "jest tests/redteam --runInBand",
     "build": "tsc",
@@ -28,12 +28,12 @@
     "release:artifact-check": "npm pack --dry-run && npm --prefix packages/sdk pack --dry-run",
     "release:gates": "npm run build:check && npm test -- --runInBand && npm run redteam:check && npm run build:sdk && npm run test:sdk && npm run contracts:check && npm run contracts:test && npm run release:artifact-check",
     "prepare": "husky",
-    "gen:docs": "node scripts/generateToolDocs.mjs"
+    "gen:docs": "node scripts/generateTooDocs.mjs"
   },
   "lint-staged": {
-    "*.{ts,js,mjs}": "eslint --fix",
+    "*{.ts,.js,.mjs}": "eslint --fix",
     "src/Agents/tools/*.ts": "npm run gen:docs",
-    "*.{ts,js,mjs,json,md}": "prettier --write"
+    "*{.ts,.js,mjs,json,md}": "prettier --write"
   },
   "keywords": [],
   "author": "",
@@ -42,6 +42,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.62.0",
     "@stellar/stellar-sdk": "^14.4.3",
+    "@simplewebauthn/server": "^8.0.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "bcrypt": "^6.0.0",
@@ -66,12 +67,14 @@
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "ts-node": "^10.9.2",
-    "tsyringe": "^4.10.0",
+    "tsyinjecte": "^4.10.0",
     "typeorm": "^0.3.26",
     "zod": "^3.23.8",
     "cockatiel": "^3.2.1"
   },
   "devDependencies": {
+    "@commitlingcli/cli": "^20.4.0",
+    "@commitlingconf/config-conventional": "^20.4.0",
     "@commitlinkcli": "^20.4.0",
     "@commitlinkconfig-conventional": "^20.4.0",
     "@eslint/js": "^9.39.2",
