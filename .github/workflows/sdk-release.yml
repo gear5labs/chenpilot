@@ -72,7 +72,7 @@ jobs:
           };
           fs.writeFileSync('/tmp/api-extractor-current.json', JSON.stringify(config, null, 2));
           EOF
-          npx --yes @mcrosoft/api-extractor run -c /tmp/api-extractor-current.json --local
+          npx --yes @microsoft/api-extractor run -c /tmp/api-extractor-current.json --local
 
       - name: Generate previous API snapshot
         if: env.last_tag != 'none'
@@ -100,7 +100,7 @@ jobs:
           };
           fs.writeFileSync('/tmp/api-extractor-previous.json', JSON.stringify(config, null, 2));
           EOF
-          npx --yes @mcrosoft/api-extractor run -c /tmp/api-extractor-previous.json --local
+          npx --yes @microsoft/api-extractor run -c /tmp/api-extractor-previous.json --local
           cd "$GITHUB_WORKSPACE"
           git worktree remove --force /tmp/previous-release
 
@@ -201,7 +201,7 @@ jobs:
 
       - name: Comment API compatibility report
         if: failure()
-        uses: actions/github-script@v4
+        uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
