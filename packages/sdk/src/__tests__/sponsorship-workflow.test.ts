@@ -247,3 +247,37 @@ describe("SponsorshipWorkflowBuilder", () => {
     });
   });
 });
+
+describe('Preflight Recipient Existence Workflow (#827)', () => {
+  it('chooses create_account operation when the recipient account does not exist', async () => {
+    const mockRpcClient = {
+      getAccount: jest.fn().mockRejectedValue({ status: 404, message: 'Account not found' }),
+    };
+
+    const operation = await selectPaymentOrCreationOperation(
+      mockRpcClient,
+      'G_NONEXISTENT_RECIPIENT',
+      '50.0'
+    );
+
+    expect(operation.operationType).toBe('create_account');
+    expect(operation.destination).toBe('G_NONEXISTENT_RECIPIENT');
+    expect(mockRpcClient.getAccount).toHaveBeenCalledWith('G_NONEXISTENT_RECIPIENT');
+  });
+
+  it('chooses payment operation when the recipient account already exists', async () => {
+    const mockRpcClient = {
+      getAccount: jest.fn().mockResolvedValue({ id: 'G_EXISTING_RECIPIENT', balances: [] }),
+    };
+
+    const operation = await selectPaymentOrCreationOperation(
+      mockRpcClient,
+      'G_EXISTING_RECIPIENT',
+      '50.0'
+    );
+
+    expect(operation.operationType).toBe('payment');
+    expect(operation.destination).toBe('G_EXISTING_RECIPIENT');
+    expect(mockRpcClient.getAccount).toHaveBeenCalledWith('G_EXISTING_RECIPIENT');
+  });
+});
