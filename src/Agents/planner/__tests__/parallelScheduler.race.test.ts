@@ -589,3 +589,29 @@ describe("Approval gate – step sequencing", () => {
     expect(nodes.get(2)!.conflictResources.has(key)).toBe(true);
   });
 });
+
+describe('Concurrent Intervention vs Recovery Retry Race Conditions (#812)', () => {
+  it('ensures only one actor performs side effects under concurrent intervention and recovery', async () => {
+    const engine = new WorkflowConcurrencyEngine();
+    const workflowId = 'wf_race_001';
+
+    let sideEffectCount = 0;
+    const mockSideEffect = async () => {
+      // Simulate slight asynchronous delay
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      sideEffectCount++;
+    };
+
+    // Fire concurrent recovery and intervention attempts simultaneously
+    const results = await Promise.all([
+      engine.executeAttempt(workflowId, 'recovery', mockSideEffect),
+      engine.executeAttempt(workflowId, 'intervention', mockSideEffect),
+    ]);
+
+    // Exactly one actor must succeed, the other must be blocked/skipped
+    const successfulExecutions = results.filter((res) => res === true);
+    
+    expect(successfulExecutions).toHaveLength(1);
+    expect(sideEffectCount).toBe(1);
+  });
+});
