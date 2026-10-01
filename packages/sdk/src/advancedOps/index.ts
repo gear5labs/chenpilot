@@ -43,14 +43,28 @@ export {
 } from "./validation";
 
 export {
+  type DestinationMemoCheck,
+  type DestinationMemoRequirement,
+  type StellarTransactionMemoShape,
+  DestinationMemoRequirementError,
+  assertDestinationMemoRequirement,
+  checkDestinationMemoRequirement,
+  clearDestinationMemoRequirements,
   describeMemo,
+  destinationMemoChecksForTransaction,
+  enforceDestinationMemoRequirements,
+  getDestinationMemoRequirement,
   hashMemo,
   idMemo,
+  listDestinationMemoRequirements,
   memoValueToBuffer,
   noMemo,
   normalizeMemoParams,
+  registerDestinationMemoRequirement,
+  registerDestinationMemoRequirements,
   returnMemo,
   textMemo,
+  unregisterDestinationMemoRequirement,
   validateMemoParams,
 } from "./memoOperations";
 
@@ -68,6 +82,9 @@ export {
   createClaimableBalance,
   describeClaimableBalanceClaim,
   describeClaimableBalanceCreate,
+  describeClaimPredicate,
+  evaluateClaimPredicate,
+  explainClaimEligibility,
   isNativeAsset,
   normalizeClaimableBalanceClaimParams,
   normalizeClaimableBalanceCreateParams,

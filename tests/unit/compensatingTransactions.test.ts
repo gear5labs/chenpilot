@@ -71,6 +71,7 @@ import {
   TERMINAL_STATES,
   LifecycleState,
 } from "../../src/transactions/TransactionLifecycle.entity";
+import { DependencyGraph } from "../../src/Agents/planner/DependencyGraph";
 
 // ── buildCompensationPlan unit tests ────────────────────────────────────────────
 
@@ -476,6 +477,46 @@ describe("Multi-step workflow compensation scenarios", () => {
 
     expect(plans[0].type).toBe(CompensationType.REVERSIBLE);
     expect(plans[1].type).toBe(CompensationType.REQUIRES_MANUAL_REVIEW);
+  });
+
+  it("diamond branch failure compensates only the completed eligible branch in reverse dependency order", () => {
+    const steps: PlanStep[] = [
+      {
+        stepNumber: 1,
+        action: "swap_tool",
+        payload: { from: "XLM", to: "USDC", amount: 100 },
+        description: "Root source swap",
+      },
+      {
+        stepNumber: 2,
+        action: "swap_tool",
+        payload: { from: "USDC", to: "ETH", amount: 50 },
+        description: "Branch A swap",
+        dependencies: [1],
+      },
+      {
+        stepNumber: 3,
+        action: "swap_tool",
+        payload: { from: "USDC", to: "BTC", amount: 60 },
+        description: "Branch B swap",
+        dependencies: [1],
+      },
+      {
+        stepNumber: 4,
+        action: "swap_tool",
+        payload: { from: "ETH", to: "XLM", amount: 40 },
+        description: "Join step",
+        dependencies: [2, 3],
+      },
+    ];
+
+    const graph = DependencyGraph.build(steps);
+    const completed = [1, 2]; // Branch B failed and step 3 is not eligible
+    const order = DependencyGraph.getCompensationOrder(completed, graph.nodes);
+
+    expect(order).toEqual([2, 1]);
+    expect(order).not.toContain(3);
+    expect(order.indexOf(2)).toBeLessThan(order.indexOf(1));
   });
 
   it("idempotency: building compensation plan twice returns same result", () => {

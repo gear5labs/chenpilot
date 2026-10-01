@@ -1,4 +1,10 @@
+import * as StellarSdk from '@stellar/stellar-sdk';
 import { Asset, AssetAmount } from '../index';
+
+jest.mock('@stellar/stellar-sdk', () => {
+  const actual = jest.requireActual('@stellar/stellar-sdk');
+  return { __esModule: true, ...actual };
+});
 
 describe('Domain Models', () => {
   describe('Asset', () => {
@@ -27,6 +33,41 @@ describe('Domain Models', () => {
           decimals: 7,
         });
       }).toThrow();
+    });
+
+    it('should keep the issuer in the asset identity (#832)', () => {
+      const issuerA = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
+      const issuerB = 'GCQTGZQQ5G4PTM2GL7CDIFKUBIPEC52BROAQIAPW53XBRJVN6ZJVTG6V';
+      const first = Asset.create({
+        code: 'USDC',
+        issuer: issuerA,
+        type: 'credit_alphanum4',
+        decimals: 7,
+      });
+      const second = Asset.create({
+        code: 'USDC',
+        issuer: issuerB,
+        type: 'credit_alphanum4',
+        decimals: 7,
+      });
+
+      expect(first.canonicalId).toBe(`USDC:${issuerA}`);
+      expect(second.canonicalId).toBe(`USDC:${issuerB}`);
+      expect(first.canonicalId).not.toBe(second.canonicalId);
+      expect(first.toString()).not.toBe(second.toString());
+      expect(first.equals(second)).toBe(false);
+      expect(first.equals(Asset.create({ ...first.value }))).toBe(true);
+      expect(Asset.native().canonicalId).toBe('native:XLM');
+    });
+
+    it('should round-trip the issuer through the Stellar SDK asset (#832)', () => {
+      const issuer = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
+      const asset = Asset.fromStellarAsset(new StellarSdk.Asset('USDC', issuer));
+
+      expect(asset.issuer).toBe(issuer);
+      expect(asset.canonicalId).toBe(`USDC:${issuer}`);
+      expect(asset.toStellarAsset().getCode()).toBe('USDC');
+      expect(asset.toStellarAsset().getIssuer()).toBe(issuer);
     });
   });
 

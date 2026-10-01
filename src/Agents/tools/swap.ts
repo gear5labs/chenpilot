@@ -10,6 +10,10 @@ import { flashSwapRiskAnalyzer } from "../../services/flashSwapRiskAnalyzer";
 import { RedisLockService } from "../../services/lock";
 import { transactionLifecycleService } from "../../transactions/TransactionLifecycle.service";
 import { assetRevocationService } from "../../Security";
+import {
+  assertTrustlinesForTransfer,
+  TrustlineUnauthorizedError,
+} from "../../../packages/sdk/src/trustline";
 
 interface SwapPayload extends Record<string, unknown> {
   from: string;
@@ -284,6 +288,18 @@ export class SwapTool extends BaseTool<SwapPayload> {
         );
       }
 
+      // Preflight: both sides of the swap must hold authorized trustlines.
+      // Fail-closed — a frozen or missing trustline must block the transfer
+      // before any quote or transaction is built.
+      const sourceKeypair = this.getStellarAccount(userId);
+      const sourcePublicKey = sourceKeypair.publicKey();
+
+      await assertTrustlinesForTransfer(
+        config.stellar.horizonUrl,
+        sourcePublicKey,
+        [sourceAsset, destAsset]
+      );
+
       // Simulation phase — price quote + risk analysis
       await transactionLifecycleService.transition(lifecycleId, "simulating");
 
@@ -368,9 +384,6 @@ export class SwapTool extends BaseTool<SwapPayload> {
           deadline: quoteDeadline,
         },
       });
-
-      const sourceKeypair = this.getStellarAccount(userId);
-      const sourcePublicKey = sourceKeypair.publicKey();
 
       // Acquire a durable sequence lease to prevent sequence races across instances
       const leaseResult = await sequenceLeaseService.acquireLease(
@@ -491,9 +504,11 @@ export class SwapTool extends BaseTool<SwapPayload> {
       );
       return this.createErrorResult(
         "swap",
-        error instanceof Error
+        error instanceof TrustlineUnauthorizedError
           ? error.message
-          : "Unknown error occurred during swap"
+          : error instanceof Error
+            ? error.message
+            : "Unknown error occurred during swap"
       );
     } finally {
       this.stopLockHeartbeat(heartbeat);

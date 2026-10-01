@@ -1,0 +1,4 @@
+﻿TSCJS=False
+LIBCOUNT=1
+LIBS=_tsc.js
+TSCLIBJS=True

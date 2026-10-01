@@ -6,6 +6,7 @@ import AppDataSource from "../config/Datasource";
 import logger from "../config/logger";
 import { DeploymentEventBridge, TransactionEventBridge } from "../Gateway/eventBridges";
 import { JobHandler, JobHandlerResult, NonRetryableJobError } from "./jobWorker";
+import { QueueJob } from "./job.entity";
 import { getFinalizationManager } from "../services/finality/FinalizationManager";
 import { SafeXdrDecoder } from "../utils/xdr";
 
@@ -28,6 +29,14 @@ interface FundingAutoDeployPayload {
   transactionHash: string;
   amount: string;
   stellarAccount: string;
+}
+
+interface WorkflowExpiryPayload {
+  batchSize?: number;
+}
+
+interface ProgressMonitorPayload {
+  logOnly?: boolean;
 }
 
 class DelayedTransactionJobHandler implements JobHandler {
@@ -233,9 +242,115 @@ class FundingAutoDeploymentJobHandler implements JobHandler {
   }
 }
 
+class WorkflowExpiryJobHandler implements JobHandler {
+  readonly jobType = "workflow.expire_cleanup";
+  private readonly defaultBatchSize = 100;
+
+  async handle(job: QueueJob): Promise<JobHandlerResult> {
+    const payload = job.payload as unknown as WorkflowExpiryPayload;
+    const batchSize = payload?.batchSize ?? this.defaultBatchSize;
+
+    try {
+      // Lazy import to avoid circular dependency
+      const { adminWorkflowService } = await import("../Agents/admin/workflow.service");
+      const expiredCount = await adminWorkflowService.expireOldInstances();
+
+      logger.info("Workflow expiry cleanup completed", {
+        jobId: job.id,
+        expiredCount,
+        batchSize,
+      });
+
+      return {
+        outcome: "completed",
+        result: {
+          expiredCount,
+          processedAt: new Date().toISOString(),
+        },
+      };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown workflow expiry error";
+
+      logger.error("Workflow expiry cleanup failed", {
+        jobId: job.id,
+        error: errorMessage,
+      });
+
+      return {
+        outcome: "retry",
+        delayMs: 60000, // Retry after 1 minute
+        error: errorMessage,
+      };
+    }
+  }
+}
+
+class ProgressMonitorJobHandler implements JobHandler {
+  readonly jobType = "progress.monitor";
+
+  async handle(job: QueueJob): Promise<JobHandlerResult> {
+    const payload = job.payload as unknown as ProgressMonitorPayload;
+    const logOnly = payload?.logOnly ?? true;
+
+    try {
+      // Lazy import to avoid circular dependency
+      const { progressMonitorService } = await import("../Agents/planner/ProgressMonitor.service");
+
+      if (logOnly) {
+        await progressMonitorService.logStuckExecutions();
+      } else {
+        const healthStats = await progressMonitorService.getExecutionHealthStats();
+
+        logger.info("Progress monitor health check completed", {
+          jobId: job.id,
+          stats: {
+            total: healthStats.total,
+            running: healthStats.running,
+            awaitingApproval: healthStats.awaitingApproval,
+            paused: healthStats.paused,
+            stuck: healthStats.stuck,
+          },
+        });
+
+        return {
+          outcome: "completed",
+          result: {
+            healthStats,
+            processedAt: new Date().toISOString(),
+          },
+        };
+      }
+
+      return {
+        outcome: "completed",
+        result: {
+          processedAt: new Date().toISOString(),
+        },
+      };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown progress monitor error";
+
+      logger.error("Progress monitor failed", {
+        jobId: job.id,
+        error: errorMessage,
+      });
+
+      return {
+        outcome: "retry",
+        delayMs: 300000, // Retry after 5 minutes
+        error: errorMessage,
+      };
+    }
+  }
+}
+
 export function buildDefaultJobHandlers(): JobHandler[] {
   return [
     new DelayedTransactionJobHandler(),
     new FundingAutoDeploymentJobHandler(),
+    new WorkflowExpiryJobHandler(),
+    new ProgressMonitorJobHandler(),
   ];
 }

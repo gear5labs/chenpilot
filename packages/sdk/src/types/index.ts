@@ -30,6 +30,77 @@ export interface AgentResponse {
   data?: unknown;
 }
 
+// ─── Abort handling types ────────────────────────────────────────────────────
+
+/**
+ * Structural subset of the DOM `AbortSignal` used across the SDK so callers can
+ * pass either a native `AbortSignal` or a minimal compatible stub (for tests
+ * and non-DOM runtimes).
+ */
+export interface AbortSignalLike {
+  /** Whether the signal has already been aborted. */
+  readonly aborted: boolean;
+  /** Optional abort event wiring. Native AbortSignal implements both. */
+  addEventListener?: (
+    type: "abort",
+    listener: () => void,
+    options?: { once?: boolean }
+  ) => void;
+  removeEventListener?: (type: "abort", listener: () => void) => void;
+  /** Optional direct handler used as a fallback when listeners are unavailable. */
+  onabort?: ((...args: never[]) => void) | null;
+}
+
+/** Options accepted by every abortable SDK operation. */
+export interface AbortableOperationOptions {
+  /** Optional external signal to cancel the operation. */
+  signal?: AbortSignalLike;
+  /** Optional call-level timeout in milliseconds. */
+  timeoutMs?: number;
+}
+
+// ─── Agent client request types ──────────────────────────────────────────────
+
+/** Common options forwarded to every AgentClient operation. */
+export interface RequestOptions {
+  /** User id the agent operates on behalf of. */
+  userId: string;
+  /** Optional caller-supplied idempotency key. */
+  idempotencyKey?: string;
+  /** Per-call timeout in milliseconds. */
+  timeoutMs?: number;
+  /** Maximum retry attempts. */
+  maxRetries?: number;
+  /** Delay between retries in milliseconds. */
+  retryDelayMs?: number;
+  /** Optional external signal to cancel the operation. */
+  signal?: AbortSignalLike;
+}
+
+/** Simulation payload for the AI agent. */
+export interface SimulationRequest {
+  [key: string]: unknown;
+}
+
+/** Simulation result. */
+export type SimulationResult = AgentResponse;
+
+/** Execution payload for the AI agent. */
+export interface ExecutionRequest {
+  [key: string]: unknown;
+}
+
+/** Execution result. */
+export type ExecutionResult = AgentResponse;
+
+/** Vault operation payload for the AI agent. */
+export interface VaultOperationRequest {
+  [key: string]: unknown;
+}
+
+/** Vault operation result. */
+export type VaultOperationResult = AgentResponse;
+
 /** Recovery and cleanup actions available during cross-chain flows */
 export enum RecoveryAction {
   RETRY_MINT = "retry_mint",
@@ -77,6 +148,8 @@ export interface RecoveryEngineOptions {
   retryDelayMs?: number;
   retryHandler?: RetryHandler;
   refundHandler?: RefundHandler;
+  /** Optional signal applied to cleanup/retry backoff delays by default. */
+  signal?: AbortSignalLike;
 }
 
 // ─── Rate limiter types ──────────────────────────────────────────────────────

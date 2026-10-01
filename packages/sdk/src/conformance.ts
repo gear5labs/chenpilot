@@ -42,6 +42,8 @@ export interface BackendVersionEntry {
 export interface BackendFixtures {
   /** Response to an authentication / capability handshake. */
   auth: unknown;
+  /** Response to a getLedgerEntries (read-only query) call. */
+  query: unknown;
   /** Response to a simulateTransaction call. */
   simulation: unknown;
   /** Response to a sendTransaction call. */
@@ -64,6 +66,7 @@ export const BACKEND_VERSION_MATRIX: BackendVersionEntry[] = [
     capabilities: ["deposit", "withdraw", "auth"],
     fixtures: {
       auth: { ok: true, capabilities: ["deposit", "withdraw", "auth"] },
+      query: { returnValue: { balance: "500", owner: "GUSER" } },
       simulation: {
         result: { retval: "ok", auth: [{ address: "GUSER" }] },
         minResourceFee: "1200",
@@ -90,6 +93,7 @@ export const BACKEND_VERSION_MATRIX: BackendVersionEntry[] = [
         ok: true,
         capabilities: ["deposit", "withdraw", "auth", "flash-loan"],
       },
+      query: { returnValue: { balance: "1000", owner: "GUSER" } },
       simulation: {
         result: { retval: "ok", auth: [{ address: "GUSER" }] },
         minResourceFee: "1500",
@@ -116,6 +120,7 @@ export const BACKEND_VERSION_MATRIX: BackendVersionEntry[] = [
         ok: true,
         capabilities: ["deposit", "withdraw", "auth", "flash-loan", "recovery"],
       },
+      query: { returnValue: { balance: "2500", owner: "GUSER" } },
       simulation: {
         result: { retval: "ok", auth: [{ address: "GUSER" }] },
         minResourceFee: "2000",
@@ -226,6 +231,7 @@ export function runConformance(
   sdkVersion: string,
   decoded: {
     auth?: unknown;
+    query?: unknown;
     simulation?: unknown;
     submission?: unknown;
     events?: unknown[];
@@ -265,7 +271,18 @@ export function runConformance(
     }
   }
 
-  // 2. Simulation.
+  // 2. Query (read-only ledger state via getLedgerEntries).
+  const queryFixture = (entry.fixtures.query ?? {}) as Record<string, unknown>;
+  const queryDecoded = (decoded.query ?? {}) as Record<string, unknown>;
+  const queryRetvalFixture = (queryFixture.returnValue ?? {}) as Record<string, unknown>;
+  const queryRetvalDecoded = (queryDecoded.returnValue ?? {}) as Record<string, unknown>;
+  for (const key of Object.keys(queryRetvalFixture)) {
+    if (queryRetvalFixture[key] !== queryRetvalDecoded[key]) {
+      fail("query", `query.returnValue.${key}`, `Query return value field ${key} diverged`, queryRetvalFixture[key], queryRetvalDecoded[key]);
+    }
+  }
+
+  // 3. Simulation.
   const simFixture = entry.fixtures.simulation as Record<string, unknown>;
   const simDecoded = (decoded.simulation ?? {}) as Record<string, unknown>;
   const simResult = (simFixture.result ?? {}) as Record<string, unknown>;
@@ -280,7 +297,7 @@ export function runConformance(
     fail("simulation", "simulation.transactionData", "Transaction data diverged", simFixture.transactionData, simDecoded.transactionData);
   }
 
-  // 3. Submission.
+  // 4. Submission.
   const subFixture = entry.fixtures.submission as Record<string, unknown>;
   const subDecoded = (decoded.submission ?? {}) as Record<string, unknown>;
   if (subFixture.hash !== subDecoded.hash) {
@@ -290,7 +307,7 @@ export function runConformance(
     fail("submission", "submission.status", "Submission status diverged", subFixture.status, subDecoded.status);
   }
 
-  // 4. Events.
+  // 5. Events.
   const eventFixtures = entry.fixtures.events ?? [];
   const eventDecoded = decoded.events ?? [];
   if (eventFixtures.length !== eventDecoded.length) {
@@ -309,7 +326,7 @@ export function runConformance(
     }
   }
 
-  // 5. Error decoding.
+  // 6. Error decoding.
   const errFixture = entry.fixtures.error as Record<string, unknown>;
   const errDecoded = (decoded.error ?? {}) as Record<string, unknown>;
   if (errFixture.code !== errDecoded.code) {

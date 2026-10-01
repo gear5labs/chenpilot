@@ -3,6 +3,10 @@ import {
   NetworkIdentityVerifier,
   NetworkIdentityVerifierConfig,
 } from "./networkIdentity";
+import {
+  ValidationResult,
+  SchemaValidationError,
+} from "./schemaValidator";
 
 export type ContractFunctionKind = "query" | "simulate" | "execute";
 export type ApprovalCheckpoint =
@@ -42,6 +46,7 @@ export interface ContractCall<Args extends readonly unknown[] = unknown[]> {
 
 export interface QueryRequest<TDecoded = unknown> extends ContractCall {
   decoder?: ResultDecoder<TDecoded>;
+  resultSpec?: ResultSpec;
   signal?: AbortSignalLike;
 }
 
@@ -49,6 +54,7 @@ export interface SimulationRequest<TDecoded = unknown> extends ContractCall {
   sourceAccount?: string;
   transactionXdr?: string;
   decoder?: ResultDecoder<TDecoded>;
+  resultSpec?: ResultSpec;
   signal?: AbortSignalLike;
 }
 
@@ -56,10 +62,56 @@ export interface ExecuteRequest<TDecoded = unknown> extends ContractCall {
   signedTransactionXdr: string;
   idempotencyKey?: string;
   decoder?: ResultDecoder<TDecoded>;
+  resultSpec?: ResultSpec;
   signal?: AbortSignalLike;
 }
 
 export type ResultDecoder<T> = (value: unknown) => T;
+
+/**
+ * A runtime specification for a contract method's return value.
+ * Returns a {@link ValidationResult} describing any type mismatches.
+ *
+ * Build one with {@link validateResultSpec} or supply a custom predicate.
+ */
+export type ResultSpec = (decoded: unknown) => ValidationResult;
+
+/**
+ * Build a {@link ResultSpec} that checks each entry in `fields` against an
+ * expected JS `typeof` string (or `"array"`).
+ *
+ * @example
+ * validateResultSpec({ admin: "string", paused: "boolean" })
+ */
+export function validateResultSpec(
+  fields: Record<string, string>
+): ResultSpec {
+  return (decoded: unknown): ValidationResult => {
+    const errors: ValidationResult["errors"] = [];
+
+    if (decoded === null || decoded === undefined || typeof decoded !== "object" || Array.isArray(decoded)) {
+      return {
+        valid: false,
+        errors: [{ field: "(root)", expected: "object", received: typeof decoded, message: "Decoded result must be a plain object" }],
+      };
+    }
+
+    const obj = decoded as Record<string, unknown>;
+    for (const [field, expectedType] of Object.entries(fields)) {
+      const value = obj[field];
+      if (value === undefined) {
+        errors.push({ field, expected: expectedType, message: `Missing field "${field}"` });
+        continue;
+      }
+      const actual = Array.isArray(value) ? "array" : typeof value;
+      if (actual !== expectedType) {
+        errors.push({ field, expected: expectedType, received: actual, message: `Field "${field}" should be ${expectedType}, received ${actual}` });
+      }
+    }
+
+    return { valid: errors.length === 0, errors };
+  };
+}
 
 export interface ContractResult<TDecoded> {
   raw: unknown;
@@ -114,6 +166,7 @@ export interface ContractMethodSpec<
   method: string;
   kind: ContractFunctionKind;
   decoder?: ResultDecoder<Result>;
+  resultSpec?: ResultSpec;
 }
 
 export type ContractSpec = Record<string, ContractMethodSpec>;
@@ -212,7 +265,7 @@ export class ContractClient {
     const raw = await this.rpc("getLedgerEntries", {
       keys: [this.ledgerEntryKey(request.contractId, request.method, request.args)],
     });
-    return this.toContractResult(raw, request.decoder);
+    return this.toContractResult(raw, request.decoder, request.resultSpec);
   }
 
   async simulate<TDecoded = unknown>(
@@ -228,7 +281,7 @@ export class ContractClient {
       sourceAccount: request.sourceAccount,
     });
 
-    const base = await this.toContractResult(raw, request.decoder);
+    const base = await this.toContractResult(raw, request.decoder, request.resultSpec);
     const authEntries = extractArray(raw, ["result", "auth"]);
     const feeEstimate = extractFeeEstimate(raw);
     const warnings = extractWarnings(raw);
@@ -271,7 +324,7 @@ export class ContractClient {
       { "Idempotency-Key": idempotencyKey },
       request.signal
     );
-    const base = await this.toContractResult(raw, request.decoder);
+    const base = await this.toContractResult(raw, request.decoder, request.resultSpec);
 
     return {
       ...base,
@@ -292,6 +345,7 @@ export class ContractClient {
           method: methodSpec.method,
           args,
           decoder: methodSpec.decoder,
+          resultSpec: methodSpec.resultSpec,
         };
 
         if (methodSpec.kind === "simulate") return this.simulate(request);
@@ -309,11 +363,21 @@ export class ContractClient {
 
   private async toContractResult<TDecoded>(
     raw: unknown,
-    decoder?: ResultDecoder<TDecoded>
+    decoder?: ResultDecoder<TDecoded>,
+    resultSpec?: ResultSpec
   ): Promise<ContractResult<TDecoded>> {
+    const decoded = (decoder ?? identityDecoder<TDecoded>)(extractReturnValue(raw));
+
+    if (resultSpec) {
+      const check = resultSpec(decoded);
+      if (!check.valid) {
+        throw new SchemaValidationError("Contract return value failed result spec", check.errors);
+      }
+    }
+
     return {
       raw,
-      decoded: (decoder ?? identityDecoder<TDecoded>)(extractReturnValue(raw)),
+      decoded,
       compatibility: await this.checkCompatibility(),
     };
   }

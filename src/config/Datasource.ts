@@ -46,6 +46,7 @@ import {
 } from "../Agents/registry/PromptVersion.entity";
 import { DurableExecution } from "../Agents/planner/DurableExecution.entity";
 import { DurableStep } from "../Agents/planner/DurableStep.entity";
+import { InterventionRecord } from "../Agents/planner/intervention.entity";
 import { DurableOperation } from "../Reliability/DurableOperation.entity";
 import { WebhookIdempotency } from "../Gateway/webhookIdempotency.entity";
 import { AuditLog } from "../AuditLog/auditLog.entity";
@@ -96,6 +97,7 @@ const dbOptions: DataSourceOptions = {
     PromptMetric,
     DurableExecution,
     DurableStep,
+    InterventionRecord,
     DurableOperation,
     WebhookIdempotency,
     AuditLog,

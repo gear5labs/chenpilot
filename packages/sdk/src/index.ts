@@ -87,6 +87,8 @@ export {
   QueryRequest,
   ExecuteRequest,
   ResultDecoder,
+  ResultSpec,
+  validateResultSpec,
   ContractResult,
 } from "./contractClient";
 export * from "./advancedOps";

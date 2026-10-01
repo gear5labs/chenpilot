@@ -73,6 +73,9 @@ export class InterventionRecord {
   @Column({ type: "varchar", default: InterventionStatus.PENDING_APPROVAL })
   status!: InterventionStatus;
 
+  @Column({ type: "timestamp", nullable: true })
+  expiresAt?: Date;
+
   // ── Operator ───────────────────────────────────────────────────────────────
 
   @Column({ type: "uuid" })

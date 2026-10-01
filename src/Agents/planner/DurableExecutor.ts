@@ -15,6 +15,18 @@ import {
 } from "../../Gateway/socketManager";
 import { compensationService, buildCompensationPlan } from "./CompensationService";
 import { FailureState } from "../types";
+import {
+  CURRENT_WORKFLOW_SCHEMA_VERSION,
+  checkSchemaCompatibility,
+} from "./workflowSchemaVersion";
+import {
+  StepInputResolutionContext,
+  StepInputResolutionError,
+  clearResolvedStepInputs,
+  collectCompletedStepResults,
+  isStepInputResolutionError,
+  resolveAndFreezeStepInputs,
+} from "./stepInputResolution";
 
 export interface DurableExecutionResult {
   executionId: string;
@@ -66,6 +78,26 @@ export class DurableExecutor {
   }
 
   // ---------------------------------------------------------------------------
+  // Resolved-input context
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Snapshot the values a step's placeholders may reference.
+   *
+   * Rebuilt for every step (rather than once per run) so that results written
+   * by earlier steps in the same run are visible to references in a later
+   * step's payload; the map is a point-in-time copy, not a live view.
+   */
+  private buildInputResolutionContext(
+    execution: DurableExecution
+  ): StepInputResolutionContext {
+    return {
+      stepResults: collectCompletedStepResults(execution.steps ?? []),
+      context: execution.context ?? {},
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // startExecution
   // ---------------------------------------------------------------------------
 
@@ -104,6 +136,7 @@ export class DurableExecutor {
     execution.currentStepNumber = 1;
     execution.riskLevel = plan.riskLevel;
     execution.requiresApproval = plan.requiresApproval;
+    execution.schemaVersion = CURRENT_WORKFLOW_SCHEMA_VERSION;
 
     execution.steps = plan.steps.map((step) => {
       const durableStep = new DurableStep();
@@ -129,11 +162,15 @@ export class DurableExecutor {
 
     if (execution.requiresApproval) {
       execution.status = ExecutionStatus.AWAITING_APPROVAL;
+      const ttlMinutes = plan.approvalTimeoutMinutes || 60; // Default 60 minutes
+      const now = new Date();
+      execution.expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
       await this.executionRepo.save(execution);
       this.emitUpdate(RealtimeEventType.AGENT_APPROVAL_REQUIRED, execution);
       logger.info("Durable execution awaiting plan-level approval", {
         executionId: execution.id,
         parallel: useParallel,
+        expiresAt: execution.expiresAt,
       });
       return savedExecution;
     }
@@ -176,6 +213,33 @@ export class DurableExecutor {
     });
 
     if (!execution) throw new Error("Execution not found");
+
+    // Check schema version compatibility before attempting resume
+    // Handle legacy executions without schemaVersion field
+    if (!execution.schemaVersion) {
+      logger.error("Resume rejected due to missing schema version (legacy execution)", {
+        executionId,
+      });
+      throw new Error(
+        `Cannot resume execution: missing schema version. This execution was created before schema versioning was introduced and cannot be safely resumed.`
+      );
+    }
+
+    const compatibility = checkSchemaCompatibility(execution.schemaVersion);
+    if (!compatibility.compatible) {
+      logger.error("Resume rejected due to incompatible workflow schema version", {
+        executionId,
+        storedVersion: execution.schemaVersion,
+        currentVersion: compatibility.currentVersion,
+        reason: compatibility.reason,
+      });
+      throw new Error(
+        `Cannot resume execution: incompatible workflow schema version. ` +
+        `Stored: ${execution.schemaVersion}, Current: ${compatibility.currentVersion}. ` +
+        `Reason: ${compatibility.reason}`
+      );
+    }
+
     if (execution.status === ExecutionStatus.COMPLETED) return;
     if (execution.status === ExecutionStatus.CANCELLED) {
       throw new Error("Cannot resume a cancelled execution");
@@ -366,15 +430,22 @@ export class DurableExecutor {
 
         if (step.requiresApproval && !step.approvedAt) {
           step.status = StepStatus.AWAITING_APPROVAL;
+          const ttlMinutes = 60; // Default 60 minutes for step approval
+          const now = new Date();
+          step.expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
           await this.stepRepo.save(step);
 
           execution.status = ExecutionStatus.AWAITING_APPROVAL;
+          if (!execution.expiresAt) {
+            execution.expiresAt = step.expiresAt;
+          }
           await this.executionRepo.save(execution);
 
           this.emitUpdate(RealtimeEventType.AGENT_APPROVAL_REQUIRED, execution);
           logger.info("Execution suspended for step approval", {
             executionId,
             stepNumber: step.stepNumber,
+            expiresAt: step.expiresAt,
           });
           return;
         }
@@ -382,7 +453,10 @@ export class DurableExecutor {
         const success = await this.executeStepWithRetries(
           step,
           execution.userId,
-          executionId
+          executionId,
+          // Rebuilt per step so results written by earlier steps in this same
+          // run are visible to references in this step's payload.
+          this.buildInputResolutionContext(execution)
         );
 
         if (success) {
@@ -468,12 +542,34 @@ export class DurableExecutor {
   private async executeStepWithRetries(
     step: DurableStep,
     userId: string,
-    executionId: string
+    executionId: string,
+    inputContext: StepInputResolutionContext
   ): Promise<boolean> {
     while (step.retryCount < step.maxRetries) {
       // Safe point: check before each attempt to avoid invoking a tool after
       // the execution has been externally cancelled.
       await this.checkCancelled(executionId);
+
+      // Freeze the resolved inputs durably *before* the side effect. On a retry
+      // or a resume this returns the snapshot written by the interrupted
+      // attempt instead of re-deriving inputs from changed state (issue #809).
+      let inputs: Record<string, unknown>;
+      try {
+        inputs = await resolveAndFreezeStepInputs(
+          step,
+          inputContext,
+          this.stepRepo
+        );
+      } catch (error) {
+        if (!isStepInputResolutionError(error)) throw error;
+        return this.failUnresolvedStepInputs(step, error);
+      }
+
+      logger.debug("Step inputs frozen", {
+        executionId,
+        stepNumber: step.stepNumber,
+        inputsHash: step.resolvedInputsHash,
+      });
 
       step.status = StepStatus.RUNNING;
       step.startedAt = new Date();
@@ -482,7 +578,7 @@ export class DurableExecutor {
       try {
         const result = await toolRegistry.executeTool(
           step.action,
-          step.payload,
+          inputs,
           userId
         );
 
@@ -521,6 +617,37 @@ export class DurableExecutor {
         }
       }
     }
+    return false;
+  }
+
+  /**
+   * Fail a step whose inputs could not be resolved and frozen.
+   *
+   * The refusal happens before any side effect, and it is deterministic — the
+   * same payload against the same context fails identically — so the step is
+   * marked FAILED after a single attempt instead of consuming the retry budget.
+   * Returning `false` lets `run()` apply the normal failure path (including
+   * compensation of already-completed steps) unchanged.
+   */
+  private async failUnresolvedStepInputs(
+    step: DurableStep,
+    error: StepInputResolutionError
+  ): Promise<false> {
+    step.status = StepStatus.FAILED;
+    step.error = `Unresolved step inputs (${error.code}): ${error.message}`;
+    await this.stepRepo.save(step);
+
+    logger.error(
+      "Refusing to execute step: resolved inputs could not be frozen",
+      {
+        stepNumber: step.stepNumber,
+        action: step.action,
+        code: error.code,
+        location: error.location,
+        error: error.message,
+      }
+    );
+
     return false;
   }
 
@@ -569,6 +696,9 @@ export class DurableExecutor {
 
     if (!step) throw new Error("Step not found");
 
+    // The frozen resolved inputs are intentionally retained: the retry replays
+    // exactly the inputs of the failed attempt, so a recovered step cannot
+    // submit different parameters (issue #809).
     step.status = StepStatus.PENDING;
     step.retryCount = 0;
     step.error = undefined;
@@ -602,6 +732,11 @@ export class DurableExecutor {
 
   /**
    * Operator repair: Update step payload and retry
+   *
+   * This is the only path allowed to invalidate a frozen input snapshot: the
+   * supplied payload replaces the template the old snapshot was derived from,
+   * so the snapshot is cleared and the next attempt freezes fresh inputs. The
+   * superseded hash is logged so the replacement is auditable (issue #809).
    */
   async repairUpdateAndRetry(
     executionId: string,
@@ -615,11 +750,21 @@ export class DurableExecutor {
 
     if (!step) throw new Error("Step not found");
 
+    const supersededInputsHash = clearResolvedStepInputs(step);
+
     step.payload = newPayload;
     step.status = StepStatus.PENDING;
     step.retryCount = 0;
     step.error = undefined;
     await this.stepRepo.save(step);
+
+    if (supersededInputsHash) {
+      logger.warn("Operator replaced step payload; frozen inputs invalidated", {
+        executionId,
+        stepNumber,
+        supersededInputsHash,
+      });
+    }
 
     return this.resumeExecution(executionId);
   }

@@ -25,6 +25,7 @@ import governanceRoutes from "../Agents/admin/governance.routes";
 import experimentRoutes from "../Agents/admin/experiment.routes";
 import simulationRoutes from "../Agents/admin/simulation.routes";
 import workflowRoutes from "../Agents/admin/workflow.routes";
+import progressMonitorRoutes from "../Agents/planner/progressMonitor.routes";
 import { stellarLiquidityTool } from "../Agents/tools/stellarLiquidityTool";
 import { authenticateToken } from "../Auth/auth.middleware";
 import { validateBody, validateQuery } from "./middleware/validation";
@@ -96,6 +97,9 @@ router.use("/admin/simulation", simulationRoutes);
 
 // Mount workflow routes (requires admin role)
 router.use("/admin/workflows", workflowRoutes);
+
+// Mount progress monitor routes (requires admin role)
+router.use("/planner/progress", progressMonitorRoutes);
 router.get(
   "/admin/operator-report",
   authenticateToken,
@@ -1130,23 +1134,33 @@ router.get(
 );
 
 /**
- * GET /api/price/:assetCode?currency=USD
+ * GET /api/price/:assetCode?currency=USD&issuer=G...
  *
  * Returns the current DEX price of an asset in the requested currency.
  * Used by the bot's price-alert polling loop and the !portfolio command.
+ *
+ * `issuer` is optional. When supplied, the price is only returned for that
+ * issuer's asset, so a price for one `USDC` issuer is never served for
+ * another; the resolved issuer comes back in the response.
  */
 router.get("/price/:assetCode", async (req: Request, res: Response) => {
   try {
     const { assetCode } = req.params;
     const currency = (req.query.currency as string | undefined) ?? "USD";
+    const issuer = (req.query.issuer as string | undefined) ?? undefined;
 
-    const result = await portfolioService.getAssetPrice(assetCode, currency);
+    const result = await portfolioService.getAssetPrice(
+      assetCode,
+      currency,
+      issuer
+    );
 
     return res.status(200).json({
       success: true,
       assetCode: result.assetCode,
       currency: result.currency,
       price: result.price,
+      ...(result.assetIssuer ? { issuer: result.assetIssuer } : {}),
     });
   } catch (error) {
     logger.error("Price fetch error", {
