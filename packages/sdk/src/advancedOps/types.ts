@@ -105,6 +105,82 @@ export interface ClaimableBalanceClaimParams {
   claimant: string;
 }
 
+/**
+ * A claimant predicate in the JSON form Horizon returns.
+ *
+ * Every arm is optional; an empty object is the unconditional predicate.
+ * Both Horizon's snake_case spellings (`abs_before`/`rel_before`) and the XDR
+ * arm names (`absTime`/`relTime`) are accepted.
+ */
+export interface ClaimPredicate {
+  and?: ClaimPredicate[];
+  or?: ClaimPredicate[];
+  not?: ClaimPredicate;
+  /** Claimable strictly before this unix time. */
+  abs_before?: string | number;
+  /** Claimable strictly before this many seconds after the balance was created. */
+  rel_before?: string | number;
+  /** XDR arm spelling of {@link abs_before}. */
+  absTime?: string | number;
+  /** XDR arm spelling of {@link rel_before}. */
+  relTime?: string | number;
+}
+
+/** The ledger context a claim predicate is evaluated against. */
+export interface ClaimPredicateContext {
+  /**
+   * Ledger close time in seconds since the unix epoch — the time the claim
+   * would be evaluated at.
+   */
+  ledgerTime: number;
+  /**
+   * Seconds since the unix epoch the claimable balance was created (its last
+   * modified ledger close time). Required by relative-time predicates.
+   */
+  startTime?: number;
+}
+
+/** Inputs to {@link explainClaimEligibility}. */
+export interface ExplainClaimEligibilityParams {
+  /** Claimant account to explain eligibility for (`G...`). */
+  claimant: string;
+  /** Claimants carried by the balance, with the predicate each one has. */
+  claimants: Array<{ destination: string; predicate: unknown }>;
+  /** Ledger close time, in unix seconds, to evaluate the predicates at. */
+  ledgerTime: number;
+  /**
+   * Seconds since the unix epoch the balance was created (Horizon's
+   * `last_modified_time`). Required by relative-time predicates.
+   */
+  startTime?: number;
+}
+
+/** Whether, why and until when a claimant may claim a balance. */
+export interface ClaimEligibility {
+  /** Claimant the explanation describes. */
+  claimant: string;
+  /** True when the predicate is satisfied at {@link ledgerTime}. */
+  eligible: boolean;
+  /**
+   * False when the predicate could not be evaluated (missing balance creation
+   * time, malformed time value, or a non-finite ledger time). Treat an
+   * unevaluated result as unknown rather than as "not eligible".
+   */
+  evaluated: boolean;
+  /** Ledger close time the verdict was computed at, in unix seconds. */
+  ledgerTime: number;
+  /** {@link ledgerTime} rendered as an ISO timestamp. */
+  ledgerTimeIso: string;
+  /** Human-readable rendering of the claimant's predicate. */
+  predicate: string;
+  /** Full explanation, safe to surface to a user. */
+  reason: string;
+  /** ISO time the next claim window opens, when it opens in the future. */
+  claimableAt?: string;
+  /** ISO time the applicable claim window closes, when it has a finite end. */
+  claimExpiresAt?: string;
+}
+
 // ─── Descriptors ──────────────────────────────────────────────────────────────
 
 interface BaseDescriptor<K extends AdvancedOperationKind, P> {
@@ -164,6 +240,11 @@ export interface OperationPlan {
   operations: NormalizedOperation[];
   /** At most one memo applies to a Stellar transaction. */
   memo?: NormalizedOperation;
+  /**
+   * Destination the plan was composed for, when one was declared. The memo
+   * requirement of this destination was enforced during validation.
+   */
+  destination?: string;
   /** Combined validation report across every supplied operation. */
   validation: ValidationReport;
   /** Human-readable one-line summaries, in order. */

@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { identityVerificationService } from "../ContractIdentity/identityVerification.service";
 
 /**
  * Approvals bound to the economic inputs they were granted under.
@@ -84,6 +85,22 @@ export class ReapprovalRequiredError extends Error {
     super(`Reapproval required: ${check.reasons.join(" ")}`);
     this.name = "ReapprovalRequiredError";
   }
+}
+
+/**
+ * Derive the `contractVersion` token for a given contract from the identity
+ * verification cache. The token is the manifest's WASM hash — it changes
+ * whenever the contract is upgraded — so any outstanding approval that was
+ * granted under the previous WASM hash is automatically invalidated by
+ * `checkApproval` / `submitWithApproval`.
+ *
+ * Returns `undefined` when no verified identity is cached for the contract
+ * (e.g. before `verifyAll` has run or for unregistered contracts). Callers
+ * should treat `undefined` as an unresolvable version and handle it
+ * appropriately (e.g. by blocking the approval).
+ */
+export function contractVersionFromIdentity(contractName: string): string | undefined {
+  return identityVerificationService.getIdentity(contractName)?.wasmHash;
 }
 
 /**

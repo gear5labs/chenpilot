@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import {
+  ExternalReconciliationNotification,
   ExternalWalletReconciliationService,
   IngestOptions,
   InternalTransactionRecord,
   RawExternalTransaction,
+  WorkflowBroadcastIntent,
 } from "../../src/services/externalWalletReconciliation.service";
 import { ReconciliationWorkspaceService } from "../../src/services/reconciliationWorkspace.service";
 
@@ -499,6 +501,501 @@ describe("ExternalWalletReconciliationService", () => {
       expect(res2.newlyImported).toBe(1); // 0xbatch_tx_2_fixed was ingested
       expect(res2.errors).toHaveLength(0);
       expect(service.getUnmatchedActivities()).toHaveLength(2);
+    });
+  });
+
+  describe("Linking Externally Broadcast Hashes to Originating Workflows", () => {
+    const payoutIntent: WorkflowBroadcastIntent = {
+      workflowId: "wf-payout-1",
+      workflowType: "batch_payout",
+      userId: "user-1",
+      network: "testnet",
+      txHash: "0xEXTERNAL_PAYOUT_HASH",
+      sourceAddress: "G_TREASURY",
+      amount: "250",
+      asset: "usdc",
+    };
+
+    function collectNotifications(
+      target: ExternalWalletReconciliationService
+    ): ExternalReconciliationNotification[] {
+      const notifications: ExternalReconciliationNotification[] = [];
+      target.onNotification((notification) => {
+        notifications.push(notification);
+      });
+      return notifications;
+    }
+
+    it("attributes an observed hash to the workflow that declared the broadcast", async () => {
+      const notifications = collectNotifications(service);
+      service.registerWorkflowBroadcast(payoutIntent);
+
+      const result = await service.ingestAndReconcile({
+        source: "horizon",
+        network: "testnet",
+        importedBy: "operator-1",
+        rawTransactions: [
+          {
+            txHash: "0xexternal_payout_hash", // case-insensitive hash match
+            sourceAddress: "G_TREASURY",
+            targetAddress: "G_VENDOR",
+            amount: "250",
+            asset: "usdc",
+            status: "confirmed",
+          },
+        ],
+      });
+
+      expect(result.workflowLinked).toBe(1);
+      expect(result.workflowAmbiguous).toBe(0);
+
+      const activity = result.activities[0];
+      expect(activity.workflowLinkStatus).toBe("linked");
+      expect(activity.workflowLink?.workflowId).toBe("wf-payout-1");
+      expect(activity.workflowLink?.workflowType).toBe("batch_payout");
+      expect(activity.workflowLink?.userId).toBe("user-1");
+      expect(activity.workflowLink?.strategy).toBe("tx_hash");
+      expect(activity.workflowLink?.confidence).toBe(1);
+
+      // The originating workflow can read back its observed broadcast.
+      const workflowActivities = service.getActivitiesForWorkflow("wf-payout-1");
+      expect(workflowActivities).toHaveLength(1);
+      expect(workflowActivities[0].txHash).toBe("0xexternal_payout_hash");
+
+      const audit = service.getWorkflowBroadcastAudit("wf-payout-1");
+      expect(audit.pending).toHaveLength(0); // observed, no longer pending
+      expect(audit.linkedActivities).toHaveLength(1);
+
+      const linkedNotifications = notifications.filter(
+        (notification) => notification.type === "workflow_broadcast_linked"
+      );
+      expect(linkedNotifications).toHaveLength(1);
+      expect(linkedNotifications[0].workflowId).toBe("wf-payout-1");
+      expect(linkedNotifications[0].linkStrategy).toBe("tx_hash");
+
+      // A single intent may only absorb one observed broadcast.
+      const secondImport = await service.ingestAndReconcile({
+        source: "horizon",
+        network: "testnet",
+        importedBy: "operator-1",
+        rawTransactions: [
+          {
+            txHash: "0xunrelated_payout_hash",
+            sourceAddress: "G_TREASURY",
+            targetAddress: "G_VENDOR",
+            amount: "250",
+            asset: "usdc",
+            status: "confirmed",
+          },
+        ],
+      });
+      expect(secondImport.workflowLinked).toBe(0);
+      expect(secondImport.activities[0].workflowLinkStatus).toBe("unlinked");
+    });
+
+    it("links by correlation memo when the broadcast hash is not known in advance", async () => {
+      service.registerWorkflowBroadcast({
+        workflowId: "wf-rebalance-2",
+        workflowType: "portfolio_rebalance",
+        userId: "user-2",
+        network: "testnet",
+        memo: "chenpilot-wf-rebalance-2-step-1",
+        amount: "1000",
+        asset: "XLM",
+      });
+
+      const result = await service.ingestAndReconcile({
+        source: "external_export",
+        network: "testnet",
+        importedBy: "operator-2",
+        rawTransactions: [
+          {
+            txHash: "0xrebalance_broadcast",
+            sourceAddress: "G_REBALANCE_WALLET",
+            amount: "1000",
+            asset: "XLM",
+            memo: "chenpilot-wf-rebalance-2-step-1",
+          },
+        ],
+      });
+
+      expect(result.workflowLinked).toBe(1);
+      expect(result.activities[0].workflowLink?.strategy).toBe("memo");
+      expect(result.activities[0].workflowLink?.confidence).toBe(0.95);
+    });
+
+    it("links when the workflow id is embedded in the broadcast memo", async () => {
+      service.registerWorkflowBroadcast({
+        workflowId: "wf-allowance-3",
+        workflowType: "wallet_allowance",
+        userId: "user-3",
+        network: "testnet",
+      });
+
+      const result = await service.ingestAndReconcile({
+        source: "indexer",
+        network: "testnet",
+        importedBy: "operator-3",
+        rawTransactions: [
+          {
+            txHash: "0xallowance_broadcast",
+            sourceAddress: "G_USER_WALLET",
+            amount: "42",
+            memo: "cp:wf-allowance-3:grant",
+          },
+        ],
+      });
+
+      expect(result.workflowLinked).toBe(1);
+      expect(result.activities[0].workflowLink?.workflowId).toBe("wf-allowance-3");
+      expect(result.activities[0].workflowLink?.strategy).toBe("memo_workflow_id");
+    });
+
+    it("falls back to amount/wallet/time proximity for a single plausible workflow", async () => {
+      const broadcastAt = new Date();
+      service.registerWorkflowBroadcast({
+        workflowId: "wf-multisig-4",
+        workflowType: "multi_signature",
+        userId: "user-4",
+        network: "testnet",
+        sourceAddress: "G_MULTISIG",
+        targetAddress: "G_VENDOR_4",
+        amount: "77.5",
+        asset: "USDC",
+        broadcastAt,
+      });
+
+      const result = await service.ingestAndReconcile({
+        source: "horizon",
+        network: "testnet",
+        importedBy: "operator-4",
+        rawTransactions: [
+          {
+            txHash: "0xmultisig_broadcast",
+            sourceAddress: "G_MULTISIG",
+            targetAddress: "G_VENDOR_4",
+            amount: "77.5",
+            asset: "USDC",
+            timestamp: broadcastAt,
+          },
+        ],
+      });
+
+      expect(result.workflowLinked).toBe(1);
+      expect(result.activities[0].workflowLink?.strategy).toBe(
+        "amount_wallet_window"
+      );
+      expect(result.activities[0].workflowLink?.confidence).toBe(0.7);
+    });
+
+    it("flags ambiguity instead of guessing when several workflows claim a broadcast", async () => {
+      const notifications = collectNotifications(service);
+      const sharedCoordinates = {
+        workflowType: "agent_plan" as const,
+        network: "testnet" as const,
+        sourceAddress: "G_SHARED",
+        amount: "10",
+        asset: "USDC",
+      };
+
+      service.registerWorkflowBroadcast({
+        ...sharedCoordinates,
+        workflowId: "wf-ambiguous-a",
+        userId: "user-a",
+        txHash: "0xambiguous_broadcast",
+      });
+      service.registerWorkflowBroadcast({
+        ...sharedCoordinates,
+        workflowId: "wf-ambiguous-b",
+        userId: "user-b",
+        txHash: "0xambiguous_broadcast",
+      });
+
+      const result = await service.ingestAndReconcile({
+        source: "horizon",
+        network: "testnet",
+        importedBy: "operator-5",
+        rawTransactions: [
+          {
+            txHash: "0xambiguous_broadcast",
+            sourceAddress: "G_SHARED",
+            amount: "10",
+            asset: "USDC",
+          },
+        ],
+      });
+
+      expect(result.workflowLinked).toBe(0);
+      expect(result.workflowAmbiguous).toBe(1);
+
+      const activity = result.activities[0];
+      expect(activity.workflowLinkStatus).toBe("ambiguous");
+      expect(activity.workflowLink).toBeUndefined();
+      expect(activity.workflowCandidateIds).toEqual([
+        "wf-ambiguous-a",
+        "wf-ambiguous-b",
+      ]);
+
+      const ambiguousNotifications = notifications.filter(
+        (notification) => notification.type === "workflow_link_ambiguous"
+      );
+      expect(ambiguousNotifications).toHaveLength(1);
+      expect(ambiguousNotifications[0].candidateWorkflowIds).toEqual([
+        "wf-ambiguous-a",
+        "wf-ambiguous-b",
+      ]);
+
+      // Both workflows remain pending observation until an operator resolves it.
+      expect(service.getPendingWorkflowBroadcasts()).toHaveLength(2);
+
+      // Re-importing the same hash must not spam duplicate ambiguity alerts.
+      await service.ingestAndReconcile({
+        source: "horizon",
+        network: "testnet",
+        importedBy: "operator-5",
+        rawTransactions: [
+          {
+            txHash: "0xambiguous_broadcast",
+            sourceAddress: "G_SHARED",
+            amount: "10",
+            asset: "USDC",
+          },
+        ],
+      });
+      expect(
+        notifications.filter(
+          (notification) => notification.type === "workflow_link_ambiguous"
+        )
+      ).toHaveLength(1);
+    });
+
+    it("keeps ledger quarantine independent from workflow attribution", async () => {
+      service.registerWorkflowBroadcast({
+        workflowId: "wf-quarantine-6",
+        workflowType: "agent_plan",
+        userId: "user-6",
+        network: "testnet",
+        txHash: "0xquarantined_broadcast",
+      });
+
+      const internalRecord: InternalTransactionRecord = {
+        id: "int-quarantine-6",
+        txHash: "0xquarantined_broadcast",
+        userId: "user-6",
+        amount: "99", // divergent amount -> ledger quarantine
+        asset: "USDC",
+        status: "confirmed",
+        createdAt: new Date(),
+      };
+
+      const result = await service.ingestAndReconcile({
+        source: "horizon",
+        network: "testnet",
+        importedBy: "operator-6",
+        rawTransactions: [
+          {
+            txHash: "0xquarantined_broadcast",
+            sourceAddress: "G_WALLET_6",
+            amount: "100",
+            asset: "USDC",
+          },
+        ],
+        internalRecords: [internalRecord],
+      });
+
+      const activity = result.activities[0];
+      expect(activity.linkStatus).toBe("quarantined");
+      expect(activity.quarantineReason).toBe("AMOUNT_MISMATCH");
+      expect(activity.workflowLinkStatus).toBe("linked");
+      expect(activity.workflowLink?.workflowId).toBe("wf-quarantine-6");
+    });
+
+    it("is idempotent across re-imports and attributes late registrations", async () => {
+      const rawTx: RawExternalTransaction = {
+        txHash: "0xlate_registration",
+        sourceAddress: "G_WALLET_7",
+        amount: "15",
+        asset: "USDC",
+      };
+
+      const firstImport = await service.ingestAndReconcile({
+        source: "horizon",
+        network: "testnet",
+        importedBy: "operator-7",
+        rawTransactions: [rawTx],
+      });
+      expect(firstImport.workflowLinked).toBe(0);
+      expect(firstImport.activities[0].workflowLinkStatus).toBe("unlinked");
+
+      // The originating workflow declares the broadcast after ingestion.
+      service.registerWorkflowBroadcast({
+        workflowId: "wf-late-7",
+        workflowType: "manual",
+        userId: "user-7",
+        network: "testnet",
+        txHash: "0xLATE_REGISTRATION",
+      });
+
+      const secondImport = await service.ingestAndReconcile({
+        source: "horizon",
+        network: "testnet",
+        importedBy: "operator-7",
+        rawTransactions: [rawTx],
+      });
+      expect(secondImport.deduplicated).toBe(1);
+      expect(secondImport.workflowLinked).toBe(1);
+      expect(secondImport.activities[0].workflowLink?.workflowId).toBe("wf-late-7");
+
+      // Already attributed: subsequent re-imports must not double count.
+      const thirdImport = await service.ingestAndReconcile({
+        source: "horizon",
+        network: "testnet",
+        importedBy: "operator-7",
+        rawTransactions: [rawTx],
+      });
+      expect(thirdImport.workflowLinked).toBe(0);
+      expect(thirdImport.activities[0].workflowLink?.workflowId).toBe("wf-late-7");
+      expect(service.getActivitiesForWorkflow("wf-late-7")).toHaveLength(1);
+    });
+
+    it("supports inline intents, pending queries and de-registration", async () => {
+      const result = await service.ingestAndReconcile({
+        source: "manual_batch",
+        network: "testnet",
+        importedBy: "operator-8",
+        rawTransactions: [
+          {
+            txHash: "0xinline_intent_hash",
+            sourceAddress: "G_WALLET_8",
+            amount: "5",
+            asset: "USDC",
+          },
+        ],
+        workflowIntents: [
+          {
+            workflowId: "wf-inline-8",
+            workflowType: "agent_plan",
+            userId: "user-8",
+            network: "testnet",
+            txHash: "0xinline_intent_hash",
+          },
+        ],
+      });
+
+      expect(result.workflowLinked).toBe(1);
+
+      // Inline intents are registered, so they remain queryable.
+      const observed = service.getPendingWorkflowBroadcasts({
+        includeObserved: true,
+      });
+      expect(observed).toHaveLength(1);
+      expect(observed[0].workflowId).toBe("wf-inline-8");
+      expect(service.getPendingWorkflowBroadcasts()).toHaveLength(0);
+
+      // Registration is idempotent per workflow/network/hash/operation.
+      service.registerWorkflowBroadcast({
+        workflowId: "wf-pending-8",
+        workflowType: "batch_payout",
+        userId: "user-8",
+        network: "testnet",
+        txHash: "0xpending_hash",
+      });
+      service.registerWorkflowBroadcast({
+        workflowId: "wf-pending-8",
+        workflowType: "batch_payout",
+        userId: "user-8",
+        network: "testnet",
+        txHash: "0xPENDING_HASH",
+      });
+      expect(service.getPendingWorkflowBroadcasts()).toHaveLength(1);
+
+      expect(service.unregisterWorkflowBroadcast("wf-pending-8")).toBe(1);
+      expect(service.getPendingWorkflowBroadcasts()).toHaveLength(0);
+
+      expect(() =>
+        service.registerWorkflowBroadcast({
+          workflowId: "  ",
+          workflowType: "manual",
+          userId: "user-8",
+        })
+      ).toThrow("workflowId");
+      expect(() =>
+        service.registerWorkflowBroadcast({
+          workflowId: "wf-invalid-8",
+          workflowType: "manual",
+          userId: "",
+        })
+      ).toThrow("userId");
+    });
+
+    it("surfaces unobserved broadcasts as drift items for operator follow-up", async () => {
+      service.registerWorkflowBroadcast({
+        workflowId: "wf-stale-9",
+        workflowType: "batch_payout",
+        userId: "user-9",
+        network: "testnet",
+        txHash: "0xnever_observed_hash",
+        broadcastAt: new Date(Date.now() - 45 * 60 * 1000), // 45 minutes ago
+      });
+
+      const broadcastDrift = service
+        .toDriftItems()
+        .filter((item) => item.type === "workflow_broadcast_unobserved");
+      expect(broadcastDrift).toHaveLength(1);
+      expect(broadcastDrift[0].entityId).toBe("wf-stale-9");
+      expect(broadcastDrift[0].severity).toBe("major");
+
+      // Once the hash is observed the workflow is no longer reported as stale.
+      await service.ingestAndReconcile({
+        source: "indexer",
+        network: "testnet",
+        importedBy: "operator-9",
+        rawTransactions: [
+          {
+            txHash: "0xnever_observed_hash",
+            sourceAddress: "G_WALLET_9",
+            amount: "12",
+          },
+        ],
+      });
+
+      expect(
+        service
+          .toDriftItems()
+          .filter((item) => item.type === "workflow_broadcast_unobserved")
+      ).toHaveLength(0);
+    });
+
+    it("includes workflow attribution in operator-facing drift items", async () => {
+      service.registerWorkflowBroadcast({
+        workflowId: "wf-drift-10",
+        workflowType: "agent_plan",
+        userId: "user-10",
+        network: "testnet",
+        txHash: "0xdrift_broadcast_hash",
+      });
+
+      await service.ingestAndReconcile({
+        source: "horizon",
+        network: "testnet",
+        importedBy: "operator-10",
+        rawTransactions: [
+          {
+            txHash: "0xdrift_broadcast_hash",
+            sourceAddress: "G_WALLET_10",
+            amount: "31",
+            asset: "USDC",
+          },
+        ],
+      });
+
+      const driftItems = service.toDriftItems();
+      expect(driftItems).toHaveLength(1);
+      expect(driftItems[0].type).toBe("external_activity_unmatched");
+      expect(driftItems[0].description).toContain("wf-drift-10");
+      expect(driftItems[0].onChainValue).toMatchObject({
+        workflowLink: { workflowId: "wf-drift-10", strategy: "tx_hash" },
+      });
     });
   });
 });

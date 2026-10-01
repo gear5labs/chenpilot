@@ -260,15 +260,38 @@ export class PortfolioService {
         }
 
         try {
+          // The holding's issuer travels with the request so the price
+          // service can confirm it is pricing this exact asset — a code-only
+          // request would silently price a same-coded asset from another
+          // issuer.
           const quote = await stellarPriceService.getPrice(
             asset.code,
             normalizedCurrency,
-            asset.amount
+            asset.amount,
+            asset.issuer ? { fromIssuer: asset.issuer } : {}
           );
+
+          // No price exists under this issuer's identity: report "unknown"
+          // instead of attributing another issuer's price to this holding.
+          // Transient quote failures keep their historical handling below.
+          const identityUnavailable =
+            quote.validity.reason === "issuer_mismatch" ||
+            quote.validity.reason === "unsupported_asset";
+          if (!quote.validity.valid && identityUnavailable) {
+            logger.warn(
+              `PortfolioService: no ${normalizedCurrency} price for ${asset.code}${
+                asset.issuer ? ` (${asset.issuer})` : ""
+              } [${quote.validity.reason}]`
+            );
+            return; // leave as null — partial data is still useful
+          }
+
           asset.valueInCurrency = quote.estimatedOutput;
         } catch (err) {
           logger.warn(
-            `PortfolioService: could not price ${asset.code} → ${normalizedCurrency}`,
+            `PortfolioService: could not price ${asset.code}${
+              asset.issuer ? ` (${asset.issuer})` : ""
+            } → ${normalizedCurrency}`,
             { err }
           );
           // leave as null — partial data is still useful
@@ -321,20 +344,49 @@ export class PortfolioService {
 
   /**
    * Get the current DEX price of a single asset in the given currency.
+   *
+   * `issuer` is optional but recommended: when supplied, the quote is only
+   * produced for that issuer's asset, so a price is never attributed to a
+   * different issuer of the same code. The resolved issuer is echoed back as
+   * `assetIssuer` so the caller keeps the asset's full identity.
    */
   async getAssetPrice(
     assetCode: string,
-    currency: string = "USD"
-  ): Promise<{ assetCode: string; currency: string; price: number }> {
+    currency: string = "USD",
+    issuer?: string
+  ): Promise<{
+    assetCode: string;
+    currency: string;
+    price: number;
+    assetIssuer?: string;
+  }> {
     const from = assetCode.toUpperCase();
     const to = currency.toUpperCase();
+    const requestedIssuer = issuer?.trim() || undefined;
 
     if (from === to) {
-      return { assetCode: from, currency: to, price: 1 };
+      return {
+        assetCode: from,
+        currency: to,
+        price: 1,
+        ...(requestedIssuer ? { assetIssuer: requestedIssuer } : {}),
+      };
     }
 
-    const quote = await stellarPriceService.getPrice(from, to, 1);
-    return { assetCode: from, currency: to, price: quote.price };
+    const quote = await stellarPriceService.getPrice(
+      from,
+      to,
+      1,
+      requestedIssuer ? { fromIssuer: requestedIssuer } : {}
+    );
+
+    const assetIssuer = requestedIssuer ?? quote.fromIssuer;
+    return {
+      assetCode: from,
+      currency: to,
+      price: quote.price,
+      ...(assetIssuer ? { assetIssuer } : {}),
+    };
   }
 }
 

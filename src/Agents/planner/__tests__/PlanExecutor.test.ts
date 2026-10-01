@@ -32,6 +32,7 @@ describe("PlanExecutor - Edge Cases and Multi-Agent Flows", () => {
     estimatedDuration: steps.length * 3000,
     riskLevel: "low" as const,
     requiresApproval: false,
+    approvalTimeoutMinutes: undefined,
     summary: "Test plan",
   });
 

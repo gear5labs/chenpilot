@@ -72,6 +72,7 @@ export interface ExecutionPlan {
   estimatedDuration: number;
   riskLevel: "low" | "medium" | "high";
   requiresApproval: boolean;
+  approvalTimeoutMinutes?: number;
   summary: string;
   /** Attenuated capability grant for the plan */
   capabilityGrant?: import("../capability/types").CapabilityGrant | string;

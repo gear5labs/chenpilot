@@ -31,6 +31,46 @@ interface TransitionPatch {
   metadata?: Record<string, unknown>;
 }
 
+export function sanitizePersistedSubmissionReason(
+  rawReason?: string | null,
+  fallback: string = "unknown_submission_reason"
+): string {
+  const reason = (rawReason ?? "").trim();
+  if (!reason) return fallback;
+
+  const normalized = reason.toLowerCase();
+  if (
+    normalized.includes("timed out") ||
+    normalized.includes("timeout") ||
+    normalized.includes("provider unavailable") ||
+    normalized.includes("unavailable") ||
+    normalized.includes("network") ||
+    normalized.includes("connection") ||
+    normalized.includes("temporarily unavailable") ||
+    normalized.includes("not found on provider")
+  ) {
+    return "provider_unavailable";
+  }
+
+  if (
+    normalized.includes("bad auth") ||
+    normalized.includes("tx_bad_auth") ||
+    normalized.includes("malformed") ||
+    normalized.includes("sequence") ||
+    normalized.includes("underfunded") ||
+    normalized.includes("expired") ||
+    normalized.includes("invalid") ||
+    normalized.includes("rejected") ||
+    normalized.includes("failed_in_ledger") ||
+    normalized.includes("failed in ledger") ||
+    normalized.includes("not accepted")
+  ) {
+    return "provider_rejected";
+  }
+
+  return fallback;
+}
+
 const DEFAULT_BASE_RESOLUTION_DELAY_MS = 5_000;
 const DEFAULT_MAX_RESOLUTION_DELAY_MS = 300_000;
 const DEFAULT_STALLED_AFTER_MS = 60_000;
@@ -119,7 +159,10 @@ export class TransactionSubmissionService {
 
       if (outcome.status === "rejected") {
         return this.applyTransition(record, SubmissionState.REJECTED, {
-          reason: outcome.reason,
+          reason: sanitizePersistedSubmissionReason(
+            outcome.reason,
+            "provider_rejected"
+          ),
           resultXdr: outcome.resultXdr ?? null,
         });
       }
@@ -128,15 +171,22 @@ export class TransactionSubmissionService {
         reason: "accepted_by_provider",
       });
     } catch (error) {
-      const reason =
+      const rawReason =
         error instanceof AmbiguousSubmissionError
           ? error.message
           : `unexpected_submit_error: ${error instanceof Error ? error.message : String(error)}`;
+      const reason = sanitizePersistedSubmissionReason(
+        rawReason,
+        error instanceof AmbiguousSubmissionError
+          ? "provider_unavailable"
+          : "unexpected_submit_error"
+      );
 
       logger.warn("Submission outcome is ambiguous", {
         submissionId: record.id,
         transactionHash: record.transactionHash,
         reason,
+        rawReason,
       });
 
       return this.applyTransition(record, SubmissionState.UNKNOWN, { reason });

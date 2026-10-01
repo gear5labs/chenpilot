@@ -36,6 +36,86 @@ export type QuarantineReason =
   | "STATUS_CONFLICT";
 
 /**
+ * Chen Pilot workflow categories that can originate a transaction which is then
+ * broadcast externally (signed and submitted outside the platform).
+ */
+export type OriginatingWorkflowType =
+  | "batch_payout"
+  | "portfolio_rebalance"
+  | "multi_signature"
+  | "wallet_allowance"
+  | "agent_plan"
+  | "manual";
+
+/**
+ * Evidence used to attribute an externally observed broadcast to its workflow.
+ */
+export type WorkflowLinkStrategy =
+  | "tx_hash"
+  | "memo"
+  | "memo_workflow_id"
+  | "amount_wallet_window";
+
+export type WorkflowLinkStatus = "unlinked" | "linked" | "ambiguous";
+
+/**
+ * Declaration from an originating workflow that a transaction was (or is about
+ * to be) broadcast externally. Registration happens before the hash is observed,
+ * so `txHash` is optional and weaker correlation signals (memo, amount, wallet,
+ * broadcast time) can be supplied instead.
+ */
+export interface WorkflowBroadcastIntent {
+  workflowId: string;
+  workflowType: OriginatingWorkflowType;
+  userId: string;
+  network?: NetworkType;
+  chainId?: string;
+  txHash?: string;
+  operationIndex?: number;
+  sourceAddress?: string;
+  targetAddress?: string;
+  amount?: string | number;
+  asset?: string;
+  memo?: string;
+  broadcastAt?: Date | string | number;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Attribution record describing how an external activity was linked back to the
+ * workflow that originated it.
+ */
+export interface WorkflowBroadcastLink {
+  workflowId: string;
+  workflowType: OriginatingWorkflowType;
+  userId: string;
+  strategy: WorkflowLinkStrategy;
+  confidence: number;
+  linkedAt: Date;
+}
+
+/**
+ * Consolidated attribution view for a single originating workflow.
+ */
+export interface WorkflowBroadcastAudit {
+  workflowId: string;
+  pending: WorkflowBroadcastIntent[];
+  linkedActivities: NormalizedExternalActivity[];
+  ambiguousActivities: NormalizedExternalActivity[];
+}
+
+/**
+ * Registered broadcast intent plus internal observation bookkeeping.
+ */
+interface RegisteredWorkflowBroadcast {
+  key: string;
+  intent: WorkflowBroadcastIntent;
+  registeredAt: Date;
+  observedChainIdentity?: string;
+  observedAt?: Date;
+}
+
+/**
  * Audit provenance record capturing origin metadata and cryptographic payload checksum.
  */
 export interface ImportProvenance {
@@ -89,6 +169,13 @@ export interface NormalizedExternalActivity {
   quarantineReason?: QuarantineReason;
   quarantineDetails?: Record<string, unknown>;
   lastReconciledAt?: Date;
+  /**
+   * Attribution of this externally broadcast transaction to the workflow that
+   * originated it. Defaults to `unlinked` when no registered workflow matches.
+   */
+  workflowLinkStatus: WorkflowLinkStatus;
+  workflowLink?: WorkflowBroadcastLink;
+  workflowCandidateIds?: string[];
 }
 
 /**
@@ -117,6 +204,12 @@ export interface IngestOptions {
   importedBy: string;
   rawTransactions: RawExternalTransaction[];
   internalRecords?: InternalTransactionRecord[];
+  /**
+   * Originating workflows whose externally broadcast transactions may appear in
+   * this batch. Intents are registered (idempotently) and remain pending until
+   * an observed hash is attributed to them.
+   */
+  workflowIntents?: WorkflowBroadcastIntent[];
   timeToleranceMs?: number;
   amountToleranceEpsilon?: number;
   importId?: string;
@@ -134,6 +227,10 @@ export interface ImportBatchResult {
   matched: number;
   quarantined: number;
   unmatched: number;
+  /** Activities attributed to an originating workflow during this batch. */
+  workflowLinked: number;
+  /** Activities that matched multiple workflows and require operator review. */
+  workflowAmbiguous: number;
   errors: Array<{
     itemIndex: number;
     error: string;
@@ -146,7 +243,11 @@ export interface ImportBatchResult {
  * Notification payload emitted for quarantined or notable reconciliation events.
  */
 export interface ExternalReconciliationNotification {
-  type: "quarantine_alert" | "unmatched_external_activity";
+  type:
+    | "quarantine_alert"
+    | "unmatched_external_activity"
+    | "workflow_broadcast_linked"
+    | "workflow_link_ambiguous";
   chainIdentity: string;
   txHash: string;
   amount: string;
@@ -154,6 +255,12 @@ export interface ExternalReconciliationNotification {
   quarantineReason?: QuarantineReason;
   importedBy: string;
   occurredAt: Date;
+  /** Populated for workflow attribution notifications. */
+  workflowId?: string;
+  workflowType?: OriginatingWorkflowType;
+  linkStrategy?: WorkflowLinkStrategy;
+  /** Populated when multiple workflows claim the same external activity. */
+  candidateWorkflowIds?: string[];
 }
 
 export type ReconciliationNotificationHandler = (
@@ -167,12 +274,130 @@ export type ReconciliationNotificationHandler = (
 export class ExternalWalletReconciliationService {
   private activities = new Map<string, NormalizedExternalActivity>();
   private notificationHandlers: ReconciliationNotificationHandler[] = [];
+  private workflowBroadcasts = new Map<string, RegisteredWorkflowBroadcast>();
 
   /**
    * Register a notification handler for alerts.
    */
   public onNotification(handler: ReconciliationNotificationHandler): void {
     this.notificationHandlers.push(handler);
+  }
+
+  /**
+   * Register (or refresh) a workflow that expects an externally broadcast
+   * transaction so a later ingestion can attribute the observed hash back to it.
+   *
+   * Registration is idempotent per workflow/network/hash/operation coordinates,
+   * so retrying a workflow step does not create phantom attributions.
+   */
+  public registerWorkflowBroadcast(
+    intent: WorkflowBroadcastIntent
+  ): WorkflowBroadcastIntent {
+    this.assertWorkflowIntent(intent);
+
+    const key = this.buildWorkflowBroadcastKey(intent);
+    const existing = this.workflowBroadcasts.get(key);
+    const normalized = this.normalizeWorkflowIntent(intent);
+
+    this.workflowBroadcasts.set(key, {
+      key,
+      intent: normalized,
+      registeredAt: existing?.registeredAt ?? new Date(),
+      observedChainIdentity: existing?.observedChainIdentity,
+      observedAt: existing?.observedAt,
+    });
+
+    logger.info("Workflow broadcast intent registered", {
+      workflowId: normalized.workflowId,
+      workflowType: normalized.workflowType,
+      txHash: normalized.txHash,
+    });
+
+    return this.cloneWorkflowIntent(normalized);
+  }
+
+  /**
+   * List broadcast intents that have not yet been attributed to an observed
+   * external activity (or all intents when `includeObserved` is set).
+   */
+  public getPendingWorkflowBroadcasts(
+    filters: {
+      workflowId?: string;
+      userId?: string;
+      network?: NetworkType;
+      includeObserved?: boolean;
+    } = {}
+  ): WorkflowBroadcastIntent[] {
+    return [...this.workflowBroadcasts.values()]
+      .filter(
+        (registered) => filters.includeObserved || !registered.observedChainIdentity
+      )
+      .filter(
+        (registered) =>
+          !filters.workflowId ||
+          registered.intent.workflowId === filters.workflowId
+      )
+      .filter(
+        (registered) => !filters.userId || registered.intent.userId === filters.userId
+      )
+      .filter(
+        (registered) =>
+          !filters.network || registered.intent.network === filters.network
+      )
+      .map((registered) => this.cloneWorkflowIntent(registered.intent));
+  }
+
+  /**
+   * Retrieve every external activity attributed to a given originating workflow.
+   */
+  public getActivitiesForWorkflow(
+    workflowId: string
+  ): NormalizedExternalActivity[] {
+    return [...this.activities.values()]
+      .filter((act) => act.workflowLink?.workflowId === workflowId)
+      .map((act) => this.cloneActivity(act));
+  }
+
+  /**
+   * Consolidated attribution audit for an originating workflow: what is still
+   * pending observation, what has been linked, and what needs operator review.
+   */
+  public getWorkflowBroadcastAudit(workflowId: string): WorkflowBroadcastAudit {
+    return {
+      workflowId,
+      pending: this.getPendingWorkflowBroadcasts({ workflowId }),
+      linkedActivities: this.getActivitiesForWorkflow(workflowId),
+      ambiguousActivities: [...this.activities.values()]
+        .filter(
+          (act) =>
+            act.workflowLinkStatus === "ambiguous" &&
+            !!act.workflowCandidateIds?.includes(workflowId)
+        )
+        .map((act) => this.cloneActivity(act)),
+    };
+  }
+
+  /**
+   * Drop broadcast intents for a workflow (e.g. the workflow was cancelled or
+   * its external broadcast was abandoned). Returns the number removed.
+   */
+  public unregisterWorkflowBroadcast(workflowId: string, txHash?: string): number {
+    const cleanHash = txHash ? txHash.trim().toLowerCase() : undefined;
+    let removed = 0;
+
+    for (const [key, registered] of this.workflowBroadcasts.entries()) {
+      if (registered.intent.workflowId !== workflowId) continue;
+      if (
+        cleanHash &&
+        (registered.intent.txHash ?? "").trim().toLowerCase() !== cleanHash
+      ) {
+        continue;
+      }
+      this.workflowBroadcasts.delete(key);
+      removed++;
+    }
+
+    return removed;
   }
 
   /**
@@ -209,11 +434,26 @@ export class ExternalWalletReconciliationService {
       matched: 0,
       quarantined: 0,
       unmatched: 0,
+      workflowLinked: 0,
+      workflowAmbiguous: 0,
       errors: [],
       activities: [],
     };
 
     const internalRecords = options.internalRecords || [];
+
+    // Attach any inline workflow intents to the registry before matching so that
+    // re-imported (deduplicated) activities can be attributed retroactively.
+    for (const intent of options.workflowIntents ?? []) {
+      try {
+        this.registerWorkflowBroadcast(intent);
+      } catch (err) {
+        logger.warn("Skipping invalid workflow broadcast intent", {
+          workflowId: intent?.workflowId,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     for (let i = 0; i < options.rawTransactions.length; i++) {
       const raw = options.rawTransactions[i];
@@ -315,6 +555,16 @@ export class ExternalWalletReconciliationService {
           else result.unmatched++;
         }
 
+        // Re-attempt workflow attribution on every re-import until the observed
+        // hash has been bound to its originating workflow.
+        if (existing.workflowLinkStatus !== "linked") {
+          this.attributeWorkflowLink(existing, timeToleranceMs, amountEpsilon, result, {
+            importedBy: options.importedBy,
+          });
+          existing.lastReconciledAt = new Date();
+          this.activities.set(chainIdentity, existing);
+        }
+
         result.activities.push(this.cloneActivity(existing));
         continue;
       }
@@ -345,6 +595,7 @@ export class ExternalWalletReconciliationService {
         operationType: raw.operationType || "payment",
         provenance,
         linkStatus: "unmatched",
+        workflowLinkStatus: "unlinked",
       };
 
       // Perform reconciliation linkage
@@ -359,6 +610,11 @@ export class ExternalWalletReconciliationService {
       normalized.linkedInternalRecordId = matchResult.linkedInternalRecordId;
       normalized.quarantineReason = matchResult.quarantineReason;
       normalized.quarantineDetails = matchResult.quarantineDetails;
+
+      // Attribute the observed broadcast to the workflow that originated it.
+      this.attributeWorkflowLink(normalized, timeToleranceMs, amountEpsilon, result, {
+        importedBy: options.importedBy,
+      });
       normalized.lastReconciledAt = new Date();
 
       this.activities.set(chainIdentity, normalized);
@@ -586,6 +842,334 @@ export class ExternalWalletReconciliationService {
   }
 
   /**
+   * Attribute an observed external broadcast to its originating workflow, update
+   * batch counters, and notify subscribers when the attribution changes.
+   */
+  private attributeWorkflowLink(
+    activity: NormalizedExternalActivity,
+    timeToleranceMs: number,
+    amountEpsilon: number,
+    result: ImportBatchResult,
+    context: { importedBy: string }
+  ): void {
+    const previousStatus = activity.workflowLinkStatus;
+    const attribution = this.evaluateWorkflowLinkage(
+      activity,
+      [...this.workflowBroadcasts.values()],
+      timeToleranceMs,
+      amountEpsilon
+    );
+
+    if (attribution.status === "unlinked") {
+      return;
+    }
+
+    if (attribution.status === "ambiguous") {
+      activity.workflowLinkStatus = "ambiguous";
+      activity.workflowLink = undefined;
+      activity.workflowCandidateIds = attribution.candidateWorkflowIds;
+      result.workflowAmbiguous++;
+
+      // Only alert once per observed hash while the ambiguity persists.
+      if (previousStatus !== "ambiguous") {
+        this.emitNotification({
+          type: "workflow_link_ambiguous",
+          chainIdentity: activity.chainIdentity,
+          txHash: activity.txHash,
+          amount: activity.amount,
+          asset: activity.asset,
+          importedBy: context.importedBy,
+          occurredAt: new Date(),
+          candidateWorkflowIds: attribution.candidateWorkflowIds,
+        });
+      }
+      return;
+    }
+
+    activity.workflowLinkStatus = "linked";
+    activity.workflowLink = attribution.link;
+    activity.workflowCandidateIds = undefined;
+    result.workflowLinked++;
+
+    attribution.registeredBroadcast.observedChainIdentity = activity.chainIdentity;
+    attribution.registeredBroadcast.observedAt = new Date();
+
+    this.emitNotification({
+      type: "workflow_broadcast_linked",
+      chainIdentity: activity.chainIdentity,
+      txHash: activity.txHash,
+      amount: activity.amount,
+      asset: activity.asset,
+      importedBy: context.importedBy,
+      occurredAt: new Date(),
+      workflowId: attribution.link.workflowId,
+      workflowType: attribution.link.workflowType,
+      linkStrategy: attribution.link.strategy,
+    });
+
+    logger.info("External broadcast linked to originating workflow", {
+      workflowId: attribution.link.workflowId,
+      workflowType: attribution.link.workflowType,
+      chainIdentity: activity.chainIdentity,
+      txHash: activity.txHash,
+      strategy: attribution.link.strategy,
+      confidence: attribution.link.confidence,
+    });
+  }
+
+  /**
+   * Resolve the originating workflow for an observed external activity using
+   * progressively weaker correlation signals: known tx hash, memo (exact or
+   * workflow id), then amount/asset/wallet/time proximity.
+   *
+   * Attribution never blocks ledger reconciliation: a workflow match is reported
+   * independently of whether the activity matched an internal record.
+   */
+  private evaluateWorkflowLinkage(
+    activity: NormalizedExternalActivity,
+    broadcasts: RegisteredWorkflowBroadcast[],
+    timeToleranceMs: number,
+    amountEpsilon: number
+  ):
+    | {
+        status: "linked";
+        link: WorkflowBroadcastLink;
+        registeredBroadcast: RegisteredWorkflowBroadcast;
+      }
+    | { status: "ambiguous"; candidateWorkflowIds: string[] }
+    | { status: "unlinked" } {
+    // A broadcast intent can only be attributed to one observed activity, but it
+    // is re-evaluated idempotently against the very same chain identity.
+    const eligible = broadcasts.filter(
+      (registered) =>
+        !registered.observedChainIdentity ||
+        registered.observedChainIdentity === activity.chainIdentity
+    );
+
+    if (!eligible.length) {
+      return { status: "unlinked" };
+    }
+
+    const chainCompatible = eligible.filter((registered) => {
+      if (registered.intent.network && registered.intent.network !== activity.network) {
+        return false;
+      }
+      if (
+        registered.intent.chainId &&
+        registered.intent.chainId.trim().toLowerCase() !==
+          activity.chainId.trim().toLowerCase()
+      ) {
+        return false;
+      }
+      if (
+        registered.intent.operationIndex !== undefined &&
+        registered.intent.operationIndex !== activity.operationIndex
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    // 1. Cryptographic match on the broadcast hash itself.
+    const cleanHash = activity.txHash.trim().toLowerCase();
+    const hashMatches = chainCompatible.filter(
+      (registered) =>
+        !!registered.intent.txHash &&
+        registered.intent.txHash.trim().toLowerCase() === cleanHash
+    );
+    const hashResolution = this.resolveWorkflowCandidates(hashMatches, "tx_hash", 1);
+    if (hashResolution) return hashResolution;
+
+    // 2. Correlation memo: exact equality first, workflow id embedded next.
+    const memo = activity.memo?.trim();
+    if (memo) {
+      const exactMemoMatches = chainCompatible.filter(
+        (registered) =>
+          !!registered.intent.memo && registered.intent.memo.trim() === memo
+      );
+      const memoResolution = this.resolveWorkflowCandidates(
+        exactMemoMatches,
+        "memo",
+        0.95
+      );
+      if (memoResolution) return memoResolution;
+
+      const workflowIdMemoMatches = chainCompatible.filter((registered) =>
+        memo.includes(registered.intent.workflowId)
+      );
+      const memoIdResolution = this.resolveWorkflowCandidates(
+        workflowIdMemoMatches,
+        "memo_workflow_id",
+        0.9
+      );
+      if (memoIdResolution) return memoIdResolution;
+    }
+
+    // 3. Fallback proximity: amount + asset + wallet + broadcast time window.
+    const proximityMatches = chainCompatible.filter((registered) => {
+      const intent = registered.intent;
+
+      if (intent.amount !== undefined) {
+        const parsedIntentAmount = parseFloat(String(intent.amount));
+        if (
+          isNaN(parsedIntentAmount) ||
+          Math.abs(parseFloat(activity.amount) - parsedIntentAmount) > amountEpsilon
+        ) {
+          return false;
+        }
+      }
+
+      if (
+        intent.asset &&
+        intent.asset.trim().toUpperCase() !== activity.asset.trim().toUpperCase()
+      ) {
+        return false;
+      }
+
+      // Without a wallet anchor the intent is too weak to attribute safely.
+      const sourceMatches =
+        !!intent.sourceAddress &&
+        intent.sourceAddress.trim().toLowerCase() ===
+          activity.sourceAddress.trim().toLowerCase();
+      const targetMatches =
+        !!intent.targetAddress &&
+        intent.targetAddress.trim().toLowerCase() ===
+          activity.targetAddress.trim().toLowerCase();
+      if (!sourceMatches && !targetMatches) {
+        return false;
+      }
+
+      if (intent.broadcastAt) {
+        const broadcastAt = new Date(intent.broadcastAt);
+        if (
+          !isNaN(broadcastAt.getTime()) &&
+          Math.abs(broadcastAt.getTime() - activity.timestamp.getTime()) >
+            timeToleranceMs
+        ) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    return (
+      this.resolveWorkflowCandidates(
+        proximityMatches,
+        "amount_wallet_window",
+        0.7
+      ) ?? { status: "unlinked" }
+    );
+  }
+
+  /**
+   * Convert candidate broadcast intents into a single attribution or an
+   * ambiguity signal that requires operator review.
+   */
+  private resolveWorkflowCandidates(
+    candidates: RegisteredWorkflowBroadcast[],
+    strategy: WorkflowLinkStrategy,
+    confidence: number
+  ):
+    | {
+        status: "linked";
+        link: WorkflowBroadcastLink;
+        registeredBroadcast: RegisteredWorkflowBroadcast;
+      }
+    | { status: "ambiguous"; candidateWorkflowIds: string[] }
+    | undefined {
+    if (!candidates.length) {
+      return undefined;
+    }
+
+    const workflowIds = [...new Set(candidates.map((c) => c.intent.workflowId))];
+
+    if (workflowIds.length > 1) {
+      return { status: "ambiguous", candidateWorkflowIds: workflowIds };
+    }
+
+    const match = candidates.find(
+      (candidate) => candidate.intent.workflowId === workflowIds[0]
+    );
+
+    if (!match) {
+      return undefined;
+    }
+
+    return {
+      status: "linked",
+      registeredBroadcast: match,
+      link: {
+        workflowId: match.intent.workflowId,
+        workflowType: match.intent.workflowType,
+        userId: match.intent.userId,
+        strategy,
+        confidence,
+        linkedAt: new Date(),
+      },
+    };
+  }
+
+  private assertWorkflowIntent(intent: WorkflowBroadcastIntent): void {
+    if (!intent || typeof intent !== "object") {
+      throw new Error("Workflow broadcast intent must be a non-null object");
+    }
+    if (!intent.workflowId || !intent.workflowId.trim()) {
+      throw new Error("Workflow broadcast intent requires a workflowId");
+    }
+    if (!intent.userId || !intent.userId.trim()) {
+      throw new Error("Workflow broadcast intent requires a userId");
+    }
+    if (!intent.workflowType) {
+      throw new Error("Workflow broadcast intent requires a workflowType");
+    }
+  }
+
+  private normalizeWorkflowIntent(
+    intent: WorkflowBroadcastIntent
+  ): WorkflowBroadcastIntent {
+    const broadcastAt = intent.broadcastAt ? new Date(intent.broadcastAt) : undefined;
+
+    return {
+      ...intent,
+      workflowId: intent.workflowId.trim(),
+      userId: intent.userId.trim(),
+      txHash: intent.txHash?.trim(),
+      chainId: intent.chainId?.trim(),
+      sourceAddress: intent.sourceAddress?.trim(),
+      targetAddress: intent.targetAddress?.trim(),
+      asset: intent.asset?.trim().toUpperCase(),
+      memo: intent.memo?.trim(),
+      broadcastAt:
+        broadcastAt && !isNaN(broadcastAt.getTime()) ? broadcastAt : undefined,
+      metadata: intent.metadata ? { ...intent.metadata } : undefined,
+    };
+  }
+
+  /**
+   * Deterministic identity used for idempotent intent registration.
+   */
+  private buildWorkflowBroadcastKey(intent: WorkflowBroadcastIntent): string {
+    const network = intent.network ?? "any";
+    const hash = intent.txHash?.trim().toLowerCase() ?? "nohash";
+    const operationIndex = intent.operationIndex ?? 0;
+    return `${intent.workflowId}::${network}::${hash}::${operationIndex}`;
+  }
+
+  private cloneWorkflowIntent(
+    intent: WorkflowBroadcastIntent
+  ): WorkflowBroadcastIntent {
+    return {
+      ...intent,
+      broadcastAt:
+        intent.broadcastAt instanceof Date
+          ? new Date(intent.broadcastAt)
+          : intent.broadcastAt,
+      metadata: intent.metadata ? { ...intent.metadata } : undefined,
+    };
+  }
+
+  /**
    * Retrieve unmatched external activities, exposing them for review.
    */
   public getUnmatchedActivities(filters: {
@@ -694,12 +1278,22 @@ export class ExternalWalletReconciliationService {
   }
 
   /**
-   * Convert unmatched and quarantined activities into standard DriftItems for reconciliation reports.
+   * Convert unmatched activities, quarantined matches and workflow broadcasts
+   * awaiting observation into standard DriftItems for reconciliation reports.
    */
-  public toDriftItems(): DriftItem[] {
+  public toDriftItems(
+    options: { now?: Date; unobservedBroadcastToleranceMs?: number } = {}
+  ): DriftItem[] {
     const driftItems: DriftItem[] = [];
+    const now = options.now ?? new Date();
+    const unobservedToleranceMs =
+      options.unobservedBroadcastToleranceMs ?? 30 * 60 * 1000;
 
     for (const act of this.activities.values()) {
+      const workflowSuffix = act.workflowLink
+        ? ` [origin workflow: ${act.workflowLink.workflowType}/${act.workflowLink.workflowId} via ${act.workflowLink.strategy}]`
+        : "";
+
       if (act.linkStatus === "unmatched") {
         driftItems.push({
           type: "external_activity_unmatched",
@@ -713,8 +1307,9 @@ export class ExternalWalletReconciliationService {
             sourceAddress: act.sourceAddress,
             targetAddress: act.targetAddress,
             provenance: act.provenance,
+            workflowLink: act.workflowLink ?? null,
           },
-          description: `External on-chain transaction ${act.txHash} has no internal Chen Pilot matching record (source: ${act.provenance.source})`,
+          description: `External on-chain transaction ${act.txHash} has no internal Chen Pilot matching record (source: ${act.provenance.source})${workflowSuffix}`,
           repairAction: `Review external activity ${act.chainIdentity} and link or acknowledge as third-party transaction`,
           detectedAt: act.timestamp.toISOString(),
         });
@@ -729,12 +1324,46 @@ export class ExternalWalletReconciliationService {
             amount: act.amount,
             asset: act.asset,
             status: act.status,
+            workflowLink: act.workflowLink ?? null,
           },
-          description: `External transaction ${act.txHash} quarantined during reconciliation: ${act.quarantineReason}`,
+          description: `External transaction ${act.txHash} quarantined during reconciliation: ${act.quarantineReason}${workflowSuffix}`,
           repairAction: `Investigate reconciliation quarantine for ${act.chainIdentity} (${act.quarantineReason})`,
           detectedAt: act.timestamp.toISOString(),
         });
       }
+    }
+
+    // Workflows that declared an external broadcast but whose hash was never
+    // observed on-chain stay pending for operator follow-up.
+    for (const registered of this.workflowBroadcasts.values()) {
+      if (registered.observedChainIdentity) continue;
+
+      const broadcastAt =
+        registered.intent.broadcastAt instanceof Date
+          ? registered.intent.broadcastAt
+          : registered.registeredAt;
+
+      if (now.getTime() - broadcastAt.getTime() < unobservedToleranceMs) {
+        continue;
+      }
+
+      driftItems.push({
+        type: "workflow_broadcast_unobserved",
+        severity: "major" as DriftSeverity,
+        entityId: registered.intent.workflowId,
+        backendValue: {
+          workflowId: registered.intent.workflowId,
+          workflowType: registered.intent.workflowType,
+          userId: registered.intent.userId,
+          txHash: registered.intent.txHash ?? null,
+          memo: registered.intent.memo ?? null,
+          registeredAt: registered.registeredAt.toISOString(),
+        },
+        onChainValue: null,
+        description: `Workflow ${registered.intent.workflowId} (${registered.intent.workflowType}) expected an externally broadcast transaction that has not been observed on-chain`,
+        repairAction: `Verify the external broadcast for workflow ${registered.intent.workflowId} and reconcile or cancel the workflow`,
+        detectedAt: broadcastAt.toISOString(),
+      });
     }
 
     return driftItems;
@@ -806,6 +1435,12 @@ export class ExternalWalletReconciliationService {
       },
       quarantineDetails: act.quarantineDetails
         ? { ...act.quarantineDetails }
+        : undefined,
+      workflowLink: act.workflowLink
+        ? { ...act.workflowLink, linkedAt: new Date(act.workflowLink.linkedAt) }
+        : undefined,
+      workflowCandidateIds: act.workflowCandidateIds
+        ? [...act.workflowCandidateIds]
         : undefined,
     };
   }

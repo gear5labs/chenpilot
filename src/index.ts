@@ -11,6 +11,10 @@ import { durableRecoveryService } from "./Agents/planner/DurableRecoveryService"
 import { idempotencyService } from "./Reliability/IdempotencyService";
 import { adminWorkflowService } from "./Agents/admin/workflow.service";
 import { identityVerificationService } from "./ContractIdentity/identityVerification.service";
+import { retentionEngine } from "./lifecycle/retentionEngine";
+import { JobWorker } from "./jobs/jobWorker";
+import { buildDefaultJobHandlers } from "./jobs/jobHandlers";
+import { jobQueueService } from "./jobs/jobQueue.service";
 
 class Server {
   private server: http.Server;
@@ -24,7 +28,7 @@ class Server {
     initializeSocketManager(this.server);
     this.jobWorker = new JobWorker(jobQueueService, {
       workerId: `api-${process.pid}`,
-      queues: ["transactions", "side-effects"],
+      queues: ["transactions", "side-effects", "admin"],
       concurrency: 3,
       leaseMs: 30000,
       pollIntervalMs: 2500,
@@ -64,6 +68,9 @@ class Server {
 
       // Initialize default admin workflow policies
       await adminWorkflowService.initializeDefaultPolicies();
+
+      // Schedule initial workflow expiry cleanup job
+      await adminWorkflowService.scheduleExpiryCleanup(5);
 
       // Recover interrupted durable executions
       await durableRecoveryService.recoverInterruptedExecutions();

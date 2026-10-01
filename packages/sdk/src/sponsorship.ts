@@ -460,7 +460,8 @@ export class SponsorshipWorkflowBuilder {
       operations.push(
         (StellarSdk.Operation as any).beginSponsoringFutureReserves({
           sponsor: this.config.sponsor,
-          sponsored: this.config.sponsoredAccount,
+          // stellar-sdk expects the `sponsoredId` field name
+          sponsoredId: this.config.sponsoredAccount,
         })
       );
     }
@@ -524,7 +525,7 @@ export class SponsorshipWorkflowBuilder {
         }
       );
       operations.forEach((op) => tx.addOperation(op));
-      transactionXdr = tx.build().toXDR();
+      transactionXdr = tx.setTimeout(30).build().toXDR();
     }
 
     return {

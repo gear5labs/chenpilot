@@ -23,6 +23,7 @@ import {
   error,
   isHex32,
   isUint64,
+  mergeReports,
   toReport,
   utf8ByteLength,
 } from "./validation";
@@ -34,6 +35,287 @@ const MEMO_KINDS: readonly MemoKind[] = [
   "hash",
   "return",
 ];
+
+// ─── Destination memo requirements ───────────────────────────────────────────
+
+/**
+ * A destination's memo requirement.
+ *
+ * Memo syntax and encoding already existed (see {@link validateMemoParams});
+ * what was missing was a place to record *which destinations demand a memo*
+ * and a check that runs before a transaction is handed to a signer.
+ */
+export interface DestinationMemoRequirement {
+  /** Destination account (`G...`) or muxed account (`M...`) the rule applies to. */
+  destination: string;
+  /** True when the destination rejects payments that arrive without a memo. */
+  required: boolean;
+  /**
+   * Optional allow-list of memo kinds the destination accepts. Defaults to
+   * "any memo other than `none`" when omitted.
+   */
+  memoKinds?: MemoKind[];
+  /** Human-readable label for the destination (e.g. an exchange name). */
+  label?: string;
+  /** Where the requirement came from, carried through for auditing. */
+  source?: string;
+}
+
+/** A destination plus the memo a transaction intends to send to it. */
+export interface DestinationMemoCheck {
+  /** Destination to look the requirement up for. Unknown destinations pass. */
+  destination?: string | null;
+  /** Memo attached to the transaction, if any. */
+  memo?: MemoParams | null;
+}
+
+/** The subset of a Stellar transaction the memo-requirement check needs. */
+export interface StellarTransactionMemoShape {
+  operations?: Array<Record<string, unknown>> | null;
+  memo?: { type?: string; value?: string | number | null } | null;
+}
+
+/** Thrown when a destination's memo requirement is not satisfied. */
+export class DestinationMemoRequirementError extends Error {
+  /** The structured findings that caused the failure. */
+  readonly issues: ValidationIssue[];
+
+  constructor(message: string, issues: ValidationIssue[] = []) {
+    super(message);
+    this.name = "DestinationMemoRequirementError";
+    this.issues = issues;
+  }
+}
+
+/**
+ * Registry backing the destination memo-required lookup.
+ *
+ * Requirements are supplied by the caller (an exchange directory, an
+ * account-data feed, or a hand-maintained policy list) because nothing on
+ * chain advertises them. The registry is empty by default, so enforcement is
+ * a no-op until a requirement is registered.
+ */
+const destinationMemoRequirements = new Map<string, DestinationMemoRequirement>();
+
+/** Normalizes a destination for registry lookups. */
+function normalizeDestination(destination: string): string {
+  return destination.trim();
+}
+
+/**
+ * Register (or replace) a destination's memo requirement.
+ *
+ * @throws {DestinationMemoRequirementError} when the destination is missing or
+ * `memoKinds` is supplied but contains no valid memo kind.
+ */
+export function registerDestinationMemoRequirement(
+  requirement: DestinationMemoRequirement
+): DestinationMemoRequirement {
+  if (!requirement || typeof requirement.destination !== "string") {
+    throw new DestinationMemoRequirementError(
+      "A destination is required to register a memo requirement"
+    );
+  }
+
+  const destination = normalizeDestination(requirement.destination);
+  if (destination.length === 0) {
+    throw new DestinationMemoRequirementError(
+      "A destination is required to register a memo requirement"
+    );
+  }
+
+  let memoKinds: MemoKind[] | undefined;
+  if (requirement.memoKinds !== undefined) {
+    if (!Array.isArray(requirement.memoKinds) || requirement.memoKinds.length === 0) {
+      throw new DestinationMemoRequirementError(
+        `Destination ${destination}: memoKinds must list at least one memo kind`
+      );
+    }
+    const unknown = requirement.memoKinds.filter(
+      (kind) => !MEMO_KINDS.includes(kind) || kind === "none"
+    );
+    if (unknown.length > 0) {
+      throw new DestinationMemoRequirementError(
+        `Destination ${destination}: unknown memo kind(s) ${unknown.join(", ")}`
+      );
+    }
+    memoKinds = [...requirement.memoKinds];
+  }
+
+  const stored: DestinationMemoRequirement = {
+    ...requirement,
+    destination,
+    required: Boolean(requirement.required),
+    ...(memoKinds ? { memoKinds } : {}),
+  };
+  destinationMemoRequirements.set(destination, stored);
+  return { ...stored, ...(memoKinds ? { memoKinds: [...memoKinds] } : {}) };
+}
+
+/** Register several requirements at once. */
+export function registerDestinationMemoRequirements(
+  requirements: DestinationMemoRequirement[]
+): DestinationMemoRequirement[] {
+  return requirements.map(registerDestinationMemoRequirement);
+}
+
+/**
+ * Look up whether a destination requires a memo.
+ *
+ * Returns `undefined` for unknown destinations and for callers that never
+ * registered a requirement, which is what keeps existing flows untouched.
+ */
+export function getDestinationMemoRequirement(
+  destination?: string | null
+): DestinationMemoRequirement | undefined {
+  if (typeof destination !== "string") return undefined;
+  const requirement = destinationMemoRequirements.get(normalizeDestination(destination));
+  return requirement ? { ...requirement } : undefined;
+}
+
+/** Remove a destination's requirement. Returns false when nothing was stored. */
+export function unregisterDestinationMemoRequirement(destination: string): boolean {
+  return destinationMemoRequirements.delete(normalizeDestination(destination));
+}
+
+/** Drop every registered requirement (used by tests and config reloads). */
+export function clearDestinationMemoRequirements(): void {
+  destinationMemoRequirements.clear();
+}
+
+/** Snapshot of every registered requirement. */
+export function listDestinationMemoRequirements(): DestinationMemoRequirement[] {
+  return [...destinationMemoRequirements.values()].map((requirement) => ({
+    ...requirement,
+    ...(requirement.memoKinds ? { memoKinds: [...requirement.memoKinds] } : {}),
+  }));
+}
+
+/** True when `memo` carries content a destination could route on. */
+function memoCarriesValue(memo: MemoParams | null | undefined): boolean {
+  return Boolean(memo && memo.kind && memo.kind !== "none");
+}
+
+/**
+ * Check a destination/memo pair against the registered requirement.
+ *
+ * Unknown destinations produce a valid report, so this is safe to call on
+ * every transaction path.
+ */
+export function checkDestinationMemoRequirement(
+  check: DestinationMemoCheck
+): ValidationReport {
+  const requirement = getDestinationMemoRequirement(check?.destination);
+  if (!requirement || !requirement.required) {
+    return toReport([]);
+  }
+
+  const label = requirement.label ? ` (${requirement.label})` : "";
+  const issues: ValidationIssue[] = [];
+  const memo = check.memo ?? null;
+
+  if (!memoCarriesValue(memo)) {
+    issues.push(
+      error(
+        "memo",
+        "DESTINATION_MEMO_REQUIRED",
+        `Destination ${requirement.destination}${label} requires a memo before this transaction can be signed`
+      )
+    );
+    return toReport(issues);
+  }
+
+  const accepted = requirement.memoKinds;
+  if (accepted && accepted.length > 0 && memo && !accepted.includes(memo.kind)) {
+    issues.push(
+      error(
+        "memo",
+        "MEMO_KIND_NOT_ACCEPTED",
+        `Destination ${requirement.destination}${label} only accepts ${accepted.join(
+          ", "
+        )} memos (got '${memo.kind}')`
+      )
+    );
+  }
+
+  return toReport(issues);
+}
+
+/**
+ * Throwing form of {@link checkDestinationMemoRequirement}.
+ *
+ * @throws {DestinationMemoRequirementError} when the requirement is unmet.
+ */
+export function assertDestinationMemoRequirement(check: DestinationMemoCheck): void {
+  const report = checkDestinationMemoRequirement(check);
+  if (!report.valid) {
+    throw new DestinationMemoRequirementError(
+      report.errors.map((issue) => issue.message).join("; "),
+      report.errors
+    );
+  }
+}
+
+/** Convert a transaction memo header into memo params. */
+function memoParamsFromTransactionMemo(
+  memo: StellarTransactionMemoShape["memo"]
+): MemoParams | null {
+  if (!memo || typeof memo.type !== "string") return null;
+  const kind = memo.type as MemoKind;
+  if (!MEMO_KINDS.includes(kind)) return null;
+  if (kind === "none") return { kind: "none" };
+  return { kind, value: memo.value ?? undefined };
+}
+
+/** Destinations named by operations a memo can be required for. */
+function destinationsOf(tx: StellarTransactionMemoShape): string[] {
+  const destinations = new Set<string>();
+  for (const operation of tx?.operations ?? []) {
+    if (!operation || typeof operation !== "object") continue;
+    const destination = (operation as { destination?: unknown }).destination;
+    if (typeof destination === "string" && destination.trim().length > 0) {
+      destinations.add(destination.trim());
+    }
+  }
+  return [...destinations];
+}
+
+/**
+ * Build the destination/memo checks a transaction must satisfy.
+ *
+ * One check per distinct destination named by its operations, all sharing the
+ * single transaction memo (a Stellar transaction carries at most one).
+ */
+export function destinationMemoChecksForTransaction(
+  tx: StellarTransactionMemoShape
+): DestinationMemoCheck[] {
+  if (!tx || typeof tx !== "object") return [];
+  const memo = memoParamsFromTransactionMemo(tx.memo);
+  return destinationsOf(tx).map((destination) => ({ destination, memo }));
+}
+
+/**
+ * Enforce every destination memo requirement a transaction implicates.
+ *
+ * Call this immediately before handing a transaction to a signer: it is the
+ * last gate where a missing memo can still be fixed without a signature.
+ * Destinations without a registered requirement are passed through untouched.
+ *
+ * @throws {DestinationMemoRequirementError} listing every unmet requirement.
+ */
+export function enforceDestinationMemoRequirements(
+  tx: StellarTransactionMemoShape
+): void {
+  const report = mergeReports(
+    destinationMemoChecksForTransaction(tx).map(checkDestinationMemoRequirement)
+  );
+  if (!report.valid) {
+    throw new DestinationMemoRequirementError(
+      report.errors.map((issue) => issue.message).join("; "),
+      report.errors
+    );
+  }
+}
 
 /** Build a `MEMO_NONE` descriptor. */
 export function noMemo(metadata?: Record<string, unknown>): MemoOperation {

@@ -766,8 +766,64 @@ export class AdminWorkflowService {
     const count = result.affected ?? 0;
     if (count > 0) {
       logger.info("Expired old admin workflow instances", { count });
+      
+      // Log audit events for each expired instance
+      const expiredInstances = await INSTANCE_REPOSITORY()
+        .createQueryBuilder("instance")
+        .where("instance.status = :status", { status: WorkflowStatus.EXPIRED })
+        .andWhere("instance.expiresAt <= NOW()")
+        .orderBy("instance.expiresAt", "DESC")
+        .take(count)
+        .getMany();
+
+      for (const instance of expiredInstances) {
+        await auditLogService.logEvent({
+          action: "admin.workflow.expired",
+          category: EventCategory.ADMIN,
+          severity: AuditEventSeverity.WARNING,
+          resource: {
+            endpoint: `workflow:${instance.actionType}`,
+            type: "AdminWorkflowInstance",
+            id: instance.id,
+          },
+          metadata: {
+            actionType: instance.actionType,
+            initiatorId: instance.initiatorId,
+            expiresAt: instance.expiresAt.toISOString(),
+          },
+          success: true,
+        });
+      }
+      
+      // Schedule next cleanup job if instances were expired
+      await this.scheduleExpiryCleanup(5);
     }
     return count;
+  }
+
+  async scheduleExpiryCleanup(
+    scheduleMinutes: number = 5
+  ): Promise<void> {
+    const scheduledAt = new Date(Date.now() + scheduleMinutes * 60 * 1000);
+    
+    // Lazy import to avoid circular dependency
+    const { jobQueueService } = await import("../../jobs/jobQueue.service");
+    
+    await jobQueueService.enqueue({
+      queue: "admin",
+      jobType: "workflow.expire_cleanup",
+      payload: { batchSize: 100 },
+      availableAt: scheduledAt,
+      metadata: {
+        scheduledBy: "workflow_expiry_scheduler",
+        scheduleMinutes,
+      },
+    });
+
+    logger.info("Workflow expiry cleanup scheduled", {
+      scheduledAt: scheduledAt.toISOString(),
+      scheduleMinutes,
+    });
   }
 }
 

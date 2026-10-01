@@ -365,3 +365,28 @@ describe("OutputValidator", () => {
     });
   });
 });
+
+
+describe('Tool Result Output Validation before Step Completion (#811)', () => {
+  it('successfully validates when all required fields are present', () => {
+    const validResult = {
+      status: 'success',
+      data: { resultValue: 42 },
+    };
+
+    expect(() => {
+      validateToolResult(validResult, ['status', 'data']);
+    }).not.toThrow();
+  });
+
+  it('throws MissingToolResultFieldError and prevents step completion when required fields are missing', () => {
+    const incompleteResult = {
+      status: 'success',
+      // missing 'data' field
+    };
+
+    expect(() => {
+      validateToolResult(incompleteResult, ['status', 'data']);
+    }).toThrow(MissingToolResultFieldError);
+  });
+});

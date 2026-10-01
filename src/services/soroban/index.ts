@@ -40,6 +40,8 @@ export {
   SdkInitError,
   SimulationError,
   SimulationErrorResponse,
+  ContractError,
+  parseHostError,
   AuthRequiredError,
   AuthExpiredError,
   AuthScopeMismatchError,
@@ -48,7 +50,11 @@ export {
   NetworkMismatchError,
   InvocationError,
 } from "./errors";
-export type { SorobanErrorCode } from "./errors";
+export type {
+  SorobanErrorCode,
+  SorobanHostErrorType,
+  ParsedContractError,
+} from "./errors";
 
 // ─── Existing subsystem modules ───────────────────────────────────────────────
 export * from "./ttlManager";

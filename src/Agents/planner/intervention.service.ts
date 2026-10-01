@@ -198,6 +198,12 @@ export class InterventionService {
       );
     }
 
+    if (record.expiresAt && record.expiresAt < new Date()) {
+      throw new Error(
+        `Intervention has expired (expired at: ${record.expiresAt.toISOString()})`,
+      );
+    }
+
     // Re-load fresh execution state
     const execution = await this.executionRepo.findOne({
       where: { id: record.executionId },
@@ -765,11 +771,21 @@ export class InterventionService {
     // Map command → SensitiveActionType
     const actionType = this.commandToSensitiveActionType(cmd.command);
 
+    // Get approval timeout from policy
+    const policy = DEFAULT_INTERVENTION_POLICIES[cmd.command];
+    const ttlMinutes = policy?.approvalTimeoutMinutes || 120; // Default 120 minutes
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
+
     // Create pending intervention record first (pre-approval)
     const record = await this.persistRecord(cmd, execution, {
       status: InterventionStatus.PENDING_APPROVAL,
       transcriptHash,
     });
+
+    // Set expiry after save (persistRecord doesn't support it in overrides)
+    record.expiresAt = expiresAt;
+    await this.interventionRepo.save(record);
 
     // Initiate multi-party approval workflow
     const workflow = await adminWorkflowService.initiateWorkflow({

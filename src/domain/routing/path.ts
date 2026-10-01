@@ -124,10 +124,12 @@ export interface RoutePolicy {
   maxSlippage: number;
   /** Maximum number of hops allowed. */
   maxHops: number;
+  /** Protocol minimum trade size in source-asset units. Optional. */
+  minTradeSize?: number;
 }
 
 export interface PolicyViolation {
-  field: 'efficiency' | 'slippage' | 'hops';
+  field: 'efficiency' | 'slippage' | 'hops' | 'minTradeSize';
   actual: number;
   threshold: number;
   reason: string;

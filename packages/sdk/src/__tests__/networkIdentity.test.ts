@@ -740,3 +740,362 @@ describe("offline signing network validation", () => {
     expect(artifact.payload.expectedNetwork).toBe("testnet");
   });
 });
+
+describe("network identity changes between discovery and signing", () => {
+  it("detects single endpoint network switch between discovery and signing", async () => {
+    const behaviors: Record<string, EndpointBehavior> = {
+      "rpc.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+    };
+    const { fetcher, calls } = makeRoutingFetcher(behaviors);
+    const verifier = new NetworkIdentityVerifier({
+      expectedNetwork: "testnet",
+      rpcUrls: [rpcUrl("rpc.example.com")],
+      fetcher,
+      ...discoverOptions(60_000),
+    });
+
+    // Initial discovery succeeds
+    const initialReport = await verifier.assertVerified();
+    expect(initialReport.verified).toBe(true);
+    const callsAfterDiscovery = calls.length;
+
+    // Endpoint switches to mainnet before signing
+    behaviors["rpc.example.com"] = {
+      kind: "rpc",
+      passphrase: MAINNET_PASSPHRASE,
+    };
+
+    // Signing-time verification should catch the switch
+    await expect(verifier.verifyBeforeSigning()).rejects.toBeInstanceOf(
+      NetworkMismatchError
+    );
+
+    // Verify that force refresh actually hit the network again
+    expect(calls.length).toBeGreaterThan(callsAfterDiscovery);
+  });
+
+  it("detects network switch in one of multiple endpoints between discovery and signing", async () => {
+    const behaviors: Record<string, EndpointBehavior> = {
+      "rpc1.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+      "rpc2.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+      "horizon.example.com": {
+        kind: "horizon",
+        passphrase: TESTNET_PASSPHRASE,
+      },
+    };
+    const { fetcher, calls } = makeRoutingFetcher(behaviors);
+    const verifier = new NetworkIdentityVerifier({
+      expectedNetwork: "testnet",
+      rpcUrls: [rpcUrl("rpc1.example.com"), rpcUrl("rpc2.example.com")],
+      horizonUrls: [horizonUrl("horizon.example.com")],
+      fetcher,
+      ...discoverOptions(60_000),
+    });
+
+    // Initial discovery with all endpoints agreeing
+    const initialReport = await verifier.assertVerified();
+    expect(initialReport.verified).toBe(true);
+    expect(initialReport.services.filter((s) => s.status === "verified")).toHaveLength(3);
+
+    // One endpoint switches to mainnet
+    behaviors["rpc2.example.com"] = {
+      kind: "rpc",
+      passphrase: MAINNET_PASSPHRASE,
+    };
+
+    // Signing-time verification should detect the mismatch
+    await expect(verifier.verifyBeforeSigning()).rejects.toBeInstanceOf(
+      NetworkMismatchError
+    );
+
+    // Verify that all endpoints were re-discovered during force refresh
+    const mismatchedService = (
+      await verifier.verifyBeforeSigning().catch((e) => e)
+    ).report?.services.find((s) => s.status === "mismatch");
+    expect(mismatchedService?.service).toBe("rpc");
+  });
+
+  it("handles partial endpoint failures during signing-time force refresh", async () => {
+    const behaviors: Record<string, EndpointBehavior> = {
+      "rpc1.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+      "rpc2.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+    };
+    const { fetcher } = makeRoutingFetcher(behaviors);
+    const verifier = new NetworkIdentityVerifier({
+      expectedNetwork: "testnet",
+      rpcUrls: [rpcUrl("rpc1.example.com"), rpcUrl("rpc2.example.com")],
+      fetcher,
+      requireReachability: false, // Best effort mode
+      ...discoverOptions(60_000),
+    });
+
+    // Initial discovery succeeds
+    await verifier.assertVerified();
+
+    // One endpoint becomes unreachable before signing
+    behaviors["rpc2.example.com"] = { kind: "rpc", throws: true };
+
+    // Signing should still succeed if at least one endpoint verifies
+    const signingReport = await verifier.verifyBeforeSigning();
+    expect(signingReport.verified).toBe(true);
+    expect(signingReport.services.some((s) => s.status === "unreachable")).toBe(true);
+  });
+
+  it("fails signing when all endpoints become unreachable during force refresh", async () => {
+    const behaviors: Record<string, EndpointBehavior> = {
+      "rpc1.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+      "rpc2.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+    };
+    const { fetcher } = makeRoutingFetcher(behaviors);
+    const verifier = new NetworkIdentityVerifier({
+      expectedNetwork: "testnet",
+      rpcUrls: [rpcUrl("rpc1.example.com"), rpcUrl("rpc2.example.com")],
+      fetcher,
+      ...discoverOptions(60_000),
+    });
+
+    // Initial discovery succeeds
+    await verifier.assertVerified();
+
+    // All endpoints become unreachable before signing
+    behaviors["rpc1.example.com"] = { kind: "rpc", throws: true };
+    behaviors["rpc2.example.com"] = { kind: "rpc", throws: true };
+
+    // Signing should fail when no endpoints are reachable
+    await expect(verifier.verifyBeforeSigning()).rejects.toBeInstanceOf(
+      NetworkUnverifiableError
+    );
+  });
+
+  it("detects network switch during cache expiration window", async () => {
+    const behaviors: Record<string, EndpointBehavior> = {
+      "rpc.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+    };
+    const { fetcher } = makeRoutingFetcher(behaviors);
+    const verifier = new NetworkIdentityVerifier({
+      expectedNetwork: "testnet",
+      rpcUrls: [rpcUrl("rpc.example.com")],
+      fetcher,
+      discoveryTtlMs: 100, // Short TTL for testing
+      timeoutMs: 500,
+    });
+
+    // Initial discovery
+    await verifier.assertVerified();
+
+    // Wait for cache to expire
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    // Endpoint switches networks during the expiration window
+    behaviors["rpc.example.com"] = {
+      kind: "rpc",
+      passphrase: MAINNET_PASSPHRASE,
+    };
+
+    // Next verification (even without force refresh) should catch the change
+    await expect(verifier.assertVerified()).rejects.toBeInstanceOf(
+      NetworkMismatchError
+    );
+  });
+
+  it("maintains verification when network identity remains stable between discovery and signing", async () => {
+    const behaviors: Record<string, EndpointBehavior> = {
+      "rpc.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+    };
+    const { fetcher, calls } = makeRoutingFetcher(behaviors);
+    const verifier = new NetworkIdentityVerifier({
+      expectedNetwork: "testnet",
+      rpcUrls: [rpcUrl("rpc.example.com")],
+      fetcher,
+      ...discoverOptions(60_000),
+    });
+
+    // Initial discovery
+    const discoveryReport = await verifier.assertVerified();
+    expect(discoveryReport.verified).toBe(true);
+    const callsAfterDiscovery = calls.length;
+
+    // Network identity remains stable
+    behaviors["rpc.example.com"] = {
+      kind: "rpc",
+      passphrase: TESTNET_PASSPHRASE, // Same passphrase
+    };
+
+    // Signing-time verification should succeed
+    const signingReport = await verifier.verifyBeforeSigning();
+    expect(signingReport.verified).toBe(true);
+
+    // Force refresh should have hit the network again
+    expect(calls.length).toBeGreaterThan(callsAfterDiscovery);
+  });
+
+  it("handles network switch in Horizon endpoint between discovery and signing", async () => {
+    const behaviors: Record<string, EndpointBehavior> = {
+      "horizon.example.com": {
+        kind: "horizon",
+        passphrase: TESTNET_PASSPHRASE,
+      },
+    };
+    const { fetcher } = makeRoutingFetcher(behaviors);
+    const verifier = new NetworkIdentityVerifier({
+      expectedNetwork: "testnet",
+      horizonUrls: [horizonUrl("horizon.example.com")],
+      fetcher,
+      ...discoverOptions(60_000),
+    });
+
+    // Initial discovery
+    await verifier.assertVerified();
+
+    // Horizon endpoint switches to mainnet
+    behaviors["horizon.example.com"] = {
+      kind: "horizon",
+      passphrase: MAINNET_PASSPHRASE,
+    };
+
+    // Signing-time verification should detect the switch
+    await expect(verifier.verifyBeforeSigning()).rejects.toBeInstanceOf(
+      NetworkMismatchError
+    );
+  });
+
+  it("detects simultaneous network switches in multiple endpoints", async () => {
+    const behaviors: Record<string, EndpointBehavior> = {
+      "rpc.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+      "horizon.example.com": {
+        kind: "horizon",
+        passphrase: TESTNET_PASSPHRASE,
+      },
+    };
+    const { fetcher } = makeRoutingFetcher(behaviors);
+    const verifier = new NetworkIdentityVerifier({
+      expectedNetwork: "testnet",
+      rpcUrls: [rpcUrl("rpc.example.com")],
+      horizonUrls: [horizonUrl("horizon.example.com")],
+      fetcher,
+      ...discoverOptions(60_000),
+    });
+
+    // Initial discovery
+    await verifier.assertVerified();
+
+    // Both endpoints switch to mainnet simultaneously
+    behaviors["rpc.example.com"] = {
+      kind: "rpc",
+      passphrase: MAINNET_PASSPHRASE,
+    };
+    behaviors["horizon.example.com"] = {
+      kind: "horizon",
+      passphrase: MAINNET_PASSPHRASE,
+    };
+
+    // Signing-time verification should detect both mismatches
+    const error = await verifier
+      .verifyBeforeSigning()
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(NetworkMismatchError);
+    expect(error.mismatchedServices).toContain("rpc");
+    expect(error.mismatchedServices).toContain("horizon");
+  });
+
+  it("handles mixed endpoint states during signing-time verification", async () => {
+    const behaviors: Record<string, EndpointBehavior> = {
+      "rpc1.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+      "rpc2.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+      "horizon.example.com": {
+        kind: "horizon",
+        passphrase: TESTNET_PASSPHRASE,
+      },
+    };
+    const { fetcher } = makeRoutingFetcher(behaviors);
+    const verifier = new NetworkIdentityVerifier({
+      expectedNetwork: "testnet",
+      rpcUrls: [rpcUrl("rpc1.example.com"), rpcUrl("rpc2.example.com")],
+      horizonUrls: [horizonUrl("horizon.example.com")],
+      fetcher,
+      requireReachability: false,
+      ...discoverOptions(60_000),
+    });
+
+    // Initial discovery
+    await verifier.assertVerified();
+
+    // Mixed state changes: one switches network, one becomes unreachable, one stays stable
+    behaviors["rpc1.example.com"] = {
+      kind: "rpc",
+      passphrase: MAINNET_PASSPHRASE, // Network switch
+    };
+    behaviors["rpc2.example.com"] = { kind: "rpc", throws: true }; // Unreachable
+    // horizon.example.com remains stable
+
+    // Should fail due to network mismatch, not just unreachable
+    await expect(verifier.verifyBeforeSigning()).rejects.toBeInstanceOf(
+      NetworkMismatchError
+    );
+  });
+
+  it("properly invalidates cache for all endpoints during force refresh", async () => {
+    const behaviors: Record<string, EndpointBehavior> = {
+      "rpc1.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+      "rpc2.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+    };
+    const { fetcher, calls } = makeRoutingFetcher(behaviors);
+    const verifier = new NetworkIdentityVerifier({
+      expectedNetwork: "testnet",
+      rpcUrls: [rpcUrl("rpc1.example.com"), rpcUrl("rpc2.example.com")],
+      fetcher,
+      ...discoverOptions(60_000),
+    });
+
+    // Initial discovery
+    await verifier.assertVerified();
+    expect(verifier.cacheSize).toBe(2);
+
+    // Both endpoints switch networks
+    behaviors["rpc1.example.com"] = {
+      kind: "rpc",
+      passphrase: MAINNET_PASSPHRASE,
+    };
+    behaviors["rpc2.example.com"] = {
+      kind: "rpc",
+      passphrase: MAINNET_PASSPHRASE,
+    };
+
+    const callsBeforeForceRefresh = calls.length;
+
+    // Force refresh should re-discover both endpoints
+    await expect(verifier.verifyBeforeSigning()).rejects.toBeInstanceOf(
+      NetworkMismatchError
+    );
+
+    // Both endpoints should have been called again
+    expect(calls.length).toBe(callsBeforeForceRefresh + 2);
+  });
+
+  it("handles endpoint that returns unrecognized network during signing-time verification", async () => {
+    const behaviors: Record<string, EndpointBehavior> = {
+      "rpc.example.com": { kind: "rpc", passphrase: TESTNET_PASSPHRASE },
+    };
+    const { fetcher } = makeRoutingFetcher(behaviors);
+    const verifier = new NetworkIdentityVerifier({
+      expectedNetwork: "testnet",
+      rpcUrls: [rpcUrl("rpc.example.com")],
+      fetcher,
+      ...discoverOptions(60_000),
+    });
+
+    // Initial discovery
+    await verifier.assertVerified();
+
+    // Endpoint starts returning unrecognized passphrase
+    behaviors["rpc.example.com"] = {
+      kind: "rpc",
+      passphrase: "Futurenet Network ; 2024", // Unrecognized network
+    };
+
+    // Should fail with unrecognized network error
+    await expect(verifier.verifyBeforeSigning()).rejects.toMatchObject({
+      code: "NETWORK_IDENTITY_UNRECOGNIZED",
+    });
+  });
+});

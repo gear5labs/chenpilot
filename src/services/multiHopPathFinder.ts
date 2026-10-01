@@ -124,6 +124,18 @@ export class MultiHopPathFinder {
       });
     }
 
+    if (policy.minTradeSize !== undefined) {
+      const sourceAmount = parseFloat(path.sourceAmount);
+      if (sourceAmount < policy.minTradeSize) {
+        violations.push({
+          field: "minTradeSize",
+          actual: sourceAmount,
+          threshold: policy.minTradeSize,
+          reason: `trade size ${sourceAmount} < protocol minimum ${policy.minTradeSize}`,
+        });
+      }
+    }
+
     if (violations.length > 0) {
       throw new RoutePolicyViolationError(
         violations.map((v) => v.reason).join("; "),
@@ -131,6 +143,32 @@ export class MultiHopPathFinder {
         violations
       );
     }
+  }
+
+  /**
+   * Derive a stable pool identity key for the edge between two consecutive
+   * assets in a route.  On the Stellar DEX/AMM, the pool for a pair is the
+   * same regardless of which direction you traverse it, so we sort the two
+   * asset strings before joining them.
+   */
+  private poolKey(a: StellarSdk.Asset, b: StellarSdk.Asset): string {
+    const sa = this.assetToString(a);
+    const sb = this.assetToString(b);
+    return sa < sb ? `${sa}|${sb}` : `${sb}|${sa}`;
+  }
+
+  /**
+   * Return true if the path re-uses the same pool more than once.
+   * Each consecutive asset pair maps to one pool; a duplicate key = cycle.
+   */
+  private hasCycle(path: StellarSdk.Asset[]): boolean {
+    const seen = new Set<string>();
+    for (let i = 0; i < path.length - 1; i++) {
+      const key = this.poolKey(path[i], path[i + 1]);
+      if (seen.has(key)) return true;
+      seen.add(key);
+    }
+    return false;
   }
 
   private async findAllPaths(
@@ -149,9 +187,10 @@ export class MultiHopPathFinder {
 
       for (const record of strictSendPaths.records) {
         if (record.path.length <= maxHops) {
-          paths.push(
-            this.convertStrictSendPath(record, sourceAsset, destinationAsset)
-          );
+          const candidate = this.convertStrictSendPath(record, sourceAsset, destinationAsset);
+          if (!this.hasCycle(candidate.path)) {
+            paths.push(candidate);
+          }
         }
       }
     } catch (error) {
@@ -166,9 +205,10 @@ export class MultiHopPathFinder {
 
       for (const record of strictReceivePaths.records) {
         if (record.path.length <= maxHops) {
-          paths.push(
-            this.convertStrictReceivePath(record, sourceAsset, destinationAsset)
-          );
+          const candidate = this.convertStrictReceivePath(record, sourceAsset, destinationAsset);
+          if (!this.hasCycle(candidate.path)) {
+            paths.push(candidate);
+          }
         }
       }
     } catch (error) {

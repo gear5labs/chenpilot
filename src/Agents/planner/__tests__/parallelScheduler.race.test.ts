@@ -18,6 +18,12 @@
  *   7. Dependency cycle detection — cycle in dependencies raises an error.
  *   8. Wave ordering — steps with explicit dependencies run after their
  *      declared dependencies.
+ *  9. External workflow dependency ownership — references to steps of another
+ *      durable workflow are accepted only when their authoritative owner
+ *      matches the plan owner; malformed, duplicated, self-referential,
+ *      unverifiable and cross-owner references are refused before any wave is
+ *      computed.
+
  */
 
 // Mock logger before any imports that use it
@@ -37,7 +43,11 @@ jest.mock("../../../config/logger", () => {
 // Mock AgentPlanner to avoid pulling in LLM, DB, and config dependencies
 jest.mock("../AgentPlanner");
 
-import { DependencyGraph } from "../DependencyGraph";
+import {
+  DependencyGraph,
+  EXTERNAL_WORKFLOW_DEPENDENCIES_KEY,
+  ExternalDependencyOwnershipError,
+} from "../DependencyGraph";
 
 /**
  * Inline PlanStep shape — mirrors AgentPlanner.PlanStep but avoids importing
@@ -587,5 +597,324 @@ describe("Approval gate – step sequencing", () => {
     const key = "approval:router-v3";
     expect(nodes.get(1)!.conflictResources.has(key)).toBe(true);
     expect(nodes.get(2)!.conflictResources.has(key)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 12. External workflow dependency ownership
+// ---------------------------------------------------------------------------
+
+describe("DependencyGraph – external workflow dependency ownership", () => {
+  /** Builds a step that references steps belonging to other workflows. */
+  function makeStepWithExternalDeps(
+    stepNumber: number,
+    action: string,
+    externalDependencies: unknown,
+    dependencies: number[] = []
+  ): PlanStep {
+    return {
+      ...makeStep(stepNumber, action, {}, dependencies),
+      payload: { [EXTERNAL_WORKFLOW_DEPENDENCIES_KEY]: externalDependencies },
+    };
+  }
+
+  /** Runs `fn` and returns the ownership refusal it threw. */
+  function captureViolation(
+    fn: () => unknown
+  ): ExternalDependencyOwnershipError {
+    try {
+      fn();
+    } catch (error) {
+      if (error instanceof ExternalDependencyOwnershipError) {
+        return error;
+      }
+      throw error;
+    }
+    throw new Error("Expected an ExternalDependencyOwnershipError");
+  }
+
+  it("accepts a reference to a workflow owned by the same principal", () => {
+    const steps = [
+      makeStepWithExternalDeps(1, "release_escrow", [
+        { executionId: "exec-upstream", stepNumber: 3 },
+      ]),
+    ];
+
+    const { waves } = DependencyGraph.build(steps, {
+      ownerId: "user-alice",
+      executionId: "exec-current",
+      externalOwners: new Map([["exec-upstream", "user-alice"]]),
+    });
+
+    expect(waves).toEqual([[1]]);
+  });
+
+  it("accepts a declared owner that matches the authoritative owner", () => {
+    const steps = [
+      makeStepWithExternalDeps(1, "settle", [
+        { executionId: "exec-upstream", stepNumber: 1, ownerId: "user-alice" },
+      ]),
+    ];
+
+    expect(() =>
+      DependencyGraph.build(steps, {
+        ownerId: "user-alice",
+        externalOwners: new Map([["exec-upstream", "user-alice"]]),
+      })
+    ).not.toThrow();
+  });
+
+  it("schedules the referencing step after its in-plan dependency", () => {
+    const steps = [
+      makeStep(1, "check_balance"),
+      makeStepWithExternalDeps(
+        2,
+        "apply_upstream_result",
+        [{ executionId: "exec-upstream", stepNumber: 5 }],
+        [1]
+      ),
+    ];
+
+    const { waves } = DependencyGraph.build(steps, {
+      ownerId: "user-alice",
+      externalOwners: new Map([["exec-upstream", "user-alice"]]),
+    });
+
+    expect(waves).toEqual([[1], [2]]);
+  });
+
+  it("refuses to build when no authoritative owner map is supplied", () => {
+    const steps = [
+      makeStepWithExternalDeps(2, "settle", [
+        { executionId: "exec-upstream", stepNumber: 1 },
+      ]),
+    ];
+
+    const violation = captureViolation(() => DependencyGraph.build(steps));
+
+    expect(violation.code).toBe("ownership_context_required");
+    expect(violation.stepNumber).toBe(2);
+    expect(violation.message).toMatch(/externalOwners/);
+  });
+
+  it("refuses to build when the plan owner is unknown", () => {
+    const steps = [
+      makeStepWithExternalDeps(1, "settle", [
+        { executionId: "exec-upstream", stepNumber: 1 },
+      ]),
+    ];
+
+    const violation = captureViolation(() =>
+      DependencyGraph.build(steps, {
+        externalOwners: new Map([["exec-upstream", "user-alice"]]),
+      })
+    );
+
+    expect(violation.code).toBe("ownership_context_required");
+    expect(violation.message).toMatch(/GraphBuildOptions.ownerId/);
+  });
+
+  it("refuses a reference owned by another principal", () => {
+    const steps = [
+      makeStepWithExternalDeps(4, "settle", [
+        { executionId: "exec-bob", stepNumber: 2 },
+      ]),
+    ];
+
+    const violation = captureViolation(() =>
+      DependencyGraph.build(steps, {
+        ownerId: "user-alice",
+        externalOwners: new Map([["exec-bob", "user-bob"]]),
+      })
+    );
+
+    expect(violation.code).toBe("owner_mismatch");
+    expect(violation.stepNumber).toBe(4);
+    expect(violation.executionId).toBe("exec-bob");
+    expect(violation.message).toMatch(/owned by user-bob/);
+  });
+
+  it("refuses a spoofed owner claim carried in the plan payload", () => {
+    const steps = [
+      makeStepWithExternalDeps(1, "settle", [
+        { executionId: "exec-bob", stepNumber: 2, ownerId: "user-alice" },
+      ]),
+    ];
+
+    const violation = captureViolation(() =>
+      DependencyGraph.build(steps, {
+        ownerId: "user-alice",
+        externalOwners: new Map([["exec-bob", "user-bob"]]),
+      })
+    );
+
+    expect(violation.code).toBe("owner_mismatch");
+    expect(violation.message).toMatch(
+      /claims external workflow exec-bob is owned by user-alice/
+    );
+  });
+
+  it("refuses a reference whose ownership cannot be resolved", () => {
+    const steps = [
+      makeStepWithExternalDeps(3, "settle", [
+        { executionId: "exec-ghost", stepNumber: 1 },
+      ]),
+    ];
+
+    const violation = captureViolation(() =>
+      DependencyGraph.build(steps, {
+        ownerId: "user-alice",
+        externalOwners: new Map(),
+      })
+    );
+
+    expect(violation.code).toBe("unverifiable_ownership");
+    expect(violation.executionId).toBe("exec-ghost");
+  });
+
+  it("refuses a reference to the execution being built", () => {
+    const steps = [
+      makeStepWithExternalDeps(1, "settle", [
+        { executionId: "exec-current", stepNumber: 2 },
+      ]),
+    ];
+
+    const violation = captureViolation(() =>
+      DependencyGraph.build(steps, {
+        ownerId: "user-alice",
+        executionId: "exec-current",
+        externalOwners: new Map([["exec-current", "user-alice"]]),
+      })
+    );
+
+    expect(violation.code).toBe("self_reference");
+    expect(violation.message).toMatch(/use PlanStep.dependencies/);
+  });
+
+  it("refuses duplicate declarations of the same external step", () => {
+    const steps = [
+      makeStepWithExternalDeps(1, "settle", [
+        { executionId: "exec-upstream", stepNumber: 2 },
+        { executionId: "exec-upstream", stepNumber: 2 },
+      ]),
+    ];
+
+    const violation = captureViolation(() =>
+      DependencyGraph.build(steps, {
+        ownerId: "user-alice",
+        externalOwners: new Map([["exec-upstream", "user-alice"]]),
+      })
+    );
+
+    expect(violation.code).toBe("duplicate_reference");
+  });
+
+  it.each([
+    [
+      "a non-array declaration",
+      { executionId: "exec-upstream", stepNumber: 1 },
+    ],
+    ["a missing executionId", [{ stepNumber: 1 }]],
+    ["a blank executionId", [{ executionId: "   ", stepNumber: 1 }]],
+    [
+      "a non-positive stepNumber",
+      [{ executionId: "exec-upstream", stepNumber: 0 }],
+    ],
+    [
+      "a non-integer stepNumber",
+      [{ executionId: "exec-upstream", stepNumber: 1.5 }],
+    ],
+    [
+      "a blank ownerId",
+      [{ executionId: "exec-upstream", stepNumber: 1, ownerId: " " }],
+    ],
+  ])("refuses %s", (_label, declaration) => {
+    const steps = [makeStepWithExternalDeps(1, "settle", declaration)];
+
+    const violation = captureViolation(() =>
+      DependencyGraph.build(steps, {
+        ownerId: "user-alice",
+        externalOwners: new Map([["exec-upstream", "user-alice"]]),
+      })
+    );
+
+    expect(violation.code).toBe("malformed_reference");
+    expect(violation.stepNumber).toBe(1);
+  });
+
+  it("validates ownership before computing any wave", () => {
+    // The plan also contains a cycle.  The ownership refusal must win, because
+    // no schedule may be produced for a plan that depends on another principal.
+    const steps = [
+      makeStepWithExternalDeps(
+        1,
+        "a",
+        [{ executionId: "exec-bob", stepNumber: 1 }],
+        [2]
+      ),
+      makeStep(2, "b", {}, [1]),
+    ];
+
+    const violation = captureViolation(() =>
+      DependencyGraph.build(steps, {
+        ownerId: "user-alice",
+        externalOwners: new Map([["exec-bob", "user-bob"]]),
+      })
+    );
+
+    expect(violation.code).toBe("owner_mismatch");
+    expect(violation.message).not.toMatch(/Cycle detected/);
+  });
+
+  it("allows cross-owner references only when explicitly permitted", () => {
+    const steps = [
+      makeStepWithExternalDeps(1, "settle", [
+        { executionId: "exec-bob", stepNumber: 1 },
+      ]),
+    ];
+    const externalOwners = new Map([["exec-bob", "user-bob"]]);
+
+    const violation = captureViolation(() =>
+      DependencyGraph.build(steps, { ownerId: "user-alice", externalOwners })
+    );
+    expect(violation.code).toBe("owner_mismatch");
+
+    const { waves } = DependencyGraph.build(steps, {
+      ownerId: "user-alice",
+      externalOwners,
+      allowCrossOwner: true,
+    });
+    expect(waves).toEqual([[1]]);
+  });
+
+  it("collectExternalDependencyExecutionIds returns sorted unique ids", () => {
+    const steps = [
+      makeStepWithExternalDeps(1, "a", [
+        { executionId: "exec-b", stepNumber: 1 },
+        { executionId: "exec-a", stepNumber: 2 },
+      ]),
+      makeStepWithExternalDeps(2, "b", [
+        { executionId: "exec-b", stepNumber: 9 },
+      ]),
+      makeStep(3, "c"),
+    ];
+
+    expect(
+      DependencyGraph.collectExternalDependencyExecutionIds(steps)
+    ).toEqual(["exec-a", "exec-b"]);
+  });
+
+  it("leaves plans without external dependencies untouched by build options", () => {
+    const steps = [makeStep(1, "a"), makeStep(2, "b", {}, [1])];
+
+    const plain = DependencyGraph.build(steps);
+    const withOptions = DependencyGraph.build(steps, {
+      ownerId: "user-alice",
+      executionId: "exec-current",
+      externalOwners: new Map(),
+    });
+
+    expect(withOptions.waves).toEqual(plain.waves);
+    expect(withOptions.nodes.size).toBe(plain.nodes.size);
   });
 });

@@ -58,6 +58,9 @@ export class DurableStep {
   @Column({ type: "uuid", nullable: true })
   approvedBy?: string;
 
+  @Column({ type: "timestamp", nullable: true })
+  expiresAt?: Date;
+
   @Column({
     type: "enum",
     enum: StepStatus,
@@ -123,6 +126,37 @@ export class DurableStep {
    */
   @Column({ type: "timestamp", nullable: true })
   cancelledAt?: Date | null;
+
+  // ── Immutable resolved inputs (issue #809) ──────────────────────────────────
+
+  /**
+   * Frozen, fully-resolved payload that was (or will be) handed to the tool.
+   *
+   * `payload` above keeps holding the *unresolved planner template*, which may
+   * contain placeholders such as `{ "$ref": "steps.2.result.data.balance" }`.
+   * This column holds the concrete inputs after every placeholder was
+   * substituted. It is written exactly once per payload — immediately before
+   * the step's first attempt — and reused verbatim on every retry, resume and
+   * replay, so a recovered step can never submit different parameters than the
+   * attempt it replays.
+   *
+   * Null until the first execution, and again after an operator supplies a new
+   * payload through `repairUpdateAndRetry` (an authorised act that invalidates
+   * the previous snapshot).
+   */
+  @Column({ type: "jsonb", nullable: true })
+  resolvedInputs?: Record<string, unknown> | null;
+
+  /** SHA-256 of the canonical encoding of `resolvedInputs`. */
+  @Column({ type: "varchar", length: 64, nullable: true })
+  resolvedInputsHash?: string | null;
+
+  /**
+   * Timestamp the snapshot was frozen. Non-null means immutable: the executor
+   * replays `resolvedInputs` instead of re-resolving `payload`.
+   */
+  @Column({ type: "timestamp", nullable: true })
+  resolvedAt?: Date | null;
 
   @CreateDateColumn()
   createdAt!: Date;
