@@ -188,12 +188,37 @@ export class MultiHopTradeTool extends BaseTool<MultiHopTradePayload> {
   /**
    * Evaluate optimal multi-hop route without executing
    * @param sourceAsset - The source Stellar asset
-   * @param destAsset - The destination Stellar asset
-   * @param payload - Original trade payload
-   * @param policy - Route policy constraints
-   * @param userId - User ID
-   * @returns ToolResult with best and alternative paths
+  /**
+   * Filter paths whose intermediate assets contain any revoked entry.
+   * Source and destination are checked separately; this covers only the hops in between.
    */
+  private async filterRevokedPaths(paths: TradePath[]): Promise<TradePath[]> {
+    const results: TradePath[] = [];
+    for (const path of paths) {
+      const intermediates = path.path.slice(1, -1);
+      let clean = true;
+      for (const asset of intermediates) {
+        try {
+          const check = asset.isNative()
+            ? await assetRevocationService.isRevoked("XLM", "asset")
+            : await assetRevocationService.checkAssetWithIssuer(asset.code, asset.issuer);
+          if (check.revoked) {
+            logger.warn("Dropping route: intermediate asset revoked", {
+              asset: asset.isNative() ? "XLM" : `${asset.code}:${asset.issuer}`,
+              reason: check.reason,
+            });
+            clean = false;
+            break;
+          }
+        } catch {
+          // Revocation service unavailable — keep the path rather than drop everything
+        }
+      }
+      if (clean) results.push(path);
+    }
+    return results;
+  }
+
   private async evaluateRoute(
     sourceAsset: StellarSdk.Asset,
     destAsset: StellarSdk.Asset,
@@ -211,10 +236,20 @@ export class MultiHopTradeTool extends BaseTool<MultiHopTradePayload> {
         { maxHops: policy.maxHops, policy }
       );
 
+      const cleanPaths = await this.filterRevokedPaths(result.allPaths);
+      if (cleanPaths.length === 0) {
+        return this.createErrorResult(
+          "multi_hop_evaluate",
+          "All available routes contain revoked intermediate assets"
+        );
+      }
+
+      const [bestPath, ...rest] = cleanPaths;
+
       return this.createSuccessResult("multi_hop_evaluate", {
-        bestPath: this.serializePath(result.bestPath),
-        alternativePaths: result.allPaths
-          .slice(1, 4)
+        bestPath: this.serializePath(bestPath),
+        alternativePaths: rest
+          .slice(0, 3)
           .map((p) => this.serializePath(p)),
         evaluation: {
           totalPathsFound: result.allPaths.length,
@@ -286,6 +321,14 @@ export class MultiHopTradeTool extends BaseTool<MultiHopTradePayload> {
       );
 
       // Intermediate path assets (exclude source and destination)
+      // Drop the entire path if any intermediate hop is revoked.
+      const cleanPaths = await this.filterRevokedPaths([bestPath]);
+      if (cleanPaths.length === 0) {
+        return this.createErrorResult(
+          "multi_hop_execute",
+          `Route contains a revoked intermediate asset and cannot be executed`
+        );
+      }
       const pathAssets = bestPath.path.slice(1, -1);
 
       const tx = new StellarSdk.TransactionBuilder(sourceAccount, {
