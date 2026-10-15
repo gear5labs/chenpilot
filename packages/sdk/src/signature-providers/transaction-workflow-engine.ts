@@ -5,6 +5,10 @@ import { SignatureProviderRegistry } from "./registry";
 import { SignatureProviderFactory } from "./provider-factory";
 import { SignatureRequest } from "./types";
 import { SignatureProviderErrorUtils } from "./errors";
+import {
+  enforceDestinationMemoRequirements,
+  type StellarTransactionMemoShape,
+} from "../advancedOps/memoOperations";
 import { throwIfAborted } from "../abort";
 import type { AbortSignalLike } from "../types";
 
@@ -31,6 +35,16 @@ export class TransactionWorkflowEngine {
       accountAddress: request.accountAddress,
       metadata: request.metadata,
     };
+
+    // Last gate before a signer sees the transaction: a destination that
+    // requires a memo must be satisfied while the transaction can still be
+    // rebuilt. Runs outside the provider try/catch so the failure names the
+    // destination requirement rather than blaming the selected provider.
+    if (request.chainId === ChainId.STELLAR) {
+      enforceDestinationMemoRequirements(
+        request.transaction as StellarTransactionMemoShape
+      );
+    }
 
     try {
       const signature = await provider.signTransaction(signatureRequest, signal);

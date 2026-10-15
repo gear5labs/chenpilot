@@ -20,6 +20,13 @@ export interface AdapterCapabilities {
   lending: boolean;
   borrowing: boolean;
   farming: boolean;
+  /**
+   * Whether this adapter handles assets that take a fee on every transfer
+   * (fee-on-transfer / FOT tokens). Stellar path payments resolve output
+   * amounts via Horizon simulation so no extra FOT accounting is needed;
+   * both current adapters explicitly declare this false.
+   */
+  transferFeeAsset: boolean;
 }
 
 /**
@@ -77,6 +84,7 @@ export const DEFAULT_CAPABILITIES: AdapterCapabilities = {
   lending: false,
   borrowing: false,
   farming: false,
+  transferFeeAsset: false,
 };
 
 /**
@@ -156,6 +164,10 @@ function createAdapterConfig(
         process.env[`${prefix}_CAPABILITY_FARMING`],
         defaults.capabilities?.farming ?? false
       ),
+      transferFeeAsset: parseBool(
+        process.env[`${prefix}_CAPABILITY_TRANSFER_FEE_ASSET`],
+        defaults.capabilities?.transferFeeAsset ?? false
+      ),
     },
     customConfig: defaults.customConfig,
     timeout: parseNumber(
@@ -203,6 +215,7 @@ const DEFAULT_ADAPTERS: Record<DeFiProtocol, Partial<DeFiAdapterConfig>> = {
       lending: false,
       borrowing: false,
       farming: false,
+      transferFeeAsset: false,
     },
     timeout: 30000,
     retry: {
@@ -238,6 +251,7 @@ const DEFAULT_ADAPTERS: Record<DeFiProtocol, Partial<DeFiAdapterConfig>> = {
       lending: true,
       borrowing: true,
       farming: false,
+      transferFeeAsset: false,
     },
     timeout: 30000,
     retry: {

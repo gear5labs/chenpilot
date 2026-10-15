@@ -4,6 +4,9 @@ import logger from "../config/logger";
 import { transactionLifecycleService } from "../transactions/TransactionLifecycle.service";
 import { durableOperationService } from "../Reliability/DurableOperationService";
 import { SafeXdrDecoder } from "../utils/xdr";
+import {
+  assertTrustlinesForTransfer,
+} from "../../../packages/sdk/src/trustline";
 
 /**
  * Delay strategy for transaction submission
@@ -205,12 +208,73 @@ export class DelayedTransactionService {
     const tx = SafeXdrDecoder.decodeTransaction(xdr, {
       networkPassphrase: config.stellar.networkPassphrase,
     }) as StellarSdk.Transaction;
+
+    // Trustline authorization preflight: any payment/path-payment operation in
+    // a delayed envelope must target assets whose trustlines are authorized on
+    // the operation's source account (or the transaction source when the
+    // operation does not override it). Fail-closed.
+    await this.assertDelayedTransactionTrustlines(tx);
+
     const result = await this.server.submitTransaction(tx);
     return {
       hash: result.hash,
       ledger: result.ledger,
       envelopeXdr: result.envelope_xdr,
     };
+  }
+
+  /**
+   * Check trustline authorization for every transfer operation in a delayed
+   * transaction envelope before submission.
+   * @param tx - Decoded Stellar transaction
+   */
+  private async assertDelayedTransactionTrustlines(
+    tx: StellarSdk.Transaction
+  ): Promise<void> {
+    const transferOpTypes = new Set([
+      "payment",
+      "pathPaymentStrictReceive",
+      "pathPaymentStrictSend",
+    ]);
+
+    const assetsByAccount = new Map<string, Set<unknown>>();
+    const txSource = tx.source;
+
+    for (const op of tx.operations) {
+      if (!transferOpTypes.has(op.type)) continue;
+
+      const opAny = op as unknown as {
+        asset?: unknown;
+        sendAsset?: unknown;
+        destAsset?: unknown;
+        path?: unknown[];
+        source?: string;
+      };
+
+      const sourceAccount = opAny.source || txSource;
+      if (!sourceAccount) continue;
+
+      const assets: unknown[] = [
+        opAny.asset,
+        opAny.sendAsset,
+        opAny.destAsset,
+        ...(opAny.path ?? []),
+      ].filter(Boolean);
+
+      if (assets.length === 0) continue;
+
+      const bucket = assetsByAccount.get(sourceAccount) ?? new Set<unknown>();
+      assets.forEach((a) => bucket.add(a));
+      assetsByAccount.set(sourceAccount, bucket);
+    }
+
+    for (const [account, assets] of assetsByAccount) {
+      await assertTrustlinesForTransfer(
+        config.stellar.horizonUrl,
+        account,
+        Array.from(assets)
+      );
+    }
   }
 
   private validateConfig(config: DelayedTransactionConfig): void {

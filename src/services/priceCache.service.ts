@@ -7,6 +7,22 @@ export interface PriceData {
   source: string;
 }
 
+/**
+ * Issuer identity of a price pair.
+ *
+ * Prices are per-asset, not per-code: two `USDC` issuers are two different
+ * assets. Callers that know the issuer pass it here so the cache never
+ * answers one issuer's request with another issuer's price. Omitting the
+ * issuers keeps the historical `price:{FROM}:{TO}` key, so existing entries
+ * and callers are unaffected.
+ */
+export interface PriceAssetIdentity {
+  /** Issuer account of the source asset; omitted or empty for native XLM. */
+  fromIssuer?: string;
+  /** Issuer account of the destination asset; omitted or empty for native XLM. */
+  toIssuer?: string;
+}
+
 /** Maximum age in ms a cached price is considered fresh enough to act on. */
 export const PRICE_MAX_AGE_MS = 60_000;
 
@@ -28,18 +44,31 @@ export class PriceCacheService {
   private hits = 0;
   private misses = 0;
 
-  private getCacheKey(fromAsset: string, toAsset: string): string {
-    return `price:${fromAsset.toUpperCase()}:${toAsset.toUpperCase()}`;
+  private getCacheKey(
+    fromAsset: string,
+    toAsset: string,
+    identity?: PriceAssetIdentity
+  ): string {
+    const fromIssuer = identity?.fromIssuer?.trim();
+    const toIssuer = identity?.toIssuer?.trim();
+    return [
+      "price",
+      fromAsset.toUpperCase(),
+      ...(fromIssuer ? [fromIssuer] : []),
+      toAsset.toUpperCase(),
+      ...(toIssuer ? [toIssuer] : []),
+    ].join(":");
   }
 
   async getPrice(
     fromAsset: string,
-    toAsset: string
+    toAsset: string,
+    identity?: PriceAssetIdentity
   ): Promise<CachedPriceResult | null> {
     const start = Date.now();
 
     try {
-      const key = this.getCacheKey(fromAsset, toAsset);
+      const key = this.getCacheKey(fromAsset, toAsset, identity);
       const redis = getRedisClient();
       const cached = await redis.get(key);
 
@@ -77,12 +106,13 @@ export class PriceCacheService {
     toAsset: string,
     price: number,
     source: string,
-    ttl: number = this.DEFAULT_TTL
+    ttl: number = this.DEFAULT_TTL,
+    identity?: PriceAssetIdentity
   ): Promise<void> {
     const start = Date.now();
 
     try {
-      const key = this.getCacheKey(fromAsset, toAsset);
+      const key = this.getCacheKey(fromAsset, toAsset, identity);
       const priceData: PriceData = {
         price,
         timestamp: Date.now(),
@@ -107,18 +137,22 @@ export class PriceCacheService {
   }
 
   async getPrices(
-    pairs: Array<{ from: string; to: string }>
+    pairs: Array<{ from: string; to: string } & PriceAssetIdentity>
   ): Promise<Map<string, CachedPriceResult | null>> {
     const results = new Map<string, CachedPriceResult | null>();
     const start = Date.now();
 
     try {
-      const keys = pairs.map((p) => this.getCacheKey(p.from, p.to));
+      const keys = pairs.map((p) => this.getCacheKey(p.from, p.to, p));
       const redis = getRedisClient();
       const values = await redis.mget(...keys);
 
       pairs.forEach((pair, index) => {
-        const pairKey = `${pair.from}/${pair.to}`;
+        const fromIssuer = pair.fromIssuer?.trim();
+        const toIssuer = pair.toIssuer?.trim();
+        const pairKey = `${pair.from}/${pair.to}${
+          fromIssuer ? `:${fromIssuer}` : ""
+        }${toIssuer ? `:${toIssuer}` : ""}`;
         const value = values[index];
 
         if (value) {
@@ -152,9 +186,13 @@ export class PriceCacheService {
     return results;
   }
 
-  async invalidatePrice(fromAsset: string, toAsset: string): Promise<void> {
+  async invalidatePrice(
+    fromAsset: string,
+    toAsset: string,
+    identity?: PriceAssetIdentity
+  ): Promise<void> {
     try {
-      const key = this.getCacheKey(fromAsset, toAsset);
+      const key = this.getCacheKey(fromAsset, toAsset, identity);
       const redis = getRedisClient();
       await redis.del(key);
 
@@ -264,3 +302,11 @@ export class PriceCacheService {
     return healthCheckRedis();
   }
 }
+/**
+ * Singleton cache.
+ *
+ * The price services import this module's default export; without it the
+ * default resolves to `undefined` and every price lookup throws before it
+ * reaches Horizon.
+ */
+export default new PriceCacheService();

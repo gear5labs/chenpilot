@@ -1,8 +1,29 @@
 /**
  * Tests for DifferentialEvaluator
  */
-
+// src/Agents/models/__tests__/DifferentialEvaluator.test.ts
 import { DifferentialEvaluator, DifferentialTestCase } from "../DifferentialEvaluator";
+import { evaluateMetadataRevision, EvaluationTestCase } from '../DifferentialEvaluator';
+
+describe('Differential Evaluator for Tool Metadata Revisions (#807)', () => {
+  it('detects tool selection regressions caused by metadata/description changes', () => {
+    const testCases: EvaluationTestCase[] = [
+      { prompt: 'Fetch user transaction history', expectedTool: 'fetch_transactions' },
+    ];
+
+    // Mock tool selector where 'after' metadata change breaks routing
+    const mockSelectTool = (prompt: string, version: 'before' | 'after') => {
+      if (version === 'before') return 'fetch_transactions';
+      return 'generic_search'; // Bad metadata revision caused misroute
+    };
+
+    const results = evaluateMetadataRevision(testCases, mockSelectTool);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].regressionDetected).toBe(true);
+    expect(results[0].afterTool).not.toBe(results[0].beforeTool);
+  });
+});
 
 describe("DifferentialEvaluator", () => {
   let evaluator: DifferentialEvaluator;
@@ -354,3 +375,5 @@ describe("DifferentialEvaluator", () => {
     });
   });
 });
+
+

@@ -324,3 +324,25 @@ export class AgentRegistry {
 }
 
 export const agentRegistry = new AgentRegistry();
+
+// Conceptual implementation snippet in registry/resolver logic
+
+export class PinnedToolUnavailableError extends Error {
+  constructor(public toolName: string, public pinnedVersion: string) {
+    super(`Pinned tool '${toolName}' version '${pinnedVersion}' is unavailable in the registry.`);
+    this.name = 'PinnedToolUnavailableError';
+  }
+}
+
+export function resolvePinnedTool(
+  toolName: string,
+  pinnedVersion: string,
+  availableVersions: string[]
+): string {
+  if (availableVersions.includes(pinnedVersion)) {
+    return pinnedVersion;
+  }
+  
+  // Define recovery policy: throw structured error for paused workflow recovery
+  throw new PinnedToolUnavailableError(toolName, pinnedVersion);
+}

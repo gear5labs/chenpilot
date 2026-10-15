@@ -5,6 +5,7 @@ import {
   ErrorHandler,
   EventSubscription,
 } from "./types";
+import { SafeXdrDecoder } from "./xdr/safeDecoder";
 
 interface RpcEvent {
   type?: string;
@@ -167,6 +168,21 @@ export function parseEvent(
   ledger: number,
   createdAt: number
 ): SorobanEvent {
+  let data: unknown = raw.value ?? null;
+
+  // Apply bounded XDR decoding when event data arrives as an XDR-encoded
+  // base64 string or binary buffer. Non-XDR values (already-native objects,
+  // null, numbers, etc.) pass through unchanged.
+  if (typeof data === "string" || Buffer.isBuffer(data) || data instanceof Uint8Array) {
+    try {
+      data = SafeXdrDecoder.decodeScVal(data as string | Buffer | Uint8Array);
+    } catch {
+      // Not valid XDR — keep the original value so callers that receive
+      // pre-decoded data are not broken.
+      data = raw.value ?? null;
+    }
+  }
+
   return {
     transactionHash,
     contractId,
@@ -175,7 +191,7 @@ export function parseEvent(
           typeof t === "string" ? t : JSON.stringify(t)
         )
       : [],
-    data: raw.value ?? null,
+    data,
     ledger,
     createdAt,
   };

@@ -20,6 +20,8 @@ import {
 } from "@stellar/stellar-sdk";
 import { abortableWait, isAbortError } from "./abort";
 import type { AbortSignalLike } from "./types";
+import { explainClaimEligibility } from "./advancedOps/claimableBalanceOperations";
+import type { ClaimEligibility } from "./advancedOps/types";
 
 export interface ClaimableBalance {
   /** Unique identifier for the claimable balance */
@@ -63,6 +65,13 @@ export interface ClaimBalanceOptions {
   horizonUrl?: string;
   /** Optional external signal to cancel the operation. */
   signal?: AbortSignalLike;
+  /**
+   * Ledger close time (unix seconds) to evaluate the claim predicates at.
+   * Defaults to the latest ledger read from Horizon, which keeps callers that
+   * already know the ledger time off the extra round trip (and makes tests
+   * deterministic).
+   */
+  ledgerTime?: number;
 }
 
 export interface ClaimBalanceResult {
@@ -79,6 +88,81 @@ export interface ClaimBalanceResult {
    * timed out after the transaction may have already reached the network.
    */
   ambiguous?: boolean;
+  /**
+   * Why this claimant can (or cannot) claim, evaluated against the claim
+   * predicates and the ledger time. Present whenever the ledger time could be
+   * read; absent when it could not, in which case no eligibility verdict is
+   * asserted.
+   */
+  eligibility?: ClaimEligibility;
+}
+
+export interface ClaimEligibilityOptions {
+  /** Claimable balance ID to explain */
+  balanceId: string;
+  /** Claimant account (`G...`) to explain eligibility for */
+  claimant: string;
+  /** Network to use: "testnet" or "mainnet" */
+  network?: "testnet" | "mainnet";
+  /** Optional custom Horizon URL */
+  horizonUrl?: string;
+  /**
+   * Ledger close time (unix seconds) to evaluate the predicates at.
+   * Defaults to the latest ledger read from Horizon.
+   */
+  ledgerTime?: number;
+  /** Optional external signal to cancel the operation. */
+  signal?: AbortSignalLike;
+}
+
+/** Convert an ISO timestamp to unix seconds; undefined when unparseable. */
+function toUnixSeconds(iso?: string): number | undefined {
+  if (!iso) return undefined;
+  const parsed = Date.parse(iso);
+  return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : undefined;
+}
+
+/**
+ * Extract a ledger close time in unix seconds from a Horizon ledger record.
+ * Prefers the integer `close_time` and falls back to the ISO `closed_at`.
+ */
+function parseLedgerCloseTime(record: unknown): number | undefined {
+  const ledger = record as {
+    close_time?: number | string;
+    closed_at?: string;
+  };
+  if (ledger?.close_time !== undefined && ledger.close_time !== null) {
+    const closeTime = Number(ledger.close_time);
+    if (Number.isFinite(closeTime) && closeTime > 0) return closeTime;
+  }
+  if (typeof ledger?.closed_at === "string") {
+    const parsed = Date.parse(ledger.closed_at);
+    if (Number.isFinite(parsed)) return Math.floor(parsed / 1000);
+  }
+  return undefined;
+}
+
+/**
+ * Read the latest ledger close time from Horizon, in unix seconds.
+ *
+ * Returns undefined when Horizon cannot supply it so callers can decide
+ * whether an unknown ledger time blocks them; cancellation still propagates.
+ */
+async function fetchLedgerCloseTime(
+  server: Horizon.Server,
+  signal?: AbortSignalLike
+): Promise<number | undefined> {
+  try {
+    const response = await abortableWait(
+      server.ledgers().order("desc").limit(1).call(),
+      signal
+    );
+    const record = response.records?.[0];
+    return parseLedgerCloseTime(record);
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    return undefined;
+  }
 }
 
 /**
@@ -149,6 +233,7 @@ export async function claimBalance(
   const server = new Horizon.Server(horizonUrl);
 
   let balance: ClaimableBalance | undefined;
+  let eligibility: ClaimEligibility | undefined;
 
   try {
     // Load the claimant keypair
@@ -196,6 +281,31 @@ export async function claimBalance(
       };
     }
 
+    // Explain eligibility from the claim predicates and the ledger close time
+    // before anything is signed: a claim the ledger would reject surfaces here
+    // as a readable reason instead of an opaque failure after submission.
+    // When the ledger time cannot be read the verdict is skipped rather than
+    // invented, so behaviour is unchanged in that case.
+    const ledgerTime =
+      options.ledgerTime ?? (await fetchLedgerCloseTime(server, options.signal));
+    if (ledgerTime !== undefined) {
+      eligibility = explainClaimEligibility({
+        claimant: claimantPublicKey,
+        claimants: balance.claimants,
+        ledgerTime,
+        startTime: toUnixSeconds(balance.createdAt),
+      });
+
+      if (eligibility.evaluated && !eligibility.eligible) {
+        return {
+          success: false,
+          error: eligibility.reason,
+          balance,
+          eligibility,
+        };
+      }
+    }
+
     // Load the claimant account
     const account = await abortableWait(
       server.loadAccount(claimantPublicKey),
@@ -232,12 +342,14 @@ export async function claimBalance(
       success: true,
       transactionHash: result.hash,
       balance,
+      ...(eligibility ? { eligibility } : {}),
     };
   } catch (error) {
     const outcome: ClaimBalanceResult = {
       success: false,
       error: error instanceof Error ? error.message : String(error),
       balance,
+      ...(eligibility ? { eligibility } : {}),
     };
 
     if (isAbortError(error) || isAmbiguousSubmissionError(error)) {
@@ -245,6 +357,68 @@ export async function claimBalance(
     }
 
     return outcome;
+  }
+}
+
+/**
+ * Explain whether an account may claim a claimable balance at the current
+ * ledger time, without building or submitting anything.
+ *
+ * The verdict comes from the balance's own claim predicates evaluated against
+ * the latest ledger close time (or `options.ledgerTime`), so callers can say
+ * "not yet — the claim window opens at ..." or "the claim window closed at
+ * ..." rather than discovering it through a rejected transaction.
+ *
+ * @throws {Error} when the balance or the ledger close time cannot be read.
+ */
+export async function getClaimEligibility(
+  options: ClaimEligibilityOptions
+): Promise<ClaimEligibility> {
+  const horizonUrl =
+    options.horizonUrl ||
+    (options.network === "mainnet"
+      ? "https://horizon.stellar.org"
+      : "https://horizon-testnet.stellar.org");
+
+  const server = new Horizon.Server(horizonUrl);
+
+  try {
+    const balanceRecord = await abortableWait(
+      server.claimableBalances().claimableBalance(options.balanceId).call(),
+      options.signal
+    );
+
+    const claimants = balanceRecord.claimants.map((claimant: unknown) => {
+      const entry = claimant as Record<string, unknown>;
+      return {
+        destination: entry.destination as string,
+        predicate: entry.predicate,
+      };
+    });
+
+    const ledgerTime =
+      options.ledgerTime ?? (await fetchLedgerCloseTime(server, options.signal));
+    if (ledgerTime === undefined) {
+      throw new Error("the latest ledger close time could not be read");
+    }
+
+    const createdAt = (balanceRecord as unknown as Record<string, unknown>)
+      .last_modified_time as string | undefined;
+
+    return explainClaimEligibility({
+      claimant: options.claimant,
+      claimants,
+      ledgerTime,
+      startTime: toUnixSeconds(createdAt),
+    });
+  } catch (error) {
+    // Cancellation must propagate unmasked.
+    if (isAbortError(error)) throw error;
+    throw new Error(
+      `Failed to explain claim eligibility: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   }
 }
 

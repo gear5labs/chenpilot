@@ -595,6 +595,38 @@ export class OutputValidator {
     );
   }
 }
+export interface ToolResult {
+  status: string;
+  data?: any;
+  error?: string;
+  [key: string]: any;
+}
 
+export class MissingToolResultFieldError extends Error {
+  constructor(public missingFields: string[]) {
+    super(`Tool result is missing required fields: ${missingFields.join(', ')}`);
+    this.name = 'MissingToolResultFieldError';
+  }
+}
+
+/**
+ * Validates that required tool-result fields are present before marking a step complete.
+ */
+export function validateToolResult(
+  result: ToolResult, 
+  requiredFields: string[] = ['status', 'data']
+): void {
+  if (!result || typeof result !== 'object') {
+    throw new Error('Invalid tool result format: expected an object.');
+  }
+
+  const missing = requiredFields.filter((field) => result[field] === undefined || result[field] === null);
+  
+  if (missing.length > 0) {
+    throw new MissingToolResultFieldError(missing);
+  }
+}
 // Singleton instance
 export const outputValidator = new OutputValidator();
+
+

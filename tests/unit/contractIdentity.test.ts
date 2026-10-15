@@ -29,6 +29,10 @@ import {
 import { IdentityVerificationService } from "../../src/ContractIdentity";
 import type { ChainIdentityProvider } from "../../src/ContractIdentity";
 import type { ManifestNetwork } from "../../src/ContractIdentity";
+import {
+  checkApproval,
+  createApproval,
+} from "../../src/transactions/approvalDependencies";
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 
@@ -330,6 +334,60 @@ describe("IdentityVerificationService assertCanMutate", () => {
     );
     await service.verifyAll();
     expect(() => service.assertCanMutate("core_vault")).not.toThrow();
+  });
+
+  it("invalidates an approval when the contract's WASM hash changes (simulated identity upgrade)", async () => {
+    // Simulate an approval granted under the original WASM hash.
+    const store = new FileManifestStore(tmpDir);
+    await store.save(createSignedManifest(makePayload()));
+    const service = new IdentityVerificationService(makeChainProvider(true), store);
+    await service.verifyAll();
+
+    const originalHash = service.getIdentity("core_vault")!.wasmHash;
+    const txPayload = { from: "GA...", to: "GB...", amount: "10.0000000", asset: "USDC" };
+    const approval = createApproval(txPayload, {
+      assetMetadataVersion: "a1",
+      issuerStatusVersion: "i1",
+      routeVersion: "r1",
+      feePolicyVersion: "f1",
+      contractVersion: originalHash,
+    });
+
+    // Contract is upgraded: re-verify against a new manifest with a different WASM hash.
+    const upgradedStore = new FileManifestStore(tmpDir);
+    const upgradedWasmHash =
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    await upgradedStore.save(
+      createSignedManifest(makePayload({ wasmHash: upgradedWasmHash }))
+    );
+    const upgradedService = new IdentityVerificationService(
+      {
+        name: "fake-upgraded",
+        async lookupCodeIdentity() {
+          return { match: true, observedWasmHash: upgradedWasmHash };
+        },
+      },
+      upgradedStore
+    );
+    await upgradedService.verifyAll();
+
+    const currentHash = upgradedService.getIdentity("core_vault")!.wasmHash;
+    expect(currentHash).not.toBe(originalHash);
+
+    // The approval was created under the old hash; re-checking with the new hash must fail.
+    const check = checkApproval(approval, txPayload, {
+      assetMetadataVersion: "a1",
+      issuerStatusVersion: "i1",
+      routeVersion: "r1",
+      feePolicyVersion: "f1",
+      contractVersion: currentHash,
+    });
+
+    expect(check.valid).toBe(false);
+    if (!check.valid) {
+      expect(check.changed).toContain("contractVersion");
+      expect(check.reasons[0]).toMatch(/contract was upgraded/i);
+    }
   });
 });
 

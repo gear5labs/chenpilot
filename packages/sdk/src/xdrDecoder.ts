@@ -219,10 +219,11 @@ export class XdrDecoder {
 
   /**
    * Format a MuxedAccount to Stellar address string.
+   * Preserves the muxed sub-ID (M-address) when present.
    */
   private static formatMuxedAccount(account: StellarSdk.xdr.MuxedAccount): string {
     try {
-      return StellarSdk.encodeMuxedAccountToAddress(account, false);
+      return StellarSdk.encodeMuxedAccountToAddress(account, true);
     } catch {
       return String(account);
     }

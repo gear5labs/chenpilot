@@ -60,6 +60,12 @@ jest.mock("../../src/Agents/registry/PromptRolloutService", () => ({
   },
 }));
 
+jest.mock("../../src/jobs/jobQueue.service", () => ({
+  jobQueueService: {
+    enqueue: jest.fn().mockResolvedValue({ id: "job-1" }),
+  },
+}));
+
 jest.mock("../../src/Auth/roles", () => ({
   UserRole: {
     ADMIN: "admin",
@@ -294,6 +300,102 @@ describe("AdminWorkflowService", () => {
       const result = await service.expireOldInstances();
 
       expect(result).toBe(3);
+    });
+
+    it("should schedule next cleanup when instances are expired", async () => {
+      const mockQueryBuilder = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([
+          {
+            id: "instance-1",
+            actionType: SensitiveActionType.ENABLE_TOOL,
+            initiatorId: "user-1",
+            expiresAt: new Date(Date.now() - 1000),
+          },
+        ]),
+        getCount: jest.fn().mockResolvedValue(0),
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+      };
+      AppDataSource.getRepository().createQueryBuilder.mockReturnValue(
+        mockQueryBuilder
+      );
+      mockQueryBuilder.execute = jest.fn().mockResolvedValue({ affected: 1 });
+
+      const { jobQueueService } = await import("../../src/jobs/jobQueue.service");
+      
+      const result = await service.expireOldInstances();
+
+      expect(result).toBe(1);
+      expect(jobQueueService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          queue: "admin",
+          jobType: "workflow.expire_cleanup",
+        })
+      );
+    });
+
+    it("should not schedule next cleanup when no instances are expired", async () => {
+      const mockQueryBuilder = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+        getCount: jest.fn().mockResolvedValue(0),
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+      };
+      AppDataSource.getRepository().createQueryBuilder.mockReturnValue(
+        mockQueryBuilder
+      );
+      mockQueryBuilder.execute = jest.fn().mockResolvedValue({ affected: 0 });
+
+      const { jobQueueService } = await import("../../src/jobs/jobQueue.service");
+      
+      const result = await service.expireOldInstances();
+
+      expect(result).toBe(0);
+      expect(jobQueueService.enqueue).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("scheduleExpiryCleanup", () => {
+    it("should schedule a cleanup job with correct parameters", async () => {
+      const { jobQueueService } = await import("../../src/jobs/jobQueue.service");
+      
+      await service.scheduleExpiryCleanup(10);
+
+      expect(jobQueueService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          queue: "admin",
+          jobType: "workflow.expire_cleanup",
+          payload: { batchSize: 100 },
+          metadata: expect.objectContaining({
+            scheduledBy: "workflow_expiry_scheduler",
+            scheduleMinutes: 10,
+          }),
+        })
+      );
+    });
+
+    it("should use default 5 minutes when no schedule time provided", async () => {
+      const { jobQueueService } = await import("../../src/jobs/jobQueue.service");
+      
+      await service.scheduleExpiryCleanup();
+
+      expect(jobQueueService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            scheduleMinutes: 5,
+          }),
+        })
+      );
     });
   });
 });

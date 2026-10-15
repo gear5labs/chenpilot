@@ -6,14 +6,24 @@ import {
   AdvancedOperationComposer,
   AdvancedOperationFamily,
   AdvancedOperationKind,
+  DestinationMemoRequirementError,
   MAX_MEMO_TEXT_BYTES,
   MAX_TRUST_LIMIT,
+  assertDestinationMemoRequirement,
+  checkDestinationMemoRequirement,
   claimBalance,
+  clearDestinationMemoRequirements,
   composeOperations,
   createClaimableBalance,
   createTrustline,
+  describeClaimPredicate,
   describeOperation,
+  destinationMemoChecksForTransaction,
+  enforceDestinationMemoRequirements,
+  evaluateClaimPredicate,
+  explainClaimEligibility,
   familyOf,
+  getDestinationMemoRequirement,
   hashMemo,
   idMemo,
   isAccountId,
@@ -23,11 +33,15 @@ import {
   isNativeAsset,
   isPositiveAmount,
   isUint64,
+  listDestinationMemoRequirements,
   memoValueToBuffer,
   noMemo,
+  registerDestinationMemoRequirement,
+  registerDestinationMemoRequirements,
   removeTrustline,
   returnMemo,
   textMemo,
+  unregisterDestinationMemoRequirement,
   updateTrustlineLimit,
   utf8ByteLength,
   validateOperation,
@@ -404,5 +418,460 @@ describe("AdvancedOperationComposer", () => {
 
     expect(report.valid).toBe(false);
     expect(report.errors[0].code).toBe("UNKNOWN_OPERATION_KIND");
+  });
+});
+
+describe("destination memo requirements", () => {
+  afterEach(() => {
+    clearDestinationMemoRequirements();
+  });
+
+  it("passes every destination until a requirement is registered", () => {
+    expect(getDestinationMemoRequirement(ACCOUNT)).toBeUndefined();
+    expect(listDestinationMemoRequirements()).toHaveLength(0);
+
+    const report = checkDestinationMemoRequirement({ destination: ACCOUNT });
+    expect(report.valid).toBe(true);
+    expect(() => enforceDestinationMemoRequirements({ operations: [] })).not.toThrow();
+  });
+
+  it("stores a requirement and normalizes surrounding whitespace", () => {
+    const stored = registerDestinationMemoRequirement({
+      destination: `  ${ACCOUNT}  `,
+      required: true,
+      label: "Example Exchange",
+      source: "exchange-directory",
+    });
+
+    expect(stored.destination).toBe(ACCOUNT);
+    expect(getDestinationMemoRequirement(ACCOUNT)?.label).toBe("Example Exchange");
+    expect(getDestinationMemoRequirement(` ${ACCOUNT}`)?.required).toBe(true);
+    expect(listDestinationMemoRequirements()).toHaveLength(1);
+  });
+
+  it("rejects a registration without a destination", () => {
+    expect(() =>
+      registerDestinationMemoRequirement({ destination: "   ", required: true })
+    ).toThrow(DestinationMemoRequirementError);
+    expect(() =>
+      registerDestinationMemoRequirement({ required: true } as never)
+    ).toThrow(DestinationMemoRequirementError);
+    expect(() =>
+      registerDestinationMemoRequirement({
+        destination: ACCOUNT,
+        required: true,
+        memoKinds: ["not-a-kind" as never],
+      })
+    ).toThrow(DestinationMemoRequirementError);
+  });
+
+  it("rejects a payment that carries no memo", () => {
+    registerDestinationMemoRequirement({
+      destination: ACCOUNT,
+      required: true,
+      label: "Example Exchange",
+    });
+
+    const missing = checkDestinationMemoRequirement({ destination: ACCOUNT });
+    expect(missing.valid).toBe(false);
+    expect(missing.errors[0].code).toBe("DESTINATION_MEMO_REQUIRED");
+    expect(missing.errors[0].message).toContain(ACCOUNT);
+    expect(missing.errors[0].message).toContain("Example Exchange");
+
+    const empty = checkDestinationMemoRequirement({
+      destination: ACCOUNT,
+      memo: { kind: "none" },
+    });
+    expect(empty.valid).toBe(false);
+    expect(empty.errors[0].code).toBe("DESTINATION_MEMO_REQUIRED");
+
+    const present = checkDestinationMemoRequirement({
+      destination: ACCOUNT,
+      memo: { kind: "text", value: "invoice-1" },
+    });
+    expect(present.valid).toBe(true);
+  });
+
+  it("only accepts the memo kinds the destination allows", () => {
+    registerDestinationMemoRequirement({
+      destination: ACCOUNT,
+      required: true,
+      memoKinds: ["id"],
+    });
+
+    const wrongKind = checkDestinationMemoRequirement({
+      destination: ACCOUNT,
+      memo: { kind: "text", value: "invoice-1" },
+    });
+    expect(wrongKind.valid).toBe(false);
+    expect(wrongKind.errors[0].code).toBe("MEMO_KIND_NOT_ACCEPTED");
+
+    const accepted = checkDestinationMemoRequirement({
+      destination: ACCOUNT,
+      memo: { kind: "id", value: 42 },
+    });
+    expect(accepted.valid).toBe(true);
+  });
+
+  it("leaves destinations that do not require a memo alone", () => {
+    registerDestinationMemoRequirement({ destination: ACCOUNT, required: false });
+
+    expect(checkDestinationMemoRequirement({ destination: ACCOUNT }).valid).toBe(true);
+    expect(() =>
+      enforceDestinationMemoRequirements({
+        operations: [{ type: "payment", destination: ACCOUNT, amount: "1" }],
+      })
+    ).not.toThrow();
+  });
+
+  it("throws a DestinationMemoRequirementError from the assertion form", () => {
+    registerDestinationMemoRequirement({ destination: ACCOUNT, required: true });
+
+    let caught: unknown;
+    try {
+      assertDestinationMemoRequirement({ destination: ACCOUNT, memo: null });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(DestinationMemoRequirementError);
+    const failure = caught as DestinationMemoRequirementError;
+    expect(failure.issues.some((issue) => issue.code === "DESTINATION_MEMO_REQUIRED")).toBe(
+      true
+    );
+    expect(failure.message).toContain(ACCOUNT);
+    expect(() => assertDestinationMemoRequirement({ destination: ACCOUNT })).toThrow(
+      DestinationMemoRequirementError
+    );
+  });
+
+  it("checks every destination a transaction pays and ignores the rest", () => {
+    registerDestinationMemoRequirement({ destination: ACCOUNT, required: true });
+
+    const checks = destinationMemoChecksForTransaction({
+      operations: [
+        { type: "payment", destination: ACCOUNT, amount: "1" },
+        { type: "payment", destination: ACCOUNT, amount: "2" },
+        { type: "payment", destination: ISSUER, amount: "3" },
+      ],
+    });
+    expect(checks.map((check) => check.destination)).toEqual([ACCOUNT, ISSUER]);
+
+    const payment = {
+      operations: [{ type: "payment", destination: ACCOUNT, amount: "1" }],
+    };
+
+    expect(() => enforceDestinationMemoRequirements(payment)).toThrow(
+      DestinationMemoRequirementError
+    );
+    expect(() =>
+      enforceDestinationMemoRequirements({
+        ...payment,
+        memo: { type: "text", value: "invoice-1" },
+      })
+    ).not.toThrow();
+    // A "none" memo header is the same as no memo at all.
+    expect(() =>
+      enforceDestinationMemoRequirements({ ...payment, memo: { type: "none" } })
+    ).toThrow(/requires a memo/);
+    // Unregistered destinations are never blocked.
+    expect(() =>
+      enforceDestinationMemoRequirements({
+        operations: [{ type: "payment", destination: ISSUER, amount: "1" }],
+      })
+    ).not.toThrow();
+  });
+
+  it("unregisters requirements so enforcement returns to a no-op", () => {
+    registerDestinationMemoRequirement({ destination: ACCOUNT, required: true });
+    expect(unregisterDestinationMemoRequirement(ACCOUNT)).toBe(true);
+    expect(unregisterDestinationMemoRequirement(ACCOUNT)).toBe(false);
+    expect(getDestinationMemoRequirement(ACCOUNT)).toBeUndefined();
+    expect(
+      checkDestinationMemoRequirement({ destination: ACCOUNT }).valid
+    ).toBe(true);
+  });
+
+  it("registers a batch of requirements at once", () => {
+    const stored = registerDestinationMemoRequirements([
+      { destination: ACCOUNT, required: true },
+      { destination: ISSUER, required: true, memoKinds: ["text"] },
+    ]);
+
+    expect(stored).toHaveLength(2);
+    expect(listDestinationMemoRequirements()).toHaveLength(2);
+    expect(checkDestinationMemoRequirement({ destination: ACCOUNT }).valid).toBe(false);
+    expect(checkDestinationMemoRequirement({ destination: ISSUER }).valid).toBe(false);
+  });
+
+  it("stops an unsigned plan at the composer when the destination needs a memo", () => {
+    registerDestinationMemoRequirement({ destination: ACCOUNT, required: true });
+
+    const report = new AdvancedOperationComposer()
+      .destination(ACCOUNT)
+      .add(createTrustline({ assetCode: "USDC", assetIssuer: ISSUER }))
+      .validate();
+
+    expect(report.valid).toBe(false);
+    const issue = report.errors.find(
+      (entry) => entry.code === "DESTINATION_MEMO_REQUIRED"
+    );
+    expect(issue?.field).toBe("destination.memo");
+
+    expect(() =>
+      new AdvancedOperationComposer()
+        .destination(ACCOUNT)
+        .add(createTrustline({ assetCode: "USDC", assetIssuer: ISSUER }))
+        .compose()
+    ).toThrow(/Cannot compose operations/);
+
+    const composer = new AdvancedOperationComposer()
+      .destination(ACCOUNT)
+      .add(createTrustline({ assetCode: "USDC", assetIssuer: ISSUER }))
+      .add(textMemo("invoice-1"));
+    expect(composer.validate().valid).toBe(true);
+
+    const plan = composer.compose();
+    expect(plan.destination).toBe(ACCOUNT);
+    expect(plan.memo?.kind).toBe(AdvancedOperationKind.MEMO_ATTACH);
+
+    // The wrong memo kind is rejected the same way.
+    registerDestinationMemoRequirement({
+      destination: ACCOUNT,
+      required: true,
+      memoKinds: ["id"],
+    });
+    expect(
+      new AdvancedOperationComposer()
+        .destination(ACCOUNT)
+        .add(createTrustline({ assetCode: "USDC", assetIssuer: ISSUER }))
+        .add(textMemo("invoice-1"))
+        .validate()
+        .errors.some((entry) => entry.code === "MEMO_KIND_NOT_ACCEPTED")
+    ).toBe(true);
+  });
+
+  it("leaves plans without a declared destination untouched", () => {
+    registerDestinationMemoRequirement({ destination: ACCOUNT, required: true });
+
+    const plan = composeOperations([
+      createTrustline({ assetCode: "USDC", assetIssuer: ISSUER }),
+    ]);
+
+    expect(plan.destination).toBeUndefined();
+    expect(plan.validation.valid).toBe(true);
+
+    const withDestination = new AdvancedOperationComposer([
+      createTrustline({ assetCode: "USDC", assetIssuer: ISSUER }),
+    ])
+      .destination(ACCOUNT)
+      .validate();
+    expect(
+      withDestination.errors.some(
+        (entry) => entry.code === "DESTINATION_MEMO_REQUIRED"
+      )
+    ).toBe(true);
+  });
+});
+
+describe("claim predicate eligibility", () => {
+  const NOW = 1_700_000_000;
+  const nowIso = (seconds: number) => new Date(seconds * 1000).toISOString();
+
+  it("treats an absent predicate as unconditional", () => {
+    expect(describeClaimPredicate(null)).toContain("unconditional");
+    expect(describeClaimPredicate({})).toContain("unconditional");
+    expect(evaluateClaimPredicate({}, { ledgerTime: NOW })).toBe(true);
+
+    const explanation = explainClaimEligibility({
+      claimant: ACCOUNT,
+      claimants: [{ destination: ACCOUNT, predicate: {} }],
+      ledgerTime: NOW,
+    });
+    expect(explanation.eligible).toBe(true);
+    expect(explanation.evaluated).toBe(true);
+    expect(explanation.predicate).toContain("unconditional");
+  });
+
+  it("accepts a claim that lands before the absolute cut-off", () => {
+    const closesAt = NOW + 3600;
+    const explanation = explainClaimEligibility({
+      claimant: ACCOUNT,
+      claimants: [
+        { destination: ACCOUNT, predicate: { abs_before: String(closesAt) } },
+      ],
+      ledgerTime: NOW,
+    });
+
+    expect(explanation.eligible).toBe(true);
+    expect(explanation.evaluated).toBe(true);
+    expect(explanation.ledgerTime).toBe(NOW);
+    expect(explanation.predicate).toContain(`claimable before ${nowIso(closesAt)}`);
+    expect(explanation.reason).toContain("Claimable now");
+    expect(explanation.claimExpiresAt).toBe(nowIso(closesAt));
+    expect(
+      evaluateClaimPredicate({ abs_before: String(closesAt) }, { ledgerTime: NOW })
+    ).toBe(true);
+  });
+
+  it("names the moment a closed claim window shut", () => {
+    const closedAt = NOW - 60;
+    const explanation = explainClaimEligibility({
+      claimant: ACCOUNT,
+      claimants: [
+        { destination: ACCOUNT, predicate: { abs_before: String(closedAt) } },
+      ],
+      ledgerTime: NOW,
+    });
+
+    expect(explanation.eligible).toBe(false);
+    expect(explanation.evaluated).toBe(true);
+    expect(explanation.claimExpiresAt).toBe(nowIso(closedAt));
+    expect(explanation.reason).toContain("claim window closed at");
+    expect(explanation.reason).toContain(nowIso(closedAt));
+    expect(
+      evaluateClaimPredicate({ abs_before: String(closedAt) }, { ledgerTime: NOW })
+    ).toBe(false);
+  });
+
+  it("counts relative time from when the balance was created", () => {
+    const predicate = { rel_before: "60" };
+
+    // Created ten minutes ago: the 60-second window ended minutes ago.
+    const late = explainClaimEligibility({
+      claimant: ACCOUNT,
+      claimants: [{ destination: ACCOUNT, predicate }],
+      ledgerTime: NOW,
+      startTime: NOW - 600,
+    });
+    expect(late.eligible).toBe(false);
+    expect(late.evaluated).toBe(true);
+    expect(late.claimExpiresAt).toBe(nowIso(NOW - 540));
+    expect(late.predicate).toContain("60s after the balance was created");
+    expect(late.reason).toContain("claim window closed at");
+
+    // Created ten seconds ago: the window is still open.
+    const early = explainClaimEligibility({
+      claimant: ACCOUNT,
+      claimants: [{ destination: ACCOUNT, predicate }],
+      ledgerTime: NOW,
+      startTime: NOW - 10,
+    });
+    expect(early.eligible).toBe(true);
+    expect(early.claimExpiresAt).toBe(nowIso(NOW + 50));
+    expect(evaluateClaimPredicate(predicate, { ledgerTime: NOW, startTime: NOW - 10 })).toBe(
+      true
+    );
+  });
+
+  it("reports an unevaluable relative predicate when creation time is missing", () => {
+    const explanation = explainClaimEligibility({
+      claimant: ACCOUNT,
+      claimants: [{ destination: ACCOUNT, predicate: { rel_before: "60" } }],
+      ledgerTime: NOW,
+    });
+
+    expect(explanation.evaluated).toBe(false);
+    expect(explanation.eligible).toBe(false);
+    expect(explanation.predicate).toContain("claimable within 60s of the balance");
+    expect(explanation.reason).toContain("creation time");
+    expect(
+      evaluateClaimPredicate({ rel_before: "60" }, { ledgerTime: NOW })
+    ).toBe(false);
+  });
+
+  it("turns a negated cut-off into a window that opens later", () => {
+    const opensAt = NOW + 60;
+    const predicate = { not: { abs_before: String(opensAt) } };
+
+    const before = explainClaimEligibility({
+      claimant: ACCOUNT,
+      claimants: [{ destination: ACCOUNT, predicate }],
+      ledgerTime: NOW,
+    });
+    expect(before.eligible).toBe(false);
+    expect(before.evaluated).toBe(true);
+    expect(before.claimableAt).toBe(nowIso(opensAt));
+    expect(before.reason).toContain("claim window opens at");
+
+    const after = explainClaimEligibility({
+      claimant: ACCOUNT,
+      claimants: [{ destination: ACCOUNT, predicate }],
+      ledgerTime: opensAt,
+    });
+    expect(after.eligible).toBe(true);
+    expect(
+      evaluateClaimPredicate(predicate, { ledgerTime: opensAt + 1 })
+    ).toBe(true);
+  });
+
+  it("requires every AND predicate but any one OR predicate", () => {
+    const past = { abs_before: String(NOW - 10) };
+    const future = { abs_before: String(NOW + 10) };
+
+    const both = explainClaimEligibility({
+      claimant: ACCOUNT,
+      claimants: [{ destination: ACCOUNT, predicate: { and: [past, future] } }],
+      ledgerTime: NOW,
+    });
+    expect(both.eligible).toBe(false);
+    expect(both.evaluated).toBe(true);
+    expect(both.predicate).toContain(" AND ");
+    expect(both.reason).toContain("claim window closed at");
+
+    const either = explainClaimEligibility({
+      claimant: ACCOUNT,
+      claimants: [{ destination: ACCOUNT, predicate: { or: [past, future] } }],
+      ledgerTime: NOW,
+    });
+    expect(either.eligible).toBe(true);
+    expect(either.predicate).toContain(" OR ");
+    expect(
+      evaluateClaimPredicate({ or: [past, future] }, { ledgerTime: NOW })
+    ).toBe(true);
+  });
+
+  it("explains a claimant that is not on the balance", () => {
+    const explanation = explainClaimEligibility({
+      claimant: ACCOUNT,
+      claimants: [{ destination: ISSUER, predicate: {} }],
+      ledgerTime: NOW,
+    });
+
+    expect(explanation.eligible).toBe(false);
+    expect(explanation.evaluated).toBe(true);
+    expect(explanation.predicate).toBe("none");
+    expect(explanation.reason).toContain("is not a claimant");
+    expect(explanation.reason).toContain(ACCOUNT);
+  });
+
+  it("refuses to guess when the ledger time is unusable", () => {
+    const explanation = explainClaimEligibility({
+      claimant: ACCOUNT,
+      claimants: [{ destination: ACCOUNT, predicate: { abs_before: String(NOW + 1) } }],
+      ledgerTime: Number.NaN,
+    });
+
+    expect(explanation.eligible).toBe(false);
+    expect(explanation.evaluated).toBe(false);
+    expect(explanation.reason).toContain("finite number");
+    expect(
+      evaluateClaimPredicate({ abs_before: String(NOW + 1) }, {
+        ledgerTime: Number.NaN,
+      })
+    ).toBe(false);
+  });
+
+  it("reports an unparseable predicate time as unknown rather than blocked", () => {
+    const explanation = explainClaimEligibility({
+      claimant: ACCOUNT,
+      claimants: [{ destination: ACCOUNT, predicate: { abs_before: "tomorrow" } }],
+      ledgerTime: NOW,
+    });
+
+    expect(explanation.evaluated).toBe(false);
+    expect(explanation.eligible).toBe(false);
+    expect(explanation.predicate).toContain("unreadable absolute time");
+    expect(explanation.reason).toContain("absolute-time value is not a number");
   });
 });

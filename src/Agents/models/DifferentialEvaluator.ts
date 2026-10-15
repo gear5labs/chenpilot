@@ -686,3 +686,48 @@ export class DifferentialEvaluator {
 
 // Singleton instance
 export const differentialEvaluator = new DifferentialEvaluator();
+
+// src/Agents/models/DifferentialEvaluator.ts
+
+export interface ToolMetadata {
+  name: string;
+  description: string;
+}
+
+export interface EvaluationTestCase {
+  prompt: string;
+  expectedTool: string;
+}
+
+export interface DifferentialEvaluationResult {
+  testCase: string;
+  beforeTool: string;
+  afterTool: string;
+  regressionDetected: boolean;
+}
+
+/**
+ * Compares model tool selection before and after tool metadata/description revisions.
+ */
+export function evaluateMetadataRevision(
+  testCases: EvaluationTestCase[],
+  selectToolFn: (prompt: string, metadataVersion: 'before' | 'after') => string
+): DifferentialEvaluationResult[] {
+  return testCases.map((tc) => {
+    const beforeTool = selectToolFn(tc.prompt, 'before');
+    const afterTool = selectToolFn(tc.prompt, 'after');
+
+    const matchedBefore = beforeTool === tc.expectedTool;
+    const matchedAfter = afterTool === tc.expectedTool;
+
+    // Regression detected if it worked before but fails after
+    const regressionDetected = matchedBefore && !matchedAfter;
+
+    return {
+      testCase: tc.prompt,
+      beforeTool,
+      afterTool,
+      regressionDetected,
+    };
+  });
+}

@@ -378,6 +378,52 @@ describe("TransactionSubmissionService", () => {
       expect(resolved.lastReason).toBe("provider_unavailable");
     });
 
+    it("preserves resolution progress across a provider failover", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = async () => {
+        throw new AmbiguousSubmissionError("Horizon submission timed out");
+      };
+      await service.submit(record.id);
+
+      gateway.lookupError = new ProviderUnavailableError("Horizon is down");
+      const deferred = await service.resolve(record.id);
+
+      expect(deferred.state).toBe(SubmissionState.UNKNOWN);
+      expect(deferred.lastReason).toBe("provider_unavailable");
+      expect(deferred.resolutionAttempts).toBe(1);
+      expect(deferred.nextResolutionAt).not.toBeNull();
+
+      gateway.lookupError = null;
+      gateway.ledgerTransaction = {
+        hash: TX_HASH,
+        ledger: 5150,
+        successful: true,
+        resultXdr: "AAAAAA==",
+      };
+
+      const recovered = await service.resolve(record.id);
+
+      expect(recovered.state).toBe(SubmissionState.FINALIZED);
+      expect(recovered.lastReason).toBe("found_by_hash");
+      expect(recovered.resolutionAttempts).toBeGreaterThan(1);
+    });
+
+    it("redacts provider rejection details before persisting the reason", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = async () => ({
+        status: "rejected",
+        reason:
+          "tx_bad_auth: signer=GSECRET...; envelope=AAAAAgAAAAA=; token=abc123",
+      });
+
+      const submitted = await service.submit(record.id);
+
+      expect(submitted.state).toBe(SubmissionState.REJECTED);
+      expect(submitted.lastReason).toBe("provider_rejected");
+      expect(submitted.lastReason).not.toContain("signer=");
+      expect(submitted.lastReason).not.toContain("AAAAAgAAAAA=");
+    });
+
     it("resolves a submission left mid-flight by a dead process", async () => {
       const record = await service.register(buildInput());
       gateway.submitImpl = () => new Promise(() => undefined);
@@ -530,6 +576,386 @@ describe("TransactionSubmissionService", () => {
           buildInput({ idempotencyKey: "idem-key-2" })
         )
       ).rejects.toBeInstanceOf(DuplicateEffectRiskError);
+    });
+  });
+
+  describe("restart recovery at each persisted transition", () => {
+    it("recovers BUILT -> SUBMITTING transition after restart", async () => {
+      const record = await service.register(buildInput());
+      
+      // Simulate process died during transition to SUBMITTING
+      store.forceUpdatedAt(record.id, new Date(Date.now() - 60_000));
+      
+      // Recovery should mark as UNKNOWN for resolution
+      const [recovered] = await service.recoverStalled();
+      expect(recovered.state).toBe(SubmissionState.UNKNOWN);
+      
+      // Verify record can still be found and resolved
+      const found = await service.findByHash(TX_HASH);
+      expect(found).not.toBeNull();
+      expect(found?.state).toBe(SubmissionState.UNKNOWN);
+    });
+
+    it("recovers BUILT -> UNKNOWN transition after restart", async () => {
+      const record = await service.register(buildInput());
+      store.forceUpdatedAt(record.id, new Date(Date.now() - 60_000));
+      
+      const [recovered] = await service.recoverStalled();
+      expect(recovered.state).toBe(SubmissionState.UNKNOWN);
+      
+      // Should be resolvable
+      gateway.ledgerTransaction = null;
+      gateway.accountSequence = "999";
+      gateway.latestLedgerCloseTime = Number(MAX_TIME) + 3_600;
+      
+      const resolved = await service.resolve(recovered.id);
+      expect(resolved.state).toBe(SubmissionState.EXPIRED);
+    });
+
+    it("recovers BUILT -> FINALIZED transition after restart", async () => {
+      const record = await service.register(buildInput());
+      
+      // Simulate pre-finalized state where transaction was found in ledger
+      gateway.ledgerTransaction = {
+        hash: TX_HASH,
+        ledger: 9001,
+        successful: true,
+      };
+      
+      const resolved = await service.resolve(record.id);
+      expect(resolved.state).toBe(SubmissionState.FINALIZED);
+      
+      // After restart, should still be finalized
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.FINALIZED);
+      expect(found?.ledger).toBe(9001);
+    });
+
+    it("recovers BUILT -> REJECTED transition after restart", async () => {
+      const record = await service.register(buildInput());
+      
+      gateway.ledgerTransaction = null;
+      gateway.accountSequence = SEQUENCE;
+      
+      const resolved = await service.resolve(record.id);
+      expect(resolved.state).toBe(SubmissionState.REJECTED);
+      
+      // After restart, should still be rejected
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.REJECTED);
+    });
+
+    it("recovers BUILT -> EXPIRED transition after restart", async () => {
+      const record = await service.register(buildInput());
+      
+      gateway.ledgerTransaction = null;
+      gateway.accountSequence = "999";
+      gateway.latestLedgerCloseTime = Number(MAX_TIME) + 3_600;
+      
+      const resolved = await service.resolve(record.id);
+      expect(resolved.state).toBe(SubmissionState.EXPIRED);
+      
+      // After restart, should still be expired
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.EXPIRED);
+    });
+
+    it("recovers SUBMITTING -> ACCEPTED transition after restart", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = async () => ({ status: "accepted" });
+      
+      const submitted = await service.submit(record.id);
+      expect(submitted.state).toBe(SubmissionState.ACCEPTED);
+      
+      // After restart, should still be accepted
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.ACCEPTED);
+      
+      // Can continue to finalization
+      gateway.ledgerTransaction = {
+        hash: TX_HASH,
+        ledger: 9002,
+        successful: true,
+      };
+      
+      const resolved = await service.resolve(record.id);
+      expect(resolved.state).toBe(SubmissionState.FINALIZED);
+    });
+
+    it("recovers SUBMITTING -> UNKNOWN transition after restart", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = async () => {
+        throw new AmbiguousSubmissionError("Network timeout");
+      };
+      
+      const submitted = await service.submit(record.id);
+      expect(submitted.state).toBe(SubmissionState.UNKNOWN);
+      
+      // After restart, should still be unknown and resolvable
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.UNKNOWN);
+      
+      gateway.ledgerTransaction = {
+        hash: TX_HASH,
+        ledger: 9003,
+        successful: true,
+      };
+      
+      const resolved = await service.resolve(record.id);
+      expect(resolved.state).toBe(SubmissionState.FINALIZED);
+    });
+
+    it("recovers SUBMITTING -> FINALIZED transition after restart", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = async () => ({
+        status: "applied",
+        ledger: 9004,
+        successful: true,
+      });
+      
+      const submitted = await service.submit(record.id);
+      expect(submitted.state).toBe(SubmissionState.FINALIZED);
+      
+      // After restart, should still be finalized
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.FINALIZED);
+      expect(found?.ledger).toBe(9004);
+    });
+
+    it("recovers SUBMITTING -> REJECTED transition after restart", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = async () => ({
+        status: "rejected",
+        reason: "tx_malformed",
+      });
+      
+      const submitted = await service.submit(record.id);
+      expect(submitted.state).toBe(SubmissionState.REJECTED);
+      
+      // After restart, should still be rejected
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.REJECTED);
+    });
+
+    it("recovers SUBMITTING -> EXPIRED transition after restart", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = () => new Promise(() => undefined);
+      void service.submit(record.id);
+      await Promise.resolve();
+      
+      store.forceUpdatedAt(record.id, new Date(Date.now() - 60_000));
+      await service.recoverStalled();
+      
+      gateway.ledgerTransaction = null;
+      gateway.accountSequence = "999";
+      gateway.latestLedgerCloseTime = Number(MAX_TIME) + 3_600;
+      
+      const resolved = await service.resolve(record.id);
+      expect(resolved.state).toBe(SubmissionState.EXPIRED);
+      
+      // After restart, should still be expired
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.EXPIRED);
+    });
+
+    it("recovers UNKNOWN -> ACCEPTED transition after restart", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = async () => {
+        throw new AmbiguousSubmissionError("Network timeout");
+      };
+      await service.submit(record.id);
+      
+      // Resolution can't determine outcome but marks as accepted (rare case)
+      gateway.ledgerTransaction = {
+        hash: TX_HASH,
+        ledger: 9005,
+        successful: true,
+      };
+      
+      const resolved = await service.resolve(record.id);
+      expect(resolved.state).toBe(SubmissionState.FINALIZED);
+      
+      // After restart, should still be finalized
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.FINALIZED);
+    });
+
+    it("recovers UNKNOWN -> FINALIZED transition after restart", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = async () => {
+        throw new AmbiguousSubmissionError("Network timeout");
+      };
+      await service.submit(record.id);
+      
+      gateway.ledgerTransaction = {
+        hash: TX_HASH,
+        ledger: 9006,
+        successful: true,
+      };
+      
+      const resolved = await service.resolve(record.id);
+      expect(resolved.state).toBe(SubmissionState.FINALIZED);
+      
+      // After restart, should still be finalized
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.FINALIZED);
+      expect(found?.ledger).toBe(9006);
+    });
+
+    it("recovers UNKNOWN -> REJECTED transition after restart", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = async () => {
+        throw new AmbiguousSubmissionError("Network timeout");
+      };
+      await service.submit(record.id);
+      
+      gateway.ledgerTransaction = null;
+      gateway.accountSequence = SEQUENCE;
+      
+      const resolved = await service.resolve(record.id);
+      expect(resolved.state).toBe(SubmissionState.REJECTED);
+      
+      // After restart, should still be rejected
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.REJECTED);
+    });
+
+    it("recovers UNKNOWN -> EXPIRED transition after restart", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = async () => {
+        throw new AmbiguousSubmissionError("Network timeout");
+      };
+      await service.submit(record.id);
+      
+      gateway.ledgerTransaction = null;
+      gateway.accountSequence = "999";
+      gateway.latestLedgerCloseTime = Number(MAX_TIME) + 3_600;
+      
+      const resolved = await service.resolve(record.id);
+      expect(resolved.state).toBe(SubmissionState.EXPIRED);
+      
+      // After restart, should still be expired
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.EXPIRED);
+    });
+
+    it("recovers ACCEPTED -> FINALIZED transition after restart", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = async () => ({ status: "accepted" });
+      await service.submit(record.id);
+      
+      gateway.ledgerTransaction = {
+        hash: TX_HASH,
+        ledger: 9007,
+        successful: true,
+      };
+      
+      const resolved = await service.resolve(record.id);
+      expect(resolved.state).toBe(SubmissionState.FINALIZED);
+      
+      // After restart, should still be finalized
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.FINALIZED);
+      expect(found?.ledger).toBe(9007);
+    });
+
+    it("recovers ACCEPTED -> REJECTED transition after restart", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = async () => ({ status: "accepted" });
+      await service.submit(record.id);
+      
+      gateway.ledgerTransaction = {
+        hash: TX_HASH,
+        ledger: 9008,
+        successful: false,
+        resultXdr: "AAAAAP//",
+      };
+      
+      const resolved = await service.resolve(record.id);
+      expect(resolved.state).toBe(SubmissionState.REJECTED);
+      
+      // After restart, should still be rejected
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.REJECTED);
+    });
+
+    it("recovers ACCEPTED -> UNKNOWN transition after restart", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = async () => ({ status: "accepted" });
+      await service.submit(record.id);
+      
+      gateway.lookupError = new ProviderUnavailableError("Horizon is down");
+      
+      const resolved = await service.resolve(record.id);
+      expect(resolved.state).toBe(SubmissionState.UNKNOWN);
+      
+      // After restart, should still be unknown and resolvable
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.UNKNOWN);
+      
+      // Clear error and resolve
+      gateway.lookupError = null;
+      gateway.ledgerTransaction = {
+        hash: TX_HASH,
+        ledger: 9009,
+        successful: true,
+      };
+      
+      const resolvedAgain = await service.resolve(record.id);
+      expect(resolvedAgain.state).toBe(SubmissionState.FINALIZED);
+    });
+
+    it("recovers ACCEPTED -> EXPIRED transition after restart", async () => {
+      const record = await service.register(buildInput());
+      gateway.submitImpl = async () => ({ status: "accepted" });
+      await service.submit(record.id);
+      
+      gateway.ledgerTransaction = null;
+      gateway.accountSequence = "999";
+      gateway.latestLedgerCloseTime = Number(MAX_TIME) + 3_600;
+      
+      const resolved = await service.resolve(record.id);
+      expect(resolved.state).toBe(SubmissionState.EXPIRED);
+      
+      // After restart, should still be expired
+      const found = await service.findById(record.id);
+      expect(found?.state).toBe(SubmissionState.EXPIRED);
+    });
+
+    it("recovers stalled submissions across all non-terminal states", async () => {
+      // Create submissions in various states
+      const built = await service.register(buildInput({ idempotencyKey: "test-1" }));
+      
+      const submitting = await service.register(buildInput({ idempotencyKey: "test-2" }));
+      gateway.submitImpl = () => new Promise(() => undefined);
+      void service.submit(submitting.id);
+      await Promise.resolve();
+      
+      const unknown = await service.register(buildInput({ idempotencyKey: "test-3" }));
+      gateway.submitImpl = async () => {
+        throw new AmbiguousSubmissionError("Timeout");
+      };
+      await service.submit(unknown.id);
+      
+      const accepted = await service.register(buildInput({ idempotencyKey: "test-4" }));
+      gateway.submitImpl = async () => ({ status: "accepted" });
+      await service.submit(accepted.id);
+      
+      // Simulate process death - make all look stalled
+      const oldTimestamp = new Date(Date.now() - 60_000);
+      store.forceUpdatedAt(built.id, oldTimestamp);
+      store.forceUpdatedAt(submitting.id, oldTimestamp);
+      store.forceUpdatedAt(unknown.id, oldTimestamp);
+      store.forceUpdatedAt(accepted.id, oldTimestamp);
+      
+      // Recovery should handle all
+      const recovered = await service.recoverStalled();
+      expect(recovered).toHaveLength(4);
+      
+      // All should be in UNKNOWN state for resolution
+      recovered.forEach((r) => {
+        expect(r.state).toBe(SubmissionState.UNKNOWN);
+      });
     });
   });
 });

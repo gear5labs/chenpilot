@@ -274,6 +274,86 @@ Attempts to rollback executed steps (best effort).
 }
 ```
 
+## External Workflow Dependencies
+
+A step can depend on the result of a step that belongs to a **different** durable
+workflow — for example a settlement workflow that consumes the escrow created by
+an earlier trade workflow. Such a dependency is declared inside the step payload:
+
+```jsonc
+{
+  "stepNumber": 4,
+  "action": "release_escrow",
+  "description": "Release escrow created by the trade workflow",
+  "payload": {
+    "escrowId": "$ref:steps.2.result.data.escrowId",
+    "externalWorkflowDependencies": [
+      { "executionId": "0f2c5f38-…", "stepNumber": 3 },
+    ],
+  },
+}
+```
+
+Each entry is `{ executionId, stepNumber, ownerId? }`:
+
+| Field         | Required | Meaning                                                           |
+| ------------- | -------- | ----------------------------------------------------------------- |
+| `executionId` | yes      | `DurableExecution.id` of the external workflow                    |
+| `stepNumber`  | yes      | Positive integer step number inside that workflow                 |
+| `ownerId`     | no       | Owner recorded by the planner; must match the authoritative owner |
+
+The declaration lives in the payload, so it is covered by the canonical plan hash
+(`PlanHashService`, re-computed by the SDK's `PlanVerifier`): a reference cannot be
+added, re-pointed, or removed after approval without invalidating the plan hash.
+
+### Ownership rules
+
+`DependencyGraph.build(steps, options)` validates every external reference **before
+computing a single wave**. Validation is fail-closed — a refusal throws
+`ExternalDependencyOwnershipError` carrying a machine-readable `code`:
+
+| Code                         | Meaning                                                                                                                                                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ownership_context_required` | The plan declares external dependencies, but the caller supplied no authoritative owner map (`GraphBuildOptions.externalOwners`) — or no plan owner (`ownerId`) while cross-owner references are not allowed |
+| `malformed_reference`        | The declaration is not `{ executionId, stepNumber }` with a non-empty id, a positive integer step, and an optional non-empty `ownerId`                                                                       |
+| `duplicate_reference`        | One step declares the same external step twice                                                                                                                                                               |
+| `self_reference`             | The step points at `GraphBuildOptions.executionId`, i.e. the workflow being built; use `PlanStep.dependencies` instead                                                                                       |
+| `unverifiable_ownership`     | `externalOwners` has no entry for the referenced execution                                                                                                                                                   |
+| `owner_mismatch`             | The planner-declared `ownerId` disagrees with the authoritative owner, or the authoritative owner is another principal and `allowCrossOwner` is not set                                                      |
+
+An `ownerId` carried in the payload is **never trusted on its own**: it is only
+compared against the authoritative map, which callers must build from persisted
+execution records. Plans that declare no external dependency are unaffected by the
+new options parameter and keep their previous behaviour exactly.
+
+### Scheduler integration
+
+`ParallelScheduler.run` resolves owners through
+`SchedulerOptions.resolveExternalOwner` (sync or async, called once per referenced
+execution id) and passes them to the graph build together with the execution's own
+`userId` / `id`. If a plan declares external dependencies and no resolver is
+configured, the graph build fails closed instead of trusting the plan:
+
+```typescript
+await durableExecutor.startExecution(plan, userId, context, true, {
+  resolveExternalOwner: async (executionId) => {
+    const upstream = await AppDataSource.getRepository(
+      DurableExecution
+    ).findOne({
+      where: { id: executionId },
+    });
+    return upstream?.userId;
+  },
+});
+```
+
+`DependencyGraph.collectExternalDependencyExecutionIds(steps)` returns the sorted,
+de-duplicated ids a plan references — the set the resolver is called with.
+
+**API note (additive):** `DependencyGraph.build` gained an optional second parameter
+(`GraphBuildOptions`), and `SchedulerOptions` gained the optional
+`resolveExternalOwner`. No existing signature, default, or wave schedule changed.
+
 ## Risk Assessment
 
 Plans are automatically assessed for risk:

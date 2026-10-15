@@ -417,3 +417,4 @@ const result = await agent.handle(userInput, userId);
 - [Tool Registry](./README.md) - Dynamic tool registration system
 - [Intent Agent](../agents/intentagent.ts) - Intent parsing and workflow planning
 - [Agent Planner](../planner/README.md) - Multi-step workflow planning
+

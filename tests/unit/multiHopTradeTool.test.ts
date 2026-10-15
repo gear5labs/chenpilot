@@ -12,6 +12,12 @@ jest.mock("../../src/Auth/accounts.json", () => [
     publicKey: "GABC123",
   },
 ]);
+jest.mock("../../src/Security", () => ({
+  assetRevocationService: {
+    isRevoked: jest.fn().mockResolvedValue({ revoked: false }),
+    checkAssetWithIssuer: jest.fn().mockResolvedValue({ revoked: false }),
+  },
+}));
 
 const mockFindOptimalPath = multiHopModule.multiHopPathFinder
   .findOptimalPath as jest.Mock;
@@ -268,6 +274,109 @@ describe("MultiHopTradeTool", () => {
 
       expect(result.status).toBe("error");
       expect(result.error).toMatch(/unknown operation/i);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Intermediate asset revocation filtering
+  // ---------------------------------------------------------------------------
+
+  describe("intermediate asset revocation", () => {
+    const mockRevocationService = jest.requireMock("../../src/Security") as {
+      assetRevocationService: {
+        isRevoked: jest.Mock;
+        checkAssetWithIssuer: jest.Mock;
+      };
+    };
+
+    // Plain objects that satisfy filterRevokedPaths (isNative, code, issuer)
+    const native = { isNative: () => true, code: "XLM", issuer: "" };
+    const usdc   = { isNative: () => false, code: "USDC", issuer: "GA5Z..." };
+    const scam   = { isNative: () => false, code: "SCAM", issuer: "GBADISSUER" };
+
+    beforeEach(() => {
+      // Default: nothing revoked
+      mockRevocationService.assetRevocationService.isRevoked.mockResolvedValue({ revoked: false });
+      mockRevocationService.assetRevocationService.checkAssetWithIssuer.mockResolvedValue({ revoked: false });
+    });
+
+    it("evaluate: filters out paths whose intermediate asset is revoked and returns error when none survive", async () => {
+      const pathWithRevokedHop: multiHopModule.TradePath = {
+        ...GOOD_PATH,
+        path: [native as never, scam as never, usdc as never],
+        route: ["XLM", "SCAM:GBADISSUER", "USDC"],
+        hops: 2,
+      };
+
+      mockFindOptimalPath.mockResolvedValue({
+        ...GOOD_RESULT,
+        bestPath: pathWithRevokedHop,
+        allPaths: [pathWithRevokedHop],
+      });
+
+      mockRevocationService.assetRevocationService.checkAssetWithIssuer.mockResolvedValue({
+        revoked: true,
+        reason: "fraud",
+      });
+
+      const result = await tool.execute(
+        { operation: "evaluate", fromAsset: "XLM", toAsset: "USDC", amount: 100 },
+        "user-1"
+      );
+
+      expect(result.status).toBe("error");
+      expect(result.error).toMatch(/revoked intermediate/i);
+    });
+
+    it("evaluate: returns routes that have no revoked intermediate assets", async () => {
+      const cleanPath: multiHopModule.TradePath = {
+        ...GOOD_PATH,
+        path: [native as never, usdc as never],
+        route: ["XLM", "USDC"],
+        hops: 1,
+      };
+
+      mockFindOptimalPath.mockResolvedValue({
+        ...GOOD_RESULT,
+        bestPath: cleanPath,
+        allPaths: [cleanPath],
+      });
+
+      const result = await tool.execute(
+        { operation: "evaluate", fromAsset: "XLM", toAsset: "USDC", amount: 100 },
+        "user-1"
+      );
+
+      expect(result.status).toBe("success");
+      expect(result.data?.bestPath).toBeDefined();
+    });
+
+    it("execute: blocks submission when the best path has a revoked intermediate asset", async () => {
+      const pathWithRevokedHop: multiHopModule.TradePath = {
+        ...GOOD_PATH,
+        path: [native as never, scam as never, usdc as never],
+        route: ["XLM", "SCAM:GBADISSUER", "USDC"],
+        hops: 2,
+      };
+
+      mockFindOptimalPath.mockResolvedValue({
+        ...GOOD_RESULT,
+        bestPath: pathWithRevokedHop,
+        allPaths: [pathWithRevokedHop],
+      });
+
+      mockRevocationService.assetRevocationService.checkAssetWithIssuer.mockResolvedValue({
+        revoked: true,
+        reason: "compromised",
+      });
+
+      const result = await tool.execute(
+        { operation: "execute", fromAsset: "XLM", toAsset: "USDC", amount: 100 },
+        "user-1"
+      );
+
+      expect(result.status).toBe("error");
+      expect(result.error).toMatch(/revoked intermediate/i);
     });
   });
 });

@@ -23,6 +23,7 @@ import {
 } from "./types";
 import { error, mergeReports, scopeReport, toReport } from "./validation";
 import {
+  checkDestinationMemoRequirement,
   describeMemo,
   normalizeMemoParams,
   validateMemoParams,
@@ -190,6 +191,7 @@ function normalizeOperation(operation: AdvancedOperation): NormalizedOperation {
  */
 export class AdvancedOperationComposer {
   private readonly operations: AdvancedOperation[] = [];
+  private destinationAccount?: string;
 
   constructor(operations: AdvancedOperation[] = []) {
     this.addAll(operations);
@@ -198,6 +200,20 @@ export class AdvancedOperationComposer {
   /** Append a single operation. */
   add(operation: AdvancedOperation): this {
     this.operations.push(operation);
+    return this;
+  }
+
+  /**
+   * Declare the destination this plan pays.
+   *
+   * When the destination has a registered memo requirement, {@link validate}
+   * (and therefore {@link compose}) rejects a plan whose memo is missing or of
+   * an unaccepted kind — which is what stops an unsigned plan from reaching a
+   * signer.
+   */
+  destination(destination: string): this {
+    const normalized = typeof destination === "string" ? destination.trim() : "";
+    this.destinationAccount = normalized.length > 0 ? normalized : undefined;
     return this;
   }
 
@@ -264,7 +280,26 @@ export class AdvancedOperationComposer {
       );
     }
 
-    return mergeReports([...perOperation, toReport(structural)]);
+    // Destination memo requirements are checked here so a plan that cannot be
+    // signed is rejected before it ever reaches a signer.
+    const memoOperation = this.operations.find(
+      (operation) => operation.kind === AdvancedOperationKind.MEMO_ATTACH
+    );
+    const destinationReport = this.destinationAccount
+      ? scopeReport(
+          checkDestinationMemoRequirement({
+            destination: this.destinationAccount,
+            memo: memoOperation ? (memoOperation.params as MemoParams) : null,
+          }),
+          "destination"
+        )
+      : toReport([]);
+
+    return mergeReports([
+      ...perOperation,
+      toReport(structural),
+      destinationReport,
+    ]);
   }
 
   /**
@@ -293,6 +328,7 @@ export class AdvancedOperationComposer {
     return {
       operations,
       ...(memo ? { memo } : {}),
+      ...(this.destinationAccount ? { destination: this.destinationAccount } : {}),
       validation,
       summary: this.describe(),
     };
@@ -301,7 +337,12 @@ export class AdvancedOperationComposer {
 
 /** Convenience wrapper around {@link AdvancedOperationComposer}. */
 export function composeOperations(
-  operations: AdvancedOperation[]
+  operations: AdvancedOperation[],
+  destination?: string
 ): OperationPlan {
-  return new AdvancedOperationComposer(operations).compose();
+  const composer = new AdvancedOperationComposer(operations);
+  if (destination) {
+    composer.destination(destination);
+  }
+  return composer.compose();
 }

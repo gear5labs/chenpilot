@@ -19,13 +19,26 @@
  *    downstream dependents are cancelled.  Previously completed steps are
  *    compensated in reverse topological order via their `rollbackAction`,
  *    if provided.
+ *
+ * 5. **External dependency ownership** – steps may reference steps of *other*
+ *    durable workflows (see `EXTERNAL_WORKFLOW_DEPENDENCIES_KEY`).  Every such
+ *    reference is resolved against `SchedulerOptions.resolveExternalOwner` and
+ *    rejected before any step runs unless the referenced workflow is owned by
+ *    the same principal as the execution being scheduled.  When a plan declares
+ *    an external dependency and no resolver is configured the run fails closed.
  */
 
 import { AppDataSource } from "../../config/Datasource";
 import { DurableExecution, ExecutionStatus } from "./DurableExecution.entity";
 import { DurableStep, StepStatus } from "./DurableStep.entity";
 import { ExecutionPlan, PlanStep } from "./AgentPlanner";
-import { DependencyGraph, ExecutionWave, GraphBuildResult, ResourceKey } from "./DependencyGraph";
+import {
+  DependencyGraph,
+  ExecutionWave,
+  GraphBuildOptions,
+  GraphBuildResult,
+  ResourceKey,
+} from "./DependencyGraph";
 import { toolRegistry } from "../registry/ToolRegistry";
 import { RedisLockService } from "../../services/lock/redisLock.service";
 import {
@@ -33,6 +46,13 @@ import {
   RealtimeEventType,
 } from "../../Gateway/socketManager";
 import logger from "../../config/logger";
+import {
+  StepInputResolutionContext,
+  StepInputResolutionError,
+  collectCompletedStepResults,
+  isStepInputResolutionError,
+  resolveAndFreezeStepInputs,
+} from "./stepInputResolution";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,6 +80,21 @@ export interface SchedulerOptions {
    * Defaults to true.
    */
   compensateOnFailure?: boolean;
+  /**
+   * Authoritative ownership lookup for external workflow references declared by
+   * plan steps (`externalWorkflowDependencies` in the step payload).
+   *
+   * It usually reads persisted `DurableExecution` rows, so it may be async; it
+   * is called once per referenced execution id before the graph is built.  The
+   * returned owner is compared with `execution.userId` (the principal that owns
+   * the workflow being scheduled).
+   *
+   * When a plan declares external dependencies and this resolver is not
+   * configured, the graph build fails closed instead of trusting the plan.
+   */
+  resolveExternalOwner?: (
+    executionId: string
+  ) => string | undefined | Promise<string | undefined>;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +143,12 @@ export class ParallelScheduler {
     // -----------------------------------------------------------------------
     // 1. Build or reload the dependency graph
     // -----------------------------------------------------------------------
-    const graph = DependencyGraph.build(plan.steps);
+    // References to other workflows are ownership-checked before any wave is
+    // computed; plans that declare none are unaffected.
+    const graph = DependencyGraph.build(
+      plan.steps,
+      await this.buildOwnershipOptions(execution, plan, opts)
+    );
 
     // -----------------------------------------------------------------------
     // 2. Persist (or reload) the wave schedule for deterministic replay
@@ -230,6 +270,58 @@ export class ParallelScheduler {
   }
 
   // -------------------------------------------------------------------------
+  // External workflow dependency ownership
+  // -------------------------------------------------------------------------
+
+  /**
+   * Assembles the ownership context handed to `DependencyGraph.build`.
+   *
+   * Always carries the identity of the workflow being scheduled.  When the plan
+   * declares external workflow dependencies it also carries an authoritative
+   * `executionId → ownerId` map resolved through
+   * {@link SchedulerOptions.resolveExternalOwner}.
+   *
+   * The map is deliberately omitted when no resolver is configured: the graph
+   * build then fails closed with `ownership_context_required` instead of
+   * trusting ownership claims taken from the plan itself.
+   */
+  private async buildOwnershipOptions(
+    execution: DurableExecution,
+    plan: ExecutionPlan,
+    opts: SchedulerOptions
+  ): Promise<GraphBuildOptions> {
+    const options: GraphBuildOptions = {
+      ownerId: execution.userId,
+      executionId: execution.id,
+    };
+
+    const referencedExecutionIds =
+      DependencyGraph.collectExternalDependencyExecutionIds(plan.steps);
+    if (referencedExecutionIds.length === 0) {
+      return options;
+    }
+
+    const { resolveExternalOwner } = opts;
+    if (typeof resolveExternalOwner !== "function") {
+      logger.warn(
+        "Plan declares external workflow dependencies without an owner resolver",
+        { executionId: execution.id, referencedExecutionIds }
+      );
+      return options;
+    }
+
+    const externalOwners = new Map<string, string>();
+    for (const referencedExecutionId of referencedExecutionIds) {
+      const owner = await resolveExternalOwner(referencedExecutionId);
+      if (typeof owner === "string" && owner.length > 0) {
+        externalOwners.set(referencedExecutionId, owner);
+      }
+    }
+
+    return { ...options, externalOwners };
+  }
+
+  // -------------------------------------------------------------------------
   // Schedule persistence & replay
   // -------------------------------------------------------------------------
 
@@ -310,17 +402,23 @@ export class ParallelScheduler {
     if (step.requiresApproval && !step.approvedAt) {
       // Suspend the execution for step-level approval
       step.status = StepStatus.AWAITING_APPROVAL;
+      const ttlMinutes = 60; // Default 60 minutes for step approval
+      const now = new Date();
+      step.expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
       await this.stepRepo.save(step);
 
       const execution = await this.executionRepo.findOne({ where: { id: executionId } });
       if (execution) {
         execution.status = ExecutionStatus.AWAITING_APPROVAL;
         execution.currentStepNumber = stepNumber;
+        if (!execution.expiresAt) {
+          execution.expiresAt = step.expiresAt;
+        }
         await this.executionRepo.save(execution);
         this.emitUpdate(RealtimeEventType.AGENT_APPROVAL_REQUIRED, execution);
       }
 
-      logger.info("Execution suspended for step approval", { executionId, stepNumber });
+      logger.info("Execution suspended for step approval", { executionId, stepNumber, expiresAt: step.expiresAt });
       throw new Error(`Step ${stepNumber} requires approval`);
     }
 
@@ -371,8 +469,30 @@ export class ParallelScheduler {
     userId: string,
     executionId: string
   ): Promise<void> {
+    // Values this step's placeholders may reference. Loaded once per step: a
+    // frozen snapshot is reused on every retry, so no re-read is needed
+    // (issue #809).
+    const inputContext = await this.buildInputResolutionContext(executionId);
+
     while (step.retryCount < step.maxRetries) {
       await this.checkCancelled(executionId);
+
+      // Freeze the resolved inputs durably *before* the side effect, so a
+      // retry or a resume replays the same inputs instead of re-deriving them.
+      let inputs: Record<string, unknown>;
+      try {
+        inputs = await resolveAndFreezeStepInputs(
+          step,
+          inputContext,
+          this.stepRepo
+        );
+      } catch (error) {
+        if (!isStepInputResolutionError(error)) throw error;
+        await this.failUnresolvedStepInputs(step, error);
+        // No retry: the failure is deterministic. Propagating lets the wave
+        // handler cancel downstream steps and compensate completed branches.
+        throw error;
+      }
 
       step.status = StepStatus.RUNNING;
       step.startedAt = new Date();
@@ -381,7 +501,7 @@ export class ParallelScheduler {
       try {
         const result = await toolRegistry.executeTool(
           step.action,
-          step.payload,
+          inputs,
           userId
         );
 
@@ -427,6 +547,55 @@ export class ParallelScheduler {
 
     throw new Error(
       `Step ${step.stepNumber} (${step.action}) failed after ${step.maxRetries} retries: ${step.error}`
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Resolved-input helpers
+  // -------------------------------------------------------------------------
+
+  /**
+   * Snapshot the values a step's placeholders may reference: the results of
+   * steps that already completed, plus the execution's `context` column.
+   */
+  private async buildInputResolutionContext(
+    executionId: string
+  ): Promise<StepInputResolutionContext> {
+    const [steps, execution] = await Promise.all([
+      this.stepRepo.find({ where: { execution: { id: executionId } } }),
+      this.executionRepo.findOne({ where: { id: executionId } }),
+    ]);
+
+    return {
+      stepResults: collectCompletedStepResults(steps),
+      context: execution?.context ?? {},
+    };
+  }
+
+  /**
+   * Persist the FAILED state of a step whose inputs could not be resolved.
+   *
+   * The refusal happens before any side effect; recording it on the step keeps
+   * the operator-visible audit trail complete before the error propagates to
+   * the wave handler.
+   */
+  private async failUnresolvedStepInputs(
+    step: DurableStep,
+    error: StepInputResolutionError
+  ): Promise<void> {
+    step.status = StepStatus.FAILED;
+    step.error = `Unresolved step inputs (${error.code}): ${error.message}`;
+    await this.stepRepo.save(step);
+
+    logger.error(
+      "Refusing to execute step: resolved inputs could not be frozen",
+      {
+        stepNumber: step.stepNumber,
+        action: step.action,
+        code: error.code,
+        location: error.location,
+        error: error.message,
+      }
     );
   }
 

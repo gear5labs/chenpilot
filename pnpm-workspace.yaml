@@ -6,6 +6,7 @@ packages:
 # This section documents which packages would require scripts if enabled
 # See INSTALL_SCRIPT_ALLOWLIST.md for security review documentation
 allowBuilds:
+  '@parcel/watcher': set this to true or false
   '@scarf/scarf': false
   bcrypt: false
   canvas: false

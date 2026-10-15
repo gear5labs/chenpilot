@@ -38,6 +38,7 @@ async function decodeFixturesWithSdk(
   entry: BackendVersionEntry
 ): Promise<{
   auth: unknown;
+  query: unknown;
   simulation: unknown;
   submission: unknown;
   events: unknown[];
@@ -51,6 +52,16 @@ async function decodeFixturesWithSdk(
     contractId: "CCONTRACT",
     method: "withdraw",
     args: ["100"],
+    decoder: (value) => value,
+  });
+
+  // Query: the SDK decodes the getLedgerEntries response.
+  const queryFetcher = mockFetch(entry.fixtures.query);
+  const queryClient = new ContractClient({ network: "testnet", fetcher: queryFetcher });
+  const queryResult = await queryClient.query({
+    contractId: "CCONTRACT",
+    method: "balance",
+    args: ["GUSER"],
     decoder: (value) => value,
   });
 
@@ -90,6 +101,7 @@ async function decodeFixturesWithSdk(
 
   return {
     auth,
+    query: { returnValue: queryResult.decoded },
     simulation: {
       result: { retval: (sim.decoded as { retval?: unknown })?.retval ?? "ok" },
       minResourceFee: sim.feeEstimate?.minResourceFee,
@@ -112,6 +124,7 @@ describe("version matrix declaration (#639)", () => {
       expect(entry.supportedSdkRange.min).toBeTruthy();
       expect(entry.capabilities.length).toBeGreaterThan(0);
       expect(entry.fixtures.auth).toBeDefined();
+      expect(entry.fixtures.query).toBeDefined();
       expect(entry.fixtures.simulation).toBeDefined();
       expect(entry.fixtures.submission).toBeDefined();
       expect(entry.fixtures.events).toBeDefined();
@@ -174,6 +187,7 @@ describe("black-box conformance scenarios (#639)", () => {
     // Simulate a wire-format drift: the backend renamed minResourceFee.
     const result = runConformance(entry, "0.1.0", {
       auth: { ok: true, capabilities: ["deposit", "withdraw", "auth"] },
+      query: { returnValue: { balance: "WRONG", owner: "GUSER" } },
       simulation: {
         result: { retval: "ok" },
         minResourceFee: "WRONG",
@@ -197,12 +211,21 @@ describe("black-box conformance scenarios (#639)", () => {
     expect(feeDiag!.severity).toBe("fail");
     expect(feeDiag!.expected).toBe("1200");
     expect(feeDiag!.actual).toBe("WRONG");
+
+    const queryDiag = result.diagnostics.find(
+      (d) => d.field === "query.returnValue.balance"
+    );
+    expect(queryDiag).toBeDefined();
+    expect(queryDiag!.severity).toBe("fail");
+    expect(queryDiag!.expected).toBe("500");
+    expect(queryDiag!.actual).toBe("WRONG");
   });
 
   it("reports missing capabilities as a field-level diagnostic", () => {
     const entry = BACKEND_VERSION_MATRIX[1]; // 1.1.0 requires flash-loan
     const result = runConformance(entry, "0.1.0", {
       auth: { ok: true, capabilities: ["deposit", "withdraw", "auth"] },
+      query: { returnValue: { balance: "1000", owner: "GUSER" } },
       simulation: {
         result: { retval: "ok" },
         minResourceFee: "1500",

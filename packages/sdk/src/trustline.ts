@@ -1,11 +1,49 @@
 import { Horizon, Asset, Operation, xdr } from "@stellar/stellar-sdk";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { parseScaledAmount } from "./fixedAmount";
+import type { AbortSignalLike } from "./types";
+import {
+  combineSignals,
+  throwIfAborted,
+  isAbortError,
+} from "./abort";
 
 export interface TrustlineCheckResult {
   exists: boolean;
   authorized: boolean;
   details?: Record<string, unknown>;
+}
+
+/**
+ * Error thrown when an asset transfer is attempted against an account whose
+ * trustline for the asset is missing or not authorized (e.g. frozen by the
+ * issuer). Fail-closed: any transfer path that checks trustlines must reject
+ * with this error instead of submitting a transaction that the network would
+ * reject anyway (or worse, allow a frozen asset to move).
+ */
+export class TrustlineUnauthorizedError extends Error {
+  readonly assetCode: string;
+  readonly assetIssuer?: string;
+  readonly reason: "missing" | "unauthorized" | "account_not_found";
+
+  constructor(
+    assetCode: string,
+    assetIssuer: string | undefined,
+    reason: "missing" | "unauthorized" | "account_not_found",
+    message?: string
+  ) {
+    const defaultMessage =
+      reason === "missing"
+        ? `Trustline for ${assetCode} does not exist on the account`
+        : reason === "unauthorized"
+          ? `Trustline for ${assetCode} is not authorized (frozen or unauthorized by issuer)`
+          : `Source account not found for trustline check (${assetCode})`;
+    super(message || defaultMessage);
+    this.name = "TrustlineUnauthorizedError";
+    this.assetCode = assetCode;
+    this.assetIssuer = assetIssuer;
+    this.reason = reason;
+  }
 }
 
 export interface TrustlinePreview {
@@ -179,6 +217,111 @@ export async function hasValidStellarTrustline(
   return { exists: true, authorized, details: { balance: match } };
 }
 
+/** Asset roles a transfer can involve; every one of them must be authorized. */
+export type TransferAssetRole = "source" | "destination" | "path";
+
+function isNativeAsset(asset: unknown): boolean {
+  if (typeof asset === "string") return asset.toUpperCase() === "XLM";
+  const a = asset as { isNative?(): boolean; getCode?(): string };
+  if (typeof a?.isNative === "function") return a.isNative();
+  if (typeof a?.getCode === "function") {
+    return a.getCode().toUpperCase() === "XLM";
+  }
+  return false;
+}
+
+function assetCodeOf(asset: unknown): string {
+  if (typeof asset === "string") return asset;
+  const a = asset as { getCode?(): string; code?: string };
+  if (typeof a?.getCode === "function") return a.getCode();
+  return a?.code ?? "UNKNOWN";
+}
+
+function assetIssuerOf(asset: unknown): string | undefined {
+  if (typeof asset === "string") return undefined;
+  const a = asset as { getIssuer?(): string; issuer?: string };
+  if (typeof a?.getIssuer === "function") return a.getIssuer();
+  return a?.issuer;
+}
+
+/**
+ * Preflight check that the given account holds an authorized trustline for an
+ * asset involved in a transfer. Native XLM is always authorized.
+ *
+ * @param horizonUrl - Horizon endpoint (falls back to the public network)
+ * @param accountId - Account sending (or receiving, via explicit role) the asset
+ * @param asset - Asset code string or a Stellar SDK Asset instance
+ * @param role - Why the asset is involved (used in error messages)
+ * @param assetIssuer - Optional issuer when passing a plain code string
+ * @throws TrustlineUnauthorizedError when the trustline is missing/unauthorized
+ */
+export async function assertTrustlineAuthorized(
+  horizonUrl: string | undefined,
+  accountId: string,
+  asset: string | { getCode?(): string; isNative?(): boolean; getIssuer?(): string; issuer?: string },
+  role: TransferAssetRole = "source",
+  assetIssuer?: string
+): Promise<TrustlineCheckResult> {
+  if (isNativeAsset(asset)) {
+    return { exists: true, authorized: true };
+  }
+
+  const code = assetCodeOf(asset);
+  const issuer = assetIssuer ?? assetIssuerOf(asset);
+  const check = await hasValidStellarTrustline(horizonUrl, accountId, code, issuer);
+
+  if (!check.exists) {
+    throw new TrustlineUnauthorizedError(
+      code,
+      issuer,
+      check.details?.error ? "account_not_found" : "missing",
+      `Transfer blocked: ${role} asset ${code} has no trustline on account ${accountId}`
+    );
+  }
+  if (!check.authorized) {
+    throw new TrustlineUnauthorizedError(
+      code,
+      issuer,
+      "unauthorized",
+      `Transfer blocked: ${role} asset ${code} trustline is not authorized (frozen) on account ${accountId}`
+    );
+  }
+  return check;
+}
+
+/**
+ * Enforce trustline authorization for every asset involved in an asset
+ * transfer against the given account, fail-closed.
+ *
+ * Transfer paths (payments, path payments, swaps) must call this before
+ * building/signing the transaction so frozen or missing trustlines are
+ * rejected deterministically instead of at submission time.
+ *
+ * @param horizonUrl - Horizon endpoint (falls back to the public network)
+ * @param accountId - Account whose trustlines are checked (typically the sender)
+ * @param assets - Assets involved in the transfer; duplicates are checked once
+ * @throws TrustlineUnauthorizedError on the first unauthorized/missing trustline
+ */
+export async function assertTrustlinesForTransfer(
+  horizonUrl: string | undefined,
+  accountId: string,
+  assets: Array<
+    string | { getCode?(): string; isNative?(): boolean; getIssuer?(): string; issuer?: string }
+  >
+): Promise<TrustlineCheckResult[]> {
+  const results: TrustlineCheckResult[] = [];
+  const seen = new Set<string>();
+
+  for (const asset of assets) {
+    if (isNativeAsset(asset)) continue;
+    const key = `${assetCodeOf(asset)}:${assetIssuerOf(asset) ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    results.push(await assertTrustlineAuthorized(horizonUrl, accountId, asset));
+  }
+  return results;
+}
+
 export async function findZeroBalanceTrustlines(
   horizonUrl: string | undefined,
   accountId: string
@@ -205,6 +348,102 @@ export function buildTrustlineRemovalOps(
       limit: "0",
     })
   );
+}
+
+export interface AccountMergeBlocker {
+  type: 'trustline' | 'data_entry' | 'offers' | 'signers';
+  description: string;
+  cleanupInstructions: string;
+  affectedItems?: string[];
+}
+
+export interface AccountMergePreflightResult {
+  canMerge: boolean;
+  blockers: AccountMergeBlocker[];
+}
+
+export async function checkAccountMergeBlockers(
+  horizonUrl: string | undefined,
+  accountId: string
+): Promise<AccountMergePreflightResult> {
+  const server = new Horizon.Server(horizonUrl || "https://horizon.stellar.org");
+  const blockers: AccountMergeBlocker[] = [];
+
+  try {
+    const account = await server.accounts().accountId(accountId).call();
+    const balances: Record<string, unknown>[] = (account.balances as unknown as Record<string, unknown>[]) || [];
+
+    // Check for non-zero balance trustlines
+    const nonZeroTrustlines = balances
+      .filter((b) => b['asset_type'] !== "native" && parseScaledAmount(b['balance'] as string, 7) !== 0n)
+      .map((b) => `${b['asset_code']}:${b['asset_issuer']}`);
+
+    if (nonZeroTrustlines.length > 0) {
+      blockers.push({
+        type: 'trustline',
+        description: `${nonZeroTrustlines.length} trustline(s) with non-zero balance`,
+        cleanupInstructions: 'Send all asset balances to another account or use payment operations to reduce balances to zero before merging',
+        affectedItems: nonZeroTrustlines,
+      });
+    }
+
+    // Check for zero-balance trustlines
+    const zeroBalanceTrustlines = balances
+      .filter((b) => b['asset_type'] !== "native" && parseScaledAmount(b['balance'] as string, 7) === 0n)
+      .map((b) => `${b['asset_code']}:${b['asset_issuer']}`);
+
+    if (zeroBalanceTrustlines.length > 0) {
+      blockers.push({
+        type: 'trustline',
+        description: `${zeroBalanceTrustlines.length} zero-balance trustline(s) must be removed`,
+        cleanupInstructions: 'Use changeTrust operations with limit "0" to remove these trustlines before merging',
+        affectedItems: zeroBalanceTrustlines,
+      });
+    }
+
+    // Check for data entries
+    const dataEntries = Object.keys((account as any).data || {});
+    if (dataEntries.length > 0) {
+      blockers.push({
+        type: 'data_entry',
+        description: `${dataEntries.length} data entry/entries must be removed`,
+        cleanupInstructions: 'Use manageData operations with null value to remove all data entries before merging',
+        affectedItems: dataEntries,
+      });
+    }
+
+    // Check for open offers
+    const offersResponse = await server.offers().forAccount(accountId).limit(200).call();
+    const offers = ((offersResponse.records || []) as unknown) as Array<Record<string, unknown>>;
+    if (offers.length > 0) {
+      blockers.push({
+        type: 'offers',
+        description: `${offers.length} open offer(s) must be cancelled`,
+        cleanupInstructions: 'Use manageSellOffer or manageBuyOffer operations with amount "0" to cancel all open offers before merging',
+        affectedItems: offers.map((o) => `Offer #${o['id']}`),
+      });
+    }
+
+    // Check for additional signers
+    const signers = ((account as any).signers || []) as Array<Record<string, unknown>>;
+    const additionalSigners = signers.filter((s) => s['key'] !== accountId);
+    if (additionalSigners.length > 0) {
+      blockers.push({
+        type: 'signers',
+        description: `${additionalSigners.length} additional signer(s) must be removed`,
+        cleanupInstructions: 'Use setOptions operations with weight 0 to remove all additional signers before merging',
+        affectedItems: additionalSigners.map((s) => s['key'] as string),
+      });
+    }
+
+  } catch (error) {
+    throw new Error(`Failed to check account merge blockers: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  return {
+    canMerge: blockers.length === 0,
+    blockers,
+  };
 }
 
 export async function createTrustlineOperation(
@@ -332,7 +571,7 @@ export class TrustlineWorkflowBuilder {
         }
       );
       operations.forEach((op) => tx.addOperation(op));
-      transactionXdr = tx.build().toXDR();
+      transactionXdr = tx.setTimeout(30).build().toXDR();
     }
 
     return {
@@ -431,7 +670,20 @@ export class TrustlineWorkflowBuilder {
       operationCount,
     };
   }
+export function validateDestinationReceivingCapacity(
+  trustline: TrustlineRecord | null,
+  amount: string
+): boolean {
+  if (!trustline || !trustline.authorized) return false;
 
+  const balanceNum = parseFloat(trustline.balance);
+  const limitNum = parseFloat(trustline.limit);
+  const buyingLiabilitiesNum = parseFloat(trustline.buyingLiabilities || '0');
+  const amountNum = parseFloat(amount);
+
+  const availableCapacity = limitNum - (balanceNum + buyingLiabilitiesNum);
+  return amountNum <= availableCapacity;
+}
   async build(): Promise<TrustlineWorkflowResult> {
     const preview = await this.preview();
     const estimate = this.estimate(preview);
@@ -449,3 +701,4 @@ export class TrustlineWorkflowBuilder {
 }
 
 export default hasValidStellarTrustline;
+

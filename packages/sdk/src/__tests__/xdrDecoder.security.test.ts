@@ -15,6 +15,8 @@ import {
   XdrComputationLimitExceededError,
   XdrMalformedError,
   XdrDecoder,
+  EventDecoderRegistry,
+  parseEvent,
 } from "../index";
 
 describe("XDR Security & Hardened Decoding Subsystem (#663)", () => {
@@ -247,6 +249,27 @@ describe("XDR Security & Hardened Decoding Subsystem (#663)", () => {
       expect(explanation).toContain(destKeypair.publicKey());
     });
 
+    it("preserves muxed recipient ID in payment operation explanation", () => {
+      // Build a muxed account: same base key as destKeypair but with sub-ID 42
+      const muxedDest = new StellarSdk.MuxedAccount(
+        new StellarSdk.Account(destKeypair.publicKey(), "0"),
+        "42"
+      );
+      const op = StellarSdk.Operation.payment({
+        destination: muxedDest.accountId(),
+        asset: StellarSdk.Asset.native(),
+        amount: "50",
+      });
+
+      const opXdr = op.toXDR("base64");
+      const explanation = XdrDecoder.explainOperation(opXdr);
+
+      // The explanation must carry the full M-address, not just the base G-address
+      expect(explanation).toContain("Send 50 XLM to");
+      expect(explanation).toContain(muxedDest.accountId());
+      expect(explanation).not.toBe(`Send 50 XLM to ${destKeypair.publicKey()}`);
+    });
+
     it("correctly decodes and explains valid change trust operation", () => {
       const customAsset = new StellarSdk.Asset(
         "USDC",
@@ -277,5 +300,102 @@ describe("XDR Security & Hardened Decoding Subsystem (#663)", () => {
       expect(result.error).toBeDefined();
       expect(result.operation).toBeUndefined();
     });
+  });
+});
+
+describe("8. Bounded XDR decoding in contract-event registry handlers (#842)", () => {
+  it("parseEvent decodes XDR-encoded ScVal data through the bounded decoder", () => {
+    // Encode a simple u32 ScVal as XDR base64 — this is the shape Soroban RPC
+    // returns for event data before client-side decoding.
+    const scVal = StellarSdk.xdr.ScVal.scvU32(42);
+    const xdrBase64 = scVal.toXDR("base64");
+
+    const event = parseEvent(
+      { topic: ["deposit"], value: xdrBase64 },
+      "CABC",
+      "txhash",
+      100,
+      1000
+    );
+
+    // data must be the decoded native value, not the raw XDR string
+    expect(event.data).toBe(42);
+    expect(typeof event.data).toBe("number");
+  });
+
+  it("parseEvent passes non-XDR data through unchanged", () => {
+    const alreadyDecoded = { amount: "100", user: "GA..." };
+
+    const event = parseEvent(
+      { topic: ["deposit"], value: alreadyDecoded },
+      "CABC",
+      "txhash",
+      100,
+      1000
+    );
+
+    expect(event.data).toBe(alreadyDecoded);
+  });
+
+  it("parseEvent falls back to raw value when string is not valid XDR", () => {
+    const event = parseEvent(
+      { topic: ["deposit"], value: "not-xdr" },
+      "CABC",
+      "txhash",
+      100,
+      1000
+    );
+
+    expect(event.data).toBe("not-xdr");
+  });
+
+  it("EventDecoderRegistry decoder receives bounded-decoded data from parseEvent", () => {
+    const registry = new EventDecoderRegistry();
+    registry.register({
+      eventType: "deposit",
+      decoder: (ev) => ({ amount: (ev.data as Record<string, unknown>).amount }),
+    });
+
+    // Encode a map { amount: "500" } as XDR
+    const mapEntry = new StellarSdk.xdr.ScMapEntry({
+      key: StellarSdk.xdr.ScVal.scvSymbol("amount"),
+      val: StellarSdk.xdr.ScVal.scvString("500"),
+    });
+    const scVal = StellarSdk.xdr.ScVal.scvMap([mapEntry]);
+    const xdrBase64 = scVal.toXDR("base64");
+
+    const event = parseEvent(
+      { topic: ["deposit"], value: xdrBase64 },
+      "CABC",
+      "txhash",
+      101,
+      1001
+    );
+
+    const decoded = registry.decode(event, { strict: true });
+    expect(decoded).toBeDefined();
+    expect((decoded!.data as Record<string, unknown>).amount).toBe("500");
+  });
+
+  it("parseEvent enforces depth limits — rejects adversarially nested XDR event data", () => {
+    // Build 30 levels of nested vec and encode as XDR
+    let current = StellarSdk.xdr.ScVal.scvU32(1);
+    for (let i = 0; i < 30; i++) {
+      current = StellarSdk.xdr.ScVal.scvVec([current]);
+    }
+    const xdrBase64 = current.toXDR("base64");
+
+    // With default limits (maxDepth 16) the bounded decoder will reject this;
+    // parseEvent must fall back to the raw string rather than throwing.
+    const event = parseEvent(
+      { topic: ["deposit"], value: xdrBase64 },
+      "CABC",
+      "txhash",
+      102,
+      1002
+    );
+
+    // Falls back to raw string — does NOT propagate the XdrDepthLimitExceededError
+    expect(event.data).toBe(xdrBase64);
   });
 });
