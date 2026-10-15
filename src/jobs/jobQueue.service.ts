@@ -13,6 +13,7 @@ export interface EnqueueJobInput {
   availableAt?: Date;
   maxAttempts?: number;
   metadata?: Record<string, unknown>;
+  executorVersion?: string;
 }
 
 export interface QueueStatsRow {
@@ -37,6 +38,7 @@ export class JobQueueService {
       userId: input.userId,
       correlationId: input.correlationId,
       metadata: input.metadata,
+      executorVersion: input.executorVersion,
       availableAt: input.availableAt ?? new Date(),
       maxAttempts: input.maxAttempts ?? 5,
       status: "pending",
@@ -79,6 +81,7 @@ export class JobQueueService {
     workerId: string,
     leaseMs: number,
     limit = 1,
+    workerVersion?: string,
   ): Promise<QueueJob[]> {
     if (queues.length === 0 || limit <= 0) {
       return [];
@@ -95,6 +98,7 @@ export class JobQueueService {
               status = 'pending'
               OR (status = 'leased' AND "leaseExpiresAt" IS NOT NULL AND "leaseExpiresAt" < NOW())
             )
+            AND ("executorVersion" IS NULL OR "executorVersion" = $5)
           ORDER BY "availableAt" ASC, "createdAt" ASC
           FOR UPDATE SKIP LOCKED
           LIMIT $2
@@ -108,7 +112,7 @@ export class JobQueueService {
         WHERE jobs.id = candidate_jobs.id
         RETURNING jobs.*
       `,
-      [queues, limit, workerId, leaseMs],
+      [queues, limit, workerId, leaseMs, workerVersion || null],
     );
 
     return jobs.map((job: Record<string, unknown>) =>

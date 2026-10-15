@@ -47,6 +47,9 @@ export class QueueJob {
   @Column({ type: "jsonb", nullable: true })
   metadata?: Record<string, unknown> | null;
 
+  @Column({ type: "varchar", length: 50, nullable: true })
+  executorVersion?: string | null;
+
   @Column({ type: "timestamp", default: () => "now()" })
   availableAt!: Date;
 
