@@ -32,6 +32,8 @@ class Server {
       concurrency: 3,
       leaseMs: 30000,
       pollIntervalMs: 2500,
+      workerVersion: process.env.npm_package_version || "1.0.0",
+      drainTimeoutMs: 15000,
     });
     for (const handler of buildDefaultJobHandlers()) {
       this.jobWorker.registerHandler(handler);

@@ -22,6 +22,8 @@ export interface JobWorkerOptions {
   concurrency?: number;
   retryBaseDelayMs?: number;
   retryMaxDelayMs?: number;
+  drainTimeoutMs?: number;
+  workerVersion?: string;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -78,9 +80,22 @@ export class JobWorker {
     }
 
     this.running = false;
-    await Promise.all(this.loops);
-    this.loops = [];
-    logger.info("Job worker stopped", { workerId: this.options.workerId });
+    const drainTimeoutMs = this.options.drainTimeoutMs ?? 10000;
+    const timeout = new Promise<void>((_, reject) => 
+      setTimeout(() => reject(new Error("Drain timeout exceeded")), drainTimeoutMs)
+    );
+
+    try {
+      await Promise.race([Promise.all(this.loops), timeout]);
+      logger.info("Job worker stopped cleanly", { workerId: this.options.workerId });
+    } catch (error) {
+      logger.error("Job worker forced to exit during drain", { 
+        workerId: this.options.workerId, 
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    } finally {
+      this.loops = [];
+    }
   }
 
   private async runLoop(slot: number): Promise<void> {
@@ -91,6 +106,7 @@ export class JobWorker {
           this.options.workerId,
           this.leaseMs,
           1,
+          this.options.workerVersion,
         );
 
         if (!job) {
