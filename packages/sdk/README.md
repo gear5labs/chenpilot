@@ -27,6 +27,10 @@ Core SDK for Chen Pilot cross-chain operations with Stellar/Soroban support.
 - **Plan Verification**: Verify and validate transaction plans
 - **TypeScript Support**: Full type definitions included
 
+## Amount parsing
+
+Public amount parsers (`parsePublicAmount`, `parseScaledAmount`, `isAmount`, `isPositiveAmount`, `computeSpendableXlm`, and trustline capacity checks) accept only canonical decimal strings. JavaScript numbers are rejected, including values above `Number.MAX_SAFE_INTEGER`, fractional numbers, and exponent notation such as `1e7`. `"0"` is a valid zero amount. Arithmetic uses scaled integers so large balances and 7-decimal stroop values do not pass through `number`.
+
 ## Installation
 
 ```bash

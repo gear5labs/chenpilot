@@ -2,11 +2,14 @@
 
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, token, Address, BytesN, Env, IntoVal, Symbol, Val, Vec,
-    symbol_short,
+    contract, contractclient, contractimpl, contracttype, token, Address, BytesN, Env, IntoVal,
+    Symbol, Val, Vec, symbol_short,
 };
 use contract_failure::{fail, unwrap_or_fail, FailureReason};
 use pause_state;
+use transitions::{
+    transit_control, transit_position, PositionOp, PositionState, VaultCommand, VaultControl,
+};
 
 // Unified role enum - must match UnifiedAuth contract
 #[contracttype]
@@ -21,6 +24,13 @@ pub enum UnifiedRole {
     OracleProvider,
     AgentOperator,
     StrategyOperator,
+}
+
+/// Read-only view of the UnifiedAuth contract. Role enums are encoded by
+/// variant order and must stay aligned with `unified_auth::UnifiedRole`.
+#[contractclient(name = "UnifiedAuthClient")]
+pub trait UnifiedAuthInterface {
+    fn has_role(env: Env, addr: Address, role: UnifiedRole) -> bool;
 }
 
 // ~1 hour at 5s/ledger
@@ -64,6 +74,9 @@ pub enum DataKey {
     UpgradeMode,
     // Per-admin nonce to bind each privileged authorization to a single use.
     AuthNonce(Address),
+    /// When true, privileged calls require UnifiedAuth roles and legacy-only
+    /// admin credentials are rejected.
+    AuthMigrationComplete,
 }
 
 #[contracttype]
@@ -236,18 +249,14 @@ impl CoreVaultContract {
             Symbol::new(&env, "set_backend_status"),
             args,
         );
-        
-        // Check emergency state - cannot change backend status during emergency
-        if Self::is_emergency_active(&env) {
-            fail(&env, FailureReason::EmergencyMode);
-        }
-        
-        // Check upgrade mode - restrict backend changes during upgrade
-        if Self::is_upgrade_mode_internal(&env) {
-            fail(&env, FailureReason::UpgradeMode);
-        }
-        
-        env.storage().instance().set(&DataKey::BackendOnline, &online);
+
+        let next = transit_control(
+            Self::control_snapshot(&env),
+            VaultCommand::SetBackend { online },
+        )
+        .unwrap_or_else(|reason| fail(&env, reason));
+
+        env.storage().instance().set(&DataKey::BackendOnline, &next.backend_online);
 
         env.events().publish(
             // "backend_status" is 14 chars — over symbol_short!'s 9-char
@@ -276,27 +285,32 @@ impl CoreVaultContract {
     // `pause_state` for the composable pattern this implements.
 
     /// Pause the vault. Blocks `deposit()` until `unpause()` is called.
-    /// Trust boundary: VAULT_ADMIN or EMERGENCY_ADMIN, same as
-    /// `set_backend_status`.
+    /// Trust boundary: EMERGENCY_ADMIN after auth migration; legacy admin before.
+    /// A repeated pause returns `InvalidState` and does not change storage.
     /// Emits the standard `pause_state` `pause_chg` event.
     pub fn pause(env: Env) {
-        let admin = Self::require_vault_or_emergency_admin(
+        let admin = Self::require_emergency_admin(
             &env,
             symbol_short!("pause"),
             Vec::new(&env),
         );
+        transit_control(Self::control_snapshot(&env), VaultCommand::Pause)
+            .unwrap_or_else(|reason| fail(&env, reason));
         pause_state::pause(&env, admin);
     }
 
     /// Unpause the vault, re-enabling `deposit()`.
-    /// Trust boundary: VAULT_ADMIN or EMERGENCY_ADMIN.
+    /// Trust boundary: EMERGENCY_ADMIN after auth migration; legacy admin before.
+    /// Unpausing when the vault is not paused returns `InvalidState`.
     /// Emits the standard `pause_state` `pause_chg` event.
     pub fn unpause(env: Env) {
-        let admin = Self::require_vault_or_emergency_admin(
+        let admin = Self::require_emergency_admin(
             &env,
             symbol_short!("unpause"),
             Vec::new(&env),
         );
+        transit_control(Self::control_snapshot(&env), VaultCommand::Unpause)
+            .unwrap_or_else(|reason| fail(&env, reason));
         pause_state::unpause(&env, admin);
     }
 
@@ -316,9 +330,15 @@ impl CoreVaultContract {
     pub fn deposit(env: Env, user: Address, amount: i128) {
         user.require_auth();
         pause_state::require_not_paused(&env);
-        if !Self::is_backend_online(env.clone()) {
-            fail(&env, FailureReason::BackendOffline);
-        }
+        let (state, _balance, matches) = Self::position_of(&env, &user);
+        transit_position(
+            state,
+            PositionOp::Deposit,
+            Self::is_backend_online(env.clone()),
+            false,
+            matches,
+        )
+        .unwrap_or_else(|reason| fail(&env, reason));
 
         let vault_token: Address =
             unwrap_or_fail(&env, env.storage().instance().get(&DataKey::VaultToken), FailureReason::StorageValueMissing);
@@ -347,9 +367,16 @@ impl CoreVaultContract {
     /// Emits `w` event on success.
     pub fn withdrawal(env: Env, user: Address, amount: i128) {
         user.require_auth();
-        if !Self::is_backend_online(env.clone()) {
-            fail(&env, FailureReason::BackendOffline);
-        }
+        let (state, _balance, matches) = Self::position_of(&env, &user);
+        let next = transit_position(
+            state,
+            PositionOp::Withdraw,
+            Self::is_backend_online(env.clone()),
+            false,
+            matches,
+        )
+        .unwrap_or_else(|reason| fail(&env, reason));
+        let _ = next;
 
         let balance: i128 = env.storage().persistent()
             .get(&DataKey::Deposit(user.clone()))
@@ -385,21 +412,15 @@ impl CoreVaultContract {
     /// Emits `fexit_req` event on success.
     pub fn force_exit_request(env: Env, user: Address) {
         user.require_auth();
-        if Self::is_backend_online(env.clone()) {
-            fail(&env, FailureReason::BackendOnline);
-        }
-
-        let balance: i128 = env.storage().persistent()
-            .get(&DataKey::Deposit(user.clone()))
-            .unwrap_or(0);
-        if balance <= 0 {
-            fail(&env, FailureReason::InsufficientBalance);
-        }
-
-        // Prevent duplicate requests
-        if env.storage().persistent().has(&DataKey::ForceExit(user.clone())) {
-            fail(&env, FailureReason::ForceExitAlreadyPending);
-        }
+        let (state, balance, matches) = Self::position_of(&env, &user);
+        transit_position(
+            state,
+            PositionOp::RequestExit,
+            Self::is_backend_online(env.clone()),
+            false,
+            matches,
+        )
+        .unwrap_or_else(|reason| fail(&env, reason));
 
         let eligible_at = env.ledger().timestamp() + FORCE_EXIT_DELAY;
         let req = ForceExitRequest { amount: balance, eligible_at };
@@ -424,10 +445,16 @@ impl CoreVaultContract {
         let req: ForceExitRequest = env.storage().persistent()
             .get(&DataKey::ForceExit(user.clone()))
             .unwrap_or_else(|| fail(&env, FailureReason::NoPendingForceExit));
-
-        if env.ledger().timestamp() < req.eligible_at {
-            fail(&env, FailureReason::ChallengePeriodNotElapsed);
-        }
+        let elapsed = env.ledger().timestamp() >= req.eligible_at;
+        let (state, _balance, matches) = Self::position_of(&env, &user);
+        transit_position(
+            state,
+            PositionOp::CompleteExit,
+            Self::is_backend_online(env.clone()),
+            elapsed,
+            matches,
+        )
+        .unwrap_or_else(|reason| fail(&env, reason));
 
         // Clear state before transfer (re-entrancy guard)
         env.storage().persistent().remove(&DataKey::ForceExit(user.clone()));
@@ -459,17 +486,19 @@ impl CoreVaultContract {
             args,
         );
 
+        let (state, _balance, matches) = Self::position_of(&env, &user);
+        transit_position(
+            state,
+            PositionOp::Recover,
+            Self::is_backend_online(env.clone()),
+            false,
+            matches,
+        )
+        .unwrap_or_else(|reason| fail(&env, reason));
+
         let req: ForceExitRequest = env.storage().persistent()
             .get(&DataKey::ForceExit(user.clone()))
             .unwrap_or_else(|| fail(&env, FailureReason::NoPendingForceExit));
-
-        // Validate state consistency
-        let deposit: i128 = env.storage().persistent()
-            .get(&DataKey::Deposit(user.clone()))
-            .unwrap_or(0);
-        if deposit != req.amount {
-            fail(&env, FailureReason::DepositForceExitMismatch);
-        }
 
         // Remove force exit request - deposit balance remains unchanged
         env.storage().persistent().remove(&DataKey::ForceExit(user.clone()));
@@ -503,11 +532,9 @@ impl CoreVaultContract {
             Symbol::new(&env, "propose_upgrade"),
             args,
         );
-        
-        // Check emergency state - cannot upgrade during emergency
-        if Self::is_emergency_active(&env) {
-            fail(&env, FailureReason::EmergencyMode);
-        }
+
+        transit_control(Self::control_snapshot(&env), VaultCommand::ProposeUpgrade)
+            .unwrap_or_else(|reason| fail(&env, reason));
 
         let unlock_ledger = env.ledger().sequence() + TIMELOCK_LEDGERS;
         let pending = PendingUpgrade { new_wasm_hash: new_wasm_hash.clone(), unlock_ledger };
@@ -532,6 +559,8 @@ impl CoreVaultContract {
             Symbol::new(&env, "cancel_upgrade"),
             Vec::new(&env),
         );
+        transit_control(Self::control_snapshot(&env), VaultCommand::CancelUpgrade)
+            .unwrap_or_else(|reason| fail(&env, reason));
         env.storage().instance().remove(&DataKey::PendingUpgrade);
         
         // Exit upgrade mode
@@ -548,15 +577,14 @@ impl CoreVaultContract {
     /// Exits upgrade mode after successful upgrade.
     /// Emits `upg_done` event on success.
     pub fn apply_upgrade(env: Env) {
+        transit_control(Self::control_snapshot(&env), VaultCommand::ApplyUpgrade)
+            .unwrap_or_else(|reason| fail(&env, reason));
+
         let pending: PendingUpgrade = env
             .storage()
             .instance()
             .get(&DataKey::PendingUpgrade)
             .unwrap_or_else(|| fail(&env, FailureReason::NoPendingUpgrade));
-
-        if env.ledger().sequence() < pending.unlock_ledger {
-            fail(&env, FailureReason::TimelockNotExpired);
-        }
 
         let wasm_hash = pending.new_wasm_hash.clone();
         env.storage().instance().remove(&DataKey::PendingUpgrade);
@@ -638,16 +666,105 @@ impl CoreVaultContract {
         admin
     }
 
-    fn require_vault_or_emergency_admin(env: &Env, function: Symbol, args: Vec<Val>) -> Address {
-        let _unified_auth = Self::get_unified_auth_internal(env);
-        // TODO: enforce VaultAdmin/EmergencyAdmin roles via UnifiedAuth.
-        Self::require_legacy_admin(env, function, args)
+    fn migration_complete(env: &Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::AuthMigrationComplete)
+            .unwrap_or(false)
     }
-    
+
+    /// After migration, `admin` must hold one of `roles` on UnifiedAuth.
+    /// Before migration the legacy admin remains the trust anchor so existing
+    /// deployments keep working.
+    fn require_roles(
+        env: &Env,
+        roles: &[UnifiedRole],
+        function: Symbol,
+        args: Vec<Val>,
+    ) -> Address {
+        let admin = Self::require_legacy_admin(env, function, args);
+        if !Self::migration_complete(env) {
+            return admin;
+        }
+        let auth_addr = Self::get_unified_auth_internal(env);
+        let client = UnifiedAuthClient::new(env, &auth_addr);
+        let allowed = roles.iter().any(|role| client.has_role(&admin, role));
+        if !allowed {
+            fail(env, FailureReason::Unauthorized);
+        }
+        admin
+    }
+
+    fn require_vault_or_emergency_admin(env: &Env, function: Symbol, args: Vec<Val>) -> Address {
+        Self::require_roles(
+            env,
+            &[UnifiedRole::VaultAdmin, UnifiedRole::EmergencyAdmin],
+            function,
+            args,
+        )
+    }
+
+    fn require_emergency_admin(env: &Env, function: Symbol, args: Vec<Val>) -> Address {
+        Self::require_roles(env, &[UnifiedRole::EmergencyAdmin], function, args)
+    }
+
     fn require_upgrade_admin(env: &Env, function: Symbol, args: Vec<Val>) -> Address {
-        let _unified_auth = Self::get_unified_auth_internal(env);
-        // TODO: enforce UpgradeAdmin role via UnifiedAuth.
-        Self::require_legacy_admin(env, function, args)
+        Self::require_roles(env, &[UnifiedRole::UpgradeAdmin], function, args)
+    }
+
+    /// One-way switch: privileged calls then require UnifiedAuth roles.
+    /// Legacy admin credentials with no matching role are rejected.
+    pub fn complete_auth_migration(env: Env) {
+        Self::require_legacy_admin(
+            &env,
+            Symbol::new(&env, "complete_auth_migration"),
+            Vec::new(&env),
+        );
+        if Self::migration_complete(&env) {
+            fail(&env, FailureReason::AlreadyExists);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::AuthMigrationComplete, &true);
+    }
+
+    pub fn is_auth_migration_complete(env: Env) -> bool {
+        Self::migration_complete(&env)
+    }
+
+    fn control_snapshot(env: &Env) -> VaultControl {
+        let pending: Option<PendingUpgrade> = env.storage().instance().get(&DataKey::PendingUpgrade);
+        let timelock_expired = pending
+            .as_ref()
+            .map(|p| env.ledger().sequence() >= p.unlock_ledger)
+            .unwrap_or(false);
+        VaultControl {
+            backend_online: Self::is_backend_online(env.clone()),
+            upgrade_pending: pending.is_some(),
+            paused: Self::is_emergency_active(env),
+            timelock_expired,
+        }
+    }
+
+    fn position_of(env: &Env, user: &Address) -> (PositionState, i128, bool) {
+        let deposit: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Deposit(user.clone()))
+            .unwrap_or(0);
+        let exit: Option<ForceExitRequest> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ForceExit(user.clone()));
+        let matches = exit.as_ref().map(|req| req.amount == deposit).unwrap_or(false);
+        let state = if exit.is_some() {
+            PositionState::ExitPending
+        } else if deposit > 0 {
+            PositionState::Deposited
+        } else {
+            PositionState::Idle
+        };
+        (state, deposit, matches)
     }
     
     /// Now backed by the real `pause_state` standard rather than a
@@ -680,7 +797,12 @@ impl CoreVaultContract {
     }
 }
 
+mod transitions;
+#[cfg(test)]
 mod test;
+#[cfg(test)]
 mod test_pause;
+#[cfg(test)]
+mod test_auth;
 #[cfg(test)]
 mod test_diff_fuzz;

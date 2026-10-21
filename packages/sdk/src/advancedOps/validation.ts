@@ -48,16 +48,23 @@ export function isBalanceId(value: unknown): value is string {
   return typeof value === "string" && BALANCE_ID_PATTERN.test(value);
 }
 
-/** True when `value` is a non-negative decimal amount within Stellar precision. */
+/** True when `value` is a non-negative canonical decimal within Stellar precision. */
 export function isAmount(value: unknown): value is string {
-  if (typeof value !== "string" || !AMOUNT_PATTERN.test(value)) return false;
+  if (typeof value !== "string" || /[eE]/.test(value) || !AMOUNT_PATTERN.test(value)) {
+    return false;
+  }
   const [, fraction = ""] = value.split(".");
   return fraction.length <= STELLAR_AMOUNT_PRECISION;
 }
 
-/** True when `value` is an amount strictly greater than zero. */
+/** True when `value` is an amount strictly greater than zero, compared as integers. */
 export function isPositiveAmount(value: unknown): value is string {
-  return isAmount(value) && Number(value) > 0;
+  if (!isAmount(value)) return false;
+  const [whole, fraction = ""] = value.split(".");
+  const scale = 10n ** BigInt(STELLAR_AMOUNT_PRECISION);
+  const units =
+    BigInt(whole) * scale + BigInt(fraction.padEnd(STELLAR_AMOUNT_PRECISION, "0"));
+  return units > 0n;
 }
 
 /** True when `value` fits in an unsigned 64-bit integer. */
