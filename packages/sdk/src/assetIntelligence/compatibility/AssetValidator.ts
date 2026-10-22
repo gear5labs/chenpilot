@@ -4,6 +4,8 @@
  */
 
 import { Asset, AssetMetadata, VerificationResult } from '../core/types';
+import type { AbortSignalLike } from '../../types';
+import { throwIfAborted } from '../../abort';
 
 export interface ValidationConfig {
   strictMode: boolean;
@@ -21,9 +23,17 @@ export class AssetValidator {
   }
 
   /**
-   * Validate asset metadata
+   * Validate asset metadata.
+   *
+   * @param asset - The asset to validate.
+   * @param metadata - Metadata to validate against configured rules.
+   * @param signal - Optional cancellation signal.  When already aborted, this
+   *   method rejects immediately with an AbortError before any evaluation.
+   *   Future I/O-bound validation (e.g. domain look-ups) will use the same signal.
    */
-  async validateMetadata(asset: Asset, metadata: AssetMetadata): Promise<VerificationResult> {
+  async validateMetadata(asset: Asset, metadata: AssetMetadata, signal?: AbortSignalLike): Promise<VerificationResult> {
+    throwIfAborted(signal);
+
     const issues: string[] = [];
     let score = 100;
 

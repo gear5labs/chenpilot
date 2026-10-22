@@ -99,6 +99,8 @@ export * from "./offlineSigning";
 export * from "./performance";
 export {
   AssetIntelligence,
+  AssetLookupOptions,
+  ProviderDeadlines,
   AssetCache as AssetIntelligenceCache,
   CacheInvalidator,
   TrustScorer,

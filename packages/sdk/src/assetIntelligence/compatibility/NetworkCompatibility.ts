@@ -4,6 +4,8 @@
  */
 
 import { Asset, Network, CompatibilityResult, CompatibilityContext } from '../core/types';
+import type { AbortSignalLike } from '../../types';
+import { throwIfAborted } from '../../abort';
 
 export interface NetworkRule {
   network: Network;
@@ -58,9 +60,17 @@ export class NetworkCompatibility {
   }
 
   /**
-   * Check network compatibility
+   * Check network compatibility.
+   *
+   * @param asset - The asset being checked.
+   * @param context - The network / operation context.
+   * @param signal - Optional cancellation signal.  When already aborted, this
+   *   method rejects immediately with an AbortError before evaluating rules.
+   *   Future I/O-bound rule implementations will inherit the same signal.
    */
-  async checkCompatibility(asset: Asset, context: CompatibilityContext): Promise<CompatibilityResult> {
+  async checkCompatibility(asset: Asset, context: CompatibilityContext, signal?: AbortSignalLike): Promise<CompatibilityResult> {
+    throwIfAborted(signal);
+
     const rule = this.rules.get(context.network);
     
     if (!rule) {
