@@ -10,6 +10,8 @@ export interface UpdatePreferencesDTO {
   smallTransactionThreshold?: number;
   notificationSettings?: string;
   defaultSlippage?: string;
+  requireConsent?: boolean;
+  explicitConsent?: boolean;
 }
 
 class UserPreferencesService {
@@ -63,6 +65,10 @@ class UserPreferencesService {
     userId: string,
     updates: UpdatePreferencesDTO
   ): Promise<UserPreferences> {
+    if (updates.explicitConsent !== true && updates.requireConsent !== true) {
+      throw new Error("Explicit consent is required before saving conversational preferences");
+    }
+
     const preferences = await this.getPreferences(userId);
 
     if (updates.riskLevel !== undefined) {
