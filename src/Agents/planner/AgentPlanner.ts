@@ -116,6 +116,15 @@ export class AgentPlanner {
         });
       }
 
+// Check for contradictory financial constraints
+      if (context.constraints && context.constraints.minSlippage !== undefined && context.constraints.maxSlippage !== undefined) {
+        if (context.constraints.minSlippage > context.constraints.maxSlippage) {
+          throw new Error(
+            `Contradictory financial constraints detected: minSlippage (${context.constraints.minSlippage}) cannot be greater than maxSlippage (${context.constraints.maxSlippage}).`
+          );
+        }
+      }
+
       if (typeof context.userInput === "string") {
         const networkClarification = assessNetworkClarification(
           context.userInput
@@ -127,7 +136,6 @@ export class AgentPlanner {
           );
         }
       }
-
       // Check for ambiguous asset symbols and resolve issuers
       const issuerResolution = this.resolveIssuers(context);
       if (issuerResolution.needsPrompt) {
