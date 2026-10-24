@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "chenpilot-experimental",
   "version": "1.0.0",
   "private": true,
@@ -12,8 +12,8 @@
     "test:coverage": "jest --coverage",
     "test:performance": "node --expose-gc ./node_modules/jest/bin/jest.js tests/performance --runInBand",
     "test:performance:record": "node --expose-gc ./node_modules/jest/bin/jest.js tests/performance --runInBand && ts-node --transpile-only scripts/recordPerformanceResults.ts",
-    "dev": "nodemon src/index.ts",
-    "start": "node dist/index.js",
+    "dev": "node server.js",
+    "start": "node server.js",
     "typeorm": "ts-node --transpile-only ./node_modules/typeorm/cli.js",
     "migration:run": "ts-node --transpile-only ./node_modules/typeorm/cli.js migration:run -d ./src/config/migrationDataSource.ts",
     "migration:revert": "ts-node --transpile-only ./node_modules/typeorm/cli.js migration:revert -d ./src/config/migrationDataSource.ts",
@@ -70,7 +70,7 @@
     "@stellar/stellar-sdk": "^14.4.3",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
-    "bcrypt": "^6.0.0",
+    "bcryptjs": "^2.4.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
     "cockatiel": "^3.2.1",
@@ -135,3 +135,4 @@
     "README.md"
   ]
 }
+
