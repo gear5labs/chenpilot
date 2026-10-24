@@ -67,7 +67,8 @@ export interface TrustScore {
 
 export interface TrustSignal {
   type: string;
-  value: number;
+  value: number | null;
+  status: 'known' | 'unknown';
   weight: number;
   description: string;
   source: string;

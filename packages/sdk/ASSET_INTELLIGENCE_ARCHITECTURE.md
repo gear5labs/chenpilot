@@ -140,6 +140,8 @@ class TrustProvider {
 - Community verification
 - Blacklist status
 
+Signals without a configured authoritative source are returned with `status: 'unknown'`, `value: null`, and `source: 'unconfigured'`. Unknown signals are excluded from scoring, and an asset with no known signals remains `unverified` even when the neutral score meets the configured verification threshold.
+
 ### 5. CompatibilityProvider (Compatibility Checks)
 
 Ensures asset compatibility with operations and networks.
@@ -238,7 +240,8 @@ interface TrustScore {
 
 interface TrustSignal {
   type: string;
-  value: number;
+  value: number | null;
+  status: 'known' | 'unknown';
   weight: number;
   description: string;
   source: string;
