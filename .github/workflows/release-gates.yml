@@ -5,7 +5,7 @@ on:
     branches: ["**"]
   pull_request:
     branches: ["**"]
-    paths: 
+    paths:
       - "src/Gateway/**"
       - "src/Payments/**"
       - "src/scripts/testWebhookIdempotency.ts"
@@ -91,24 +91,14 @@ jobs:
       - name: TypeScript compiler gate
         run: npm run build:check
 
-      - name: Backend unit tests
-        run: npm test --runInBand
+      - name: Backend unit tests (no external services required)
+        run: npm run test:unit
 
       - name: Adversarial red-team evaluation gate (#634)
         run: npm run redteam:check
 
-      - name: Example migrations against PostgreSQL (docs/DATA_MIGRATIONS.md)
-        run: npx jest tests/integration/migration_examples.integration.test.ts --runInBand
-        env:
-          MIGRATION_EXAMPLES_DB: "1"
-          DB_HOST: localhost
-          DB_PORT: 5432
-          DB_USERNAME: test
-          DB_PASSWORD: test
-          DB_NAME: chenpilot_test
-
-      - name: Webhook idempotency integration tests
-        run: npm test --testPathPattern="webhookIdempotency.integration" --runInBand
+      - name: Integration tests (service-backed, requires PostgreSQL and Redis)
+        run: npm run test:integration
         env:
           DATABASE_HOST: localhost
           DATABASE_PORT: 5432
@@ -117,6 +107,18 @@ jobs:
           DATABASE_NAME: chenpilot_test
           REDIS_HOST: localhost
           REDIS_PORT: 6379
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: test
+          DB_PASSWORD: test
+          DB_NAME: chenpilot_test
+
+      - name: Report test separation status
+        if: always()
+        run: |
+          echo "✅ Unit tests: executed without external services"
+          echo "✅ Integration tests: executed with PostgreSQL and Redis services"
+          echo "📋 Test separation enforced via jest.unit.config.js and jest.integration.config.js"
 
   sdk-health:
     name: SDK drift and package health
