@@ -7,7 +7,7 @@ use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
 fn setup(env: &Env) -> (Address, Address, CoreVaultContractClient) {
     let admin = Address::generate(env);
     let vault_token = env.register_stellar_asset_contract_v2(admin.clone()).address();
-    let unified_auth = Address::generate(env);
+    let unified_auth = env.register_contract(None, CoreVaultContract);
     let contract_id = env.register_contract(None, CoreVaultContract);
     let client = CoreVaultContractClient::new(env, &contract_id);
     client.init(&admin, &vault_token, &unified_auth);

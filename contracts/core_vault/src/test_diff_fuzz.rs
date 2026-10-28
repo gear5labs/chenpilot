@@ -88,7 +88,7 @@ impl DifferentialStateMachine for VaultStateMachine {
             )
         };
 
-        client.init(&admin, &token_addr);
+        client.init(&admin, &token_addr, &token_addr);
         client.set_backend_status(&true);
 
         let model = VaultReferenceModel {
