@@ -11,6 +11,8 @@ import {
   Networks,
   Operation,
 } from "@stellar/stellar-sdk";
+import type { AbortSignalLike } from "./types";
+import { abortableWait, isAbortError } from "./abort";
 
 const Server = Horizon.Server;
 
@@ -82,6 +84,7 @@ export class StellarMetadataManager {
   private horizonUrl: string;
   private networkPassphrase: string;
   private baseFee: string;
+  private defaultSignal?: AbortSignalLike;
   private metadataCache: Map<string, MetadataEntry[]> = new Map();
 
   constructor(config?: MetadataManagerConfig) {

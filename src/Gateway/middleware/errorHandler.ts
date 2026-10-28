@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import logger from "../../config/logger";
 import { ApiErrorCode, isApiError } from "../../contracts/errorContract";
+import { redactSecrets } from "../../utils/errorRedaction";
 
 /**
  * Central error-rendering middleware.
@@ -30,9 +31,12 @@ export async function ErrorHandler(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   next: NextFunction
 ): Promise<void> {
+  const requestId = req.requestId;
+
   // Budget exhaustion (e.g. byte limits on inbound requests)
   if (isBudgetExhaustedError(err)) {
     logger.warn("Request budget exhausted", {
+      requestId,
       resource: err.resource,
       path: req.originalUrl,
       message: err.message,
@@ -40,6 +44,7 @@ export async function ErrorHandler(
     res.status(413).json({
       success: false,
       status: 413,
+      requestId,
       error: {
         message: err.message,
         code: "BUDGET_EXHAUSTED",
@@ -64,12 +69,14 @@ export async function ErrorHandler(
     anyErr?.statusCode === 413
   ) {
     logger.warn("Payload too large", {
+      requestId,
       path: req.originalUrl,
       message: (anyErr?.message as string) || "Payload too large",
     });
     res.status(413).json({
       success: false,
       status: 413,
+      requestId,
       error: {
         message: (anyErr?.message as string) || "Payload too large",
         code: "PAYLOAD_TOO_LARGE",
@@ -82,13 +89,17 @@ export async function ErrorHandler(
   if (isApiError(err)) {
     const includeStack = process.env.NODE_ENV !== "production";
     logger.warn("Handled ApiError", {
+      requestId,
       code: err.code,
       status: err.statusCode,
       method: req.method,
       url: req.originalUrl,
       message: err.message,
+      details: err.details ? redactSecrets(err.details) : undefined,
     });
-    res.status(err.statusCode).json(err.toResponse(includeStack));
+    res
+      .status(err.statusCode)
+      .json({ ...err.toResponse(includeStack), requestId });
     return;
   }
 
@@ -150,6 +161,7 @@ export async function ErrorHandler(
   }
 
   logger.error("Unhandled error", {
+    requestId,
     message: pgish?.message || "No message provided",
     statusCode,
     errorCode,
@@ -162,6 +174,7 @@ export async function ErrorHandler(
   res.status(statusCode).json({
     success: false,
     status: statusCode,
+    requestId,
     error: {
       message,
       code: errorCode,

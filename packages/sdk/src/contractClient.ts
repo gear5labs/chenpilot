@@ -1,4 +1,6 @@
 import { SorobanNetwork } from "./types";
+import type { AbortSignalLike } from "./types";
+import { throwIfAborted } from "./abort";
 import {
   NetworkIdentityVerifier,
   NetworkIdentityVerifierConfig,

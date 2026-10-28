@@ -161,6 +161,55 @@ describe("DeploymentManager", () => {
       expect(manager.getCurrentVersion()).toBe("2.0.0");
     });
 
+    it("does not cut over while paused and can revert drifted instances", async () => {
+      manager.registerInstance("instance-1", "1.0.0");
+      manager.registerInstance("instance-2", "9.9.9");
+      manager.pause();
+
+      expect(manager.shouldAcceptRequest("instance-1")).toBe(false);
+      expect(manager.detectVersionDrift()).toEqual(["instance-2"]);
+
+      const paused = await manager.executeDeployment({
+        instanceId: "instance-1",
+        targetVersion: "2.0.0",
+        drainTimeoutMs: 50,
+        minHealthyInstances: 1,
+        enableVersionFencing: true,
+      });
+      expect(paused.success).toBe(false);
+      expect(paused.message).toContain("paused");
+
+      manager.revertToVersion("1.0.0");
+      expect(manager.isPaused()).toBe(false);
+      expect(manager.getCurrentVersion()).toBe("1.0.0");
+      expect(manager.detectVersionDrift()).toEqual([]);
+      expect(manager.getInstanceState("instance-2")?.version).toBe("1.0.0");
+    });
+
+    it("rolls back when agent or data-flow health fails", async () => {
+      manager.registerInstance("instance-1", "1.0.0");
+      manager.registerInstance("instance-2", "1.0.0");
+      manager.updateActiveConnections("instance-1", 0);
+      manager.updateActiveConnections("instance-2", 0);
+      manager.recordCriticalHealth("instance-1", {
+        agent: false,
+        dataFlows: true,
+      });
+
+      const result = await manager.executeDeployment({
+        instanceId: "instance-1",
+        targetVersion: "2.0.0",
+        drainTimeoutMs: 50,
+        minHealthyInstances: 1,
+        enableVersionFencing: false,
+        healthTimeoutMs: 20,
+      });
+
+      expect(result.success).toBe(false);
+      expect(manager.getCurrentVersion()).toBe("1.0.0");
+      expect(manager.getInstanceState("instance-1")?.version).toBe("1.0.0");
+    });
+
     it("should fail with insufficient healthy instances", async () => {
       const config: DeploymentConfig = {
         instanceId: "instance-1",

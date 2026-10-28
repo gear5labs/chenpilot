@@ -71,6 +71,21 @@ export interface TrustlineInfo {
   balance: string;
 }
 
+/**
+ * A parsed Horizon trustline balance record used for destination-capacity
+ * checks. Mirrors the fields Horizon returns on `account.balances[]` that the
+ * SDK cares about, plus the authorization + liability fields needed to decide
+ * whether an incoming payment can be received.
+ */
+export interface TrustlineRecord {
+  assetCode: string;
+  assetIssuer: string;
+  balance: string;
+  limit: string;
+  authorized: boolean;
+  buyingLiabilities?: string;
+}
+
 export interface AssetToTrust {
   assetCode: string;
   assetIssuer: string;

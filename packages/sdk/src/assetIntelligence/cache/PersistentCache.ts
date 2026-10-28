@@ -3,7 +3,7 @@
  * Disk-based cache for persistence across restarts
  */
 
-import { CacheEntry, CacheStats } from './MemoryCache.js';
+import { CacheEntry, CacheStats } from './MemoryCache';
 
 // Node.js filesystem and path modules
 declare const fs: {

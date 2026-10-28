@@ -61,7 +61,7 @@ export class MetadataRevisionStore {
   private static computeRevisionId(assetKey: string, metadata: AssetMetadata): string {
     const entries = Object.keys(metadata)
       .sort()
-      .filter((k) => metadata[k as keyof AssetMetadata] !== undefined)
+      .filter((k) => k !== 'provenance' && metadata[k as keyof AssetMetadata] !== undefined)
       .map((k) => [k, metadata[k as keyof AssetMetadata]]);
     return createHash('sha256')
       .update(JSON.stringify([assetKey, entries]))

@@ -50,6 +50,49 @@ describe("MemoryStore", () => {
     expect(reloadedStore.get("user-1")).toEqual(["entry-2", "entry-3"]);
   });
 
+  it("excludes expired workflow context from a new request", () => {
+    const store = new MemoryStore(10, storageFilePath);
+    const now = Date.now();
+
+    store.add("user-1", "workflow: still open", {
+      workflowExpiresAt: now + 60_000,
+    });
+    store.add("user-1", "User: hello");
+    store.add("user-1", "workflow: quote", { workflowExpiresAt: now - 1 });
+
+    expect(store.get("user-1", now)).toEqual([
+      "workflow: still open",
+      "User: hello",
+    ]);
+
+    expect(store.purgeExpiredWorkflowContext(now)).toBe(1);
+    const reloaded = new MemoryStore(10, storageFilePath);
+    expect(reloaded.get("user-1", now)).toEqual([
+      "workflow: still open",
+      "User: hello",
+    ]);
+  });
+
+  it("keeps pending transaction facts when history is truncated", () => {
+    const store = new MemoryStore(2, storageFilePath);
+
+    store.add("user-1", "User: hello");
+    store.add("user-1", "pending: swap 10 XLM", { pendingTransaction: true });
+    store.add("user-1", "User: thanks");
+    store.add("user-1", "LLM: done");
+
+    expect(store.get("user-1")).toEqual([
+      "pending: swap 10 XLM",
+      "LLM: done",
+    ]);
+
+    const reloaded = new MemoryStore(2, storageFilePath);
+    expect(reloaded.get("user-1")).toEqual([
+      "pending: swap 10 XLM",
+      "LLM: done",
+    ]);
+  });
+
   it("persists clear and clearAll operations", () => {
     const store = new MemoryStore(10, storageFilePath);
 

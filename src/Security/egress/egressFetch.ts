@@ -217,6 +217,8 @@ export class EgressController {
     const transport = opts.transport ?? globalThis.fetch.bind(globalThis);
 
     const deadlineMs = budget.timeLimitMs ?? DEFAULT_REQUEST_BUDGET.timeLimitMs;
+    const connectTimeoutMs = budget.connectTimeoutMs ?? 5000; // 5s default connect timeout
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), deadlineMs);
 
@@ -225,12 +227,35 @@ export class EgressController {
 
     let response: Response;
     try {
-      response = await transport(target.toString(), {
+      // Enforce both connect and total deadline timeouts
+      const fetchInit: RequestInit = {
         ...init,
         signal: effectiveSignal,
         redirect: "manual" as RequestRedirect,
         headers: init.headers ?? {},
-      });
+      };
+
+      // For Node.js environments, set explicit connection timeout
+      if (typeof (globalThis as { AbortSignal?: unknown }).AbortSignal === "function") {
+        // Use AbortSignal.timeout if available (Node 16+)
+        const connectController = new AbortController();
+        const connectTimeout = setTimeout(() => connectController.abort(), connectTimeoutMs);
+
+        const combinedSignal = combineSignals(
+          effectiveSignal,
+          connectController.signal
+        );
+
+        fetchInit.signal = combinedSignal;
+
+        try {
+          response = await transport(target.toString(), fetchInit);
+        } finally {
+          clearTimeout(connectTimeout);
+        }
+      } else {
+        response = await transport(target.toString(), fetchInit);
+      }
     } catch (err) {
       const abortError =
         controller.signal.aborted ? new EgressError(

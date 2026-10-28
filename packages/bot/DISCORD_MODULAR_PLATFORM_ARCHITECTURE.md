@@ -152,6 +152,8 @@ class CommandHandler {
 
 The adapter decodes and validates incoming `interaction.options.data` into a versioned, platform-neutral `DiscordCommandDto` before dispatching to backend commands. This decouples backend handlers from discord.js object shapes and nested option trees.
 
+The deployed slash-command definitions in `src/slashCommands.ts` are checked against the command cases and option getters in `src/adapters/discord.ts`. Run `pnpm run discord:commands:check` before deployment; it fails with separate missing, stale, and incompatible command reports. Focused contract tests are available with `pnpm run discord:commands:test`, and both checks run in the deployment workflow.
+
 ```typescript
 class SlashCommandHandler {
   async handleSlashCommand(interaction: ChatInputCommandInteraction): Promise<void>;
@@ -191,6 +193,19 @@ export interface DiscordCommandDto {
 
 - **Optional Values**: Missing or explicitly `null`/`undefined` optional options map to `null` with `isOptional: true`.
 - **Validation Errors**: Unsupported option types throw `CommandOptionValidationError` with code `UNSUPPORTED_OPTION_TYPE`; invalid values throw `INVALID_OPTION_VALUE`; malformed subcommand groups throw `MALFORMED_SUBCOMMAND_STRUCTURE`. The adapter intercepts these errors and responds with an ephemeral user notice.
+
+### Interaction Deferral & Response Window Lifecycle
+
+Discord enforces a 3-second initial response deadline for slash command interactions. Backend command execution can exceed this window due to network round-trips, transaction simulations, or service coordination, causing Discord to reject responses with `10062 Unknown interaction`.
+
+To ensure reliability across fast and slow execution paths:
+1. **Pre-execution Deferral**: The adapter defers eligible interactions (`interaction.deferReply()`) immediately after role checks and option mapping, but before dispatching backend requests to `backendClient.executeCommand`.
+2. **Follow-Up Response Completion**: Once backend execution completes (or fails), completion responses are sent via follow-up responses (`interaction.editReply` or `interaction.followUp`) rather than initial replies.
+3. **Exactly-Once Acknowledgment Guarantee**:
+   - Eligible unacknowledged interactions (`!interaction.deferred && !interaction.replied`) are deferred exactly once.
+   - Already acknowledged interactions preserve their state and skip duplicate deferrals to prevent Discord `40060 Interaction has already been acknowledged` errors.
+   - Early validation failures (role gating, option validation) reject immediately with ephemeral replies without deferring or invoking the backend.
+   - Interactions lacking deferral capability safely fall back to direct replies.
 
 ### Legacy Command Handler
 
@@ -345,6 +360,8 @@ class RoleManager {
 
 ### Role Cache
 
+The Discord adapter resolves command-gate membership through the guild member API. Lookups time out after five seconds, successful role lists are cached for at most five minutes and 10,000 entries, and lookup failures deny gated commands without caching a result. Member updates invalidate that member; role and guild updates invalidate that guild. Gate/admin-role configuration changes clear the cache. Call `invalidateCache`, `invalidateGuildCache`, or `clearCache` after out-of-band changes.
+
 ```typescript
 class RoleCache {
   private cache: Map<string, RoleCacheEntry>;
@@ -356,6 +373,10 @@ class RoleCache {
   cleanup(): void; // Remove expired entries
 }
 ```
+
+### Moderation Audit Persistence
+
+The Discord adapter uses a bounded in-memory audit sink by default. Set `moderationAuditFilePath` to append non-allow moderation records as JSONL across restarts, or provide `moderationAuditSink` to use another sink (it takes precedence over the file path). Audit sink errors are swallowed by the policy engine and do not change enforcement decisions. JSONL files are append-only and are not automatically pruned or rotated; operators must set access controls and apply their own archival and retention policy.
 
 ## Scam Detection Module
 

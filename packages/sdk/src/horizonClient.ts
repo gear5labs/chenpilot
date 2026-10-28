@@ -2,7 +2,12 @@
  * Horizon Client for Stellar API interactions with cursor-based pagination support
  */
 
-import { combineSignals, throwIfAborted, abortableSleep } from "./abort";
+import {
+  combineSignals,
+  throwIfAborted,
+  abortableSleep,
+  isAbortError,
+} from "./abort";
 import type { AbortSignalLike } from "./types";
 
 export interface RetryConfig {
@@ -10,6 +15,18 @@ export interface RetryConfig {
   initialDelayMs?: number;
   maxDelayMs?: number;
   backoffMultiplier?: number;
+}
+
+/**
+ * Wraps a Horizon failure that must not be retried (e.g. a 4xx response other
+ * than 429). Without this marker the outer retry loop would re-attempt every
+ * thrown error, so client errors would be retried as if they were transient.
+ */
+class NonRetryableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NonRetryableError";
+  }
 }
 
 export interface PaginationOptions {
@@ -200,8 +217,9 @@ export class HorizonClient {
             continue;
           }
           
-          // Non-retryable error
-          throw error;
+          // Non-retryable error (e.g. 4xx other than 429): mark it so the
+          // outer catch re-throws immediately instead of retrying.
+          throw new NonRetryableError(error.message);
         }
 
         const data = (await response.json()) as HorizonApiResponse<AccountOffer>;
@@ -231,11 +249,18 @@ export class HorizonClient {
       } catch (error) {
         combined.cleanup();
         
-        // Re-throw abort errors immediately without retry
-        if (error instanceof Error && error.name === "AbortError") {
+        // Re-throw abort errors immediately without retry. Use the shared
+        // detector so every cancellation shape (DOM/Node AbortError, axios
+        // ERR_CANCELED, SDK-created aborts) is handled identically.
+        if (isAbortError(error)) {
           throw error;
         }
-        
+
+        // Client errors (4xx other than 429) are terminal: surface them now.
+        if (error instanceof NonRetryableError) {
+          throw error;
+        }
+
         lastError = error as Error;
         
         // Only retry if we haven't exhausted attempts

@@ -494,7 +494,7 @@ describe("HorizonClient", () => {
       // Abort after first attempt during backoff
       setTimeout(() => controller.abort(), 50);
 
-      await expect(requestPromise).rejects.toThrow("AbortError");
+      await expect(requestPromise).rejects.toMatchObject({ name: "AbortError" });
       
       // Verify only one attempt was made (no retry after abort)
       expect(attemptCount).toBe(1);
@@ -506,11 +506,11 @@ describe("HorizonClient", () => {
       
       // Spy on clearTimeout to verify cleanup
       const originalClearTimeout = global.clearTimeout;
-      const clearTimeoutSpy = jest.fn((id: NodeJS.Timeout) => {
+      const clearTimeoutSpy = jest.fn((id?: number | NodeJS.Timeout) => {
         timerCleared = true;
-        originalClearTimeout(id);
+        originalClearTimeout(id as NodeJS.Timeout);
       });
-      global.clearTimeout = clearTimeoutSpy;
+      global.clearTimeout = clearTimeoutSpy as unknown as typeof global.clearTimeout;
 
       const client = new HorizonClient({
         retry: {
@@ -573,7 +573,7 @@ describe("HorizonClient", () => {
       // Abort during backoff after first attempt
       setTimeout(() => controller.abort(), 100);
 
-      await expect(requestPromise).rejects.toThrow("AbortError");
+      await expect(requestPromise).rejects.toMatchObject({ name: "AbortError" });
       
       // Should have exactly 1 attempt (aborted during backoff before retry)
       expect(attemptTimestamps).toHaveLength(1);

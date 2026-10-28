@@ -67,6 +67,9 @@ export class CapabilityManager {
       sortedActions,
       sortedLimits,
       grant.maxCalls !== undefined ? String(grant.maxCalls) : "1",
+      grant.maxDepth !== undefined ? String(grant.maxDepth) : "",
+      grant.maxExpandedSteps !== undefined ? String(grant.maxExpandedSteps) : "",
+      String(grant.currentDepth),
       String(grant.issuedAt),
       String(grant.expiresAt),
       grant.nonce,
@@ -97,6 +100,9 @@ export class CapabilityManager {
       allowedActions: [...params.allowedActions],
       assetLimits: params.assetLimits ? { ...params.assetLimits } : undefined,
       maxCalls: params.maxCalls ?? 1,
+      maxDepth: params.maxDepth,
+      maxExpandedSteps: params.maxExpandedSteps,
+      currentDepth: 0,
       usedCalls: 0,
       issuedAt: now,
       expiresAt,
@@ -215,6 +221,31 @@ export class CapabilityManager {
       }
     }
 
+    // 6. Recursion Depth Attenuation & Bound Check
+    const currentDepth = parentGrant.currentDepth + 1;
+    const maxDepth = params.maxDepth ?? parentGrant.maxDepth;
+    if (maxDepth !== undefined && currentDepth > maxDepth) {
+      throw new AuthorityBroadeningError(
+        `Delegated plan depth exceeded: current depth ${currentDepth} exceeds maximum allowed depth ${maxDepth}`,
+        { currentDepth, maxDepth }
+      );
+    }
+    if (parentGrant.maxDepth !== undefined && maxDepth !== undefined && maxDepth > parentGrant.maxDepth) {
+      throw new AuthorityBroadeningError(
+        `Cannot broaden depth limit: requested ${maxDepth} exceeds parent limit ${parentGrant.maxDepth}`,
+        { requestedDepth: maxDepth, parentDepth: parentGrant.maxDepth }
+      );
+    }
+
+    // 7. Expanded Step Count Attenuation & Bound Check
+    const maxExpandedSteps = params.maxExpandedSteps ?? parentGrant.maxExpandedSteps;
+    if (parentGrant.maxExpandedSteps !== undefined && maxExpandedSteps !== undefined && maxExpandedSteps > parentGrant.maxExpandedSteps) {
+      throw new AuthorityBroadeningError(
+        `Cannot broaden expanded step limit: requested ${maxExpandedSteps} exceeds parent limit ${parentGrant.maxExpandedSteps}`,
+        { requestedSteps: maxExpandedSteps, parentSteps: parentGrant.maxExpandedSteps }
+      );
+    }
+
     const grantId = `cap_${randomUUID()}`;
     const nonce = randomBytes(16).toString("hex");
 
@@ -230,6 +261,9 @@ export class CapabilityManager {
       allowedActions,
       assetLimits,
       maxCalls,
+      maxDepth: maxDepth ?? parentGrant.maxDepth,
+      maxExpandedSteps: maxExpandedSteps ?? parentGrant.maxExpandedSteps,
+      currentDepth,
       usedCalls: 0,
       issuedAt: now,
       expiresAt,
@@ -440,6 +474,8 @@ export class CapabilityManager {
           throw new CrossStepReplayError(validation.error!);
         case "REPLAY_DETECTED":
         case "CALL_LIMIT_EXCEEDED":
+        case "DEPTH_LIMIT_EXCEEDED":
+        case "STEP_COUNT_LIMIT_EXCEEDED":
           throw new ReplayAttackError(validation.error!);
         case "GRANT_EXPIRED":
           throw new CapabilityExpiredError(validation.error!);

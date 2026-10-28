@@ -3,6 +3,11 @@
  *
  * Demonstrates how to use the Sequence Manager for concurrent
  * Stellar transaction submissions
+ *
+ * #1051 — PLACEHOLDER/INSTRUCTIONAL ONLY: This example uses mock callbacks and
+ * does not submit real transactions by default. If adapted to submit real
+ * transactions, gate behind `CHEN_PILOT_ALLOW_REAL_TX=true` and
+ * `CHEN_PILOT_I_UNDERSTAND_REAL_TX=true`.
  */
 
 import * as StellarSdk from "@stellar/stellar-sdk";

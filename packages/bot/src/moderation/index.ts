@@ -21,6 +21,7 @@ export type {
 export {
   ModerationPolicyEngine,
   InMemoryAuditSink,
+  JsonLinesAuditSink,
 } from "./ModerationPolicyEngine";
 export type { ModerationPolicyEngineOptions } from "./ModerationPolicyEngine";
 

@@ -21,6 +21,20 @@ import type { RedTeamCorpus } from "../../src/redteam/types";
 // against the in-process policy and validation gates.
 jest.mock("../../src/config/logger");
 jest.mock("@anthropic-ai/sdk");
+jest.mock("../../src/Auth/userPreferences.service", () => ({
+  userPreferencesService: {
+    getPreferencesForAgent: jest.fn().mockResolvedValue({
+      riskLevel: "high",
+      preferredAssets: ["XLM", "USDC", "USDT", "BTC", "ETH", "STRK", "DAI"],
+      defaultSlippage: 1,
+      autoApproveSmallTransactions: true,
+      smallTransactionThreshold: 150,
+    }),
+    checkRiskTolerance: jest
+      .fn()
+      .mockResolvedValue({ allowed: true, reason: "within tolerance" }),
+  },
+}));
 
 const FIXTURES = path.resolve(__dirname, "../../tests/fixtures/redteam");
 const corpus: RedTeamCorpus = JSON.parse(
@@ -53,6 +67,38 @@ describe("Red-team evaluation gate (#634)", () => {
       "unsafe_recovery_advice",
     ]) {
       expect(categories.has(cat)).toBe(true);
+    }
+  });
+
+  it("covers multilingual financial-intent benchmark cases (#804)", () => {
+    const multilingual = corpus.cases.filter((c) => c.language && c.language !== "en");
+    expect(multilingual.length).toBeGreaterThanOrEqual(6);
+    const languages = new Set(multilingual.map((c) => c.language));
+    // At least one case per non-Latin script family and Latin-script language.
+    for (const lang of ["es", "fr", "ja", "ar", "zh", "pt"]) {
+      expect(languages.has(lang)).toBe(true);
+    }
+    // Every multilingual case still exercises a real attack shape.
+    for (const c of multilingual) {
+      expect(c.userInput.length).toBeGreaterThan(0);
+      expect(c.attack.action).toBeTruthy();
+    }
+  });
+
+  it("evaluates multilingual cases against the same defensive layers", async () => {
+    const report = await evaluateCorpus(corpus);
+    const multilingualIds = new Set(
+      corpus.cases.filter((c) => c.language && c.language !== "en").map((c) => c.id)
+    );
+    const evaluated = report.cases.filter((c) => multilingualIds.has(c.id));
+    expect(evaluated.length).toBe(multilingualIds.size);
+    for (const c of evaluated) {
+      const outcome = c.expectedBlocked ? c.blocked || c.requiresApproval : !c.blocked;
+      if (!outcome) {
+        throw new Error(
+          `multilingual case ${c.id} (${c.language}) got outcome '${c.reason}' which did not match expected blocked=${c.expectedBlocked}`
+        );
+      }
     }
   });
 

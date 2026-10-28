@@ -26,6 +26,8 @@ jobs:
       - name: Install and Build
         run: |
           pnpm install --frozen-lockfile
+          pnpm run discord:commands:test
+          pnpm run discord:commands:check
           pnpm run build
 
       - name: Upload build to AWS server via SCP

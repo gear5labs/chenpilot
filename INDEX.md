@@ -85,6 +85,7 @@ See detailed documentation:
 - [docs/GENERATED_FILES_POLICY.md](docs/GENERATED_FILES_POLICY.md) — Generated Files Policy
 - [docs/MULTI_HOP_ARCHITECTURE.md](docs/MULTI_HOP_ARCHITECTURE.md) — Multi-Hop Trade Path Evaluation - Architecture
 - [docs/MULTI_HOP_TRADING.md](docs/MULTI_HOP_TRADING.md) — Multi-Hop Trade Path Evaluation
+- [docs/PACKAGE_BOUNDARIES.md](docs/PACKAGE_BOUNDARIES.md) — Package Boundaries Verification
 - [docs/PLATFORM_VALIDATION_CONTRACTS.md](docs/PLATFORM_VALIDATION_CONTRACTS.md) — Platform-Wide Validation Contracts
 - [docs/PROMPT_VERSIONING.md](docs/PROMPT_VERSIONING.md) — Prompt Versioning & A/B Testing System
 - [docs/PROPERTY_TESTING.md](docs/PROPERTY_TESTING.md) — Property-Based and Invariant Testing for Soroban Contracts

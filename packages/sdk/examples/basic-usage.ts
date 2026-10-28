@@ -1,5 +1,10 @@
 /**
  * @fileoverview Basic usage examples for the SignatureProvider SDK
+ *
+ * #1051 — SAFE BY DEFAULT: All code paths in this file use mock providers
+ * (`ProviderType.MOCK`) and perform no real network I/O and no real transaction
+ * submission. It is safe to run in CI with network access disabled.
+ *
  * @example
  *
  * // Basic provider creation and usage

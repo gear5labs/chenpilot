@@ -1,4 +1,9 @@
-import { createSocketContext, propagateSocketContext } from "../socketContext";
+import {
+  createSocketContext,
+  propagateSocketContext,
+  runWithSocketRequest,
+} from "../socketContext";
+import { getExecutionContext } from "../context";
 
 const mockSocket = {
   id: "socket-123",
@@ -62,6 +67,39 @@ describe("SocketContext", () => {
 
       const ctx = createSocketContext(mockSocket);
       expect(ctx.userId).toBeUndefined();
+    });
+  });
+
+  describe("request identifiers", () => {
+    it("always produces a requestId on the socket context", () => {
+      const ctx = createSocketContext(mockSocket);
+      expect(typeof ctx.requestId).toBe("string");
+      expect(ctx.requestId.length).toBeGreaterThan(0);
+    });
+
+    it("mints a fresh requestId per inbound socket request", () => {
+      let first: string | undefined;
+      let second: string | undefined;
+
+      runWithSocketRequest(mockSocket, "user-123", () => {
+        first = getExecutionContext()?.requestId;
+      });
+      runWithSocketRequest(mockSocket, "user-123", () => {
+        second = getExecutionContext()?.requestId;
+      });
+
+      expect(first).toBeTruthy();
+      expect(second).toBeTruthy();
+      expect(first).not.toBe(second);
+    });
+
+    it("exposes the requestId to the handler body for error payloads", () => {
+      runWithSocketRequest(mockSocket, "user-123", () => {
+        const ctx = getExecutionContext();
+        expect(ctx?.transport).toBe("websocket");
+        expect(ctx?.requestId).toBeTruthy();
+        expect(ctx?.userId).toBe("user-123");
+      });
     });
   });
 });

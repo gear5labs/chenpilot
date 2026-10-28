@@ -70,4 +70,50 @@ export class NetworkConfigService {
   }
 }
 
+const NETWORK_HINTS: Array<{ type: StellarNetworkType; pattern: RegExp }> = [
+  { type: "public", pattern: /\b(mainnet|pubnet|public\s+network)\b/i },
+  { type: "testnet", pattern: /\btestnet\b/i },
+  { type: "futurenet", pattern: /\bfuturenet\b/i },
+];
+
+const VAGUE_NETWORK_PHRASES = [
+  /\b(any|either|whichever|some)\s+network\b/i,
+  /\bwhich\s+network\b/i,
+  /\bon\s+(?:a|the)\s+network\b/i,
+];
+
+export interface NetworkClarification {
+  needsClarification: boolean;
+  question?: string;
+  detectedNetworks: StellarNetworkType[];
+}
+
+/**
+ * Decide whether a request names more than one network, or talks about a
+ * network without naming one. A request that names no network is not
+ * ambiguous: planning keeps the configured network.
+ */
+export function assessNetworkClarification(
+  request: string
+): NetworkClarification {
+  const text = typeof request === "string" ? request : "";
+  const detectedNetworks = NETWORK_HINTS.filter((hint) =>
+    hint.pattern.test(text)
+  ).map((hint) => hint.type);
+  const unique = [...new Set(detectedNetworks)];
+  const namesNoSingleNetwork = unique.length !== 1;
+  const vague = VAGUE_NETWORK_PHRASES.some((pattern) => pattern.test(text));
+
+  if (unique.length > 1 || (vague && namesNoSingleNetwork)) {
+    const choices = unique.length > 0 ? unique.join(", ") : "public, testnet, or futurenet";
+    return {
+      needsClarification: true,
+      detectedNetworks: unique,
+      question: `Which network should I use before planning: ${choices}? Reply with one of public, testnet, or futurenet.`,
+    };
+  }
+
+  return { needsClarification: false, detectedNetworks: unique };
+}
+
 export const networkConfig = NetworkConfigService.getInstance().getConfig();

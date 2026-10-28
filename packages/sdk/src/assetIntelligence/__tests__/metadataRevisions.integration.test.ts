@@ -26,6 +26,7 @@ describe('AssetIntelligence metadata revisions', () => {
     ai = new AssetIntelligence(config);
     jest.spyOn((ai as any).trustScorer, 'calculateTrustScore').mockResolvedValue({
       overall: 90,
+      confidence: 100,
       signals: [],
       verificationStatus: 'verified',
       lastUpdated: 0,

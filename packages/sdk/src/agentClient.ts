@@ -12,8 +12,15 @@ import {
   VaultOperationResult,
   AbortSignalLike,
 } from "./types";
-import { abortableSleep, combineSignals, isAbortError } from "./abort";
+import {
+  abortableSleep,
+  combineSignals,
+  isAbortError,
+  throwIfAborted,
+} from "./abort";
 import { ErrorCategory, SdkError } from "./errors";
+import { ErrorRegistry, SdkErrorCode } from "./errorRegistry";
+import { HTTP_STATUS_TO_SDK_CODE } from "./errorMapping";
 
 export interface IdempotencyKeyInput {
   namespace: string;
@@ -56,20 +63,57 @@ export class AgentRequestError extends SdkError {
     attempts: number,
     statusCode?: number
   ) {
-    const category =
-      statusCode !== undefined
-        ? categorizeHttpStatus(statusCode)
-        : ErrorCategory.TRANSPORT;
-    const code =
-      statusCode !== undefined ? `HTTP_${statusCode}` : "AGENT_REQUEST_FAILED";
-    const recoverable =
-      statusCode !== undefined ? RETRIABLE_STATUS_CODES.has(statusCode) : false;
+    // Resolve a *registered* SDK code rather than inventing `HTTP_<status>` /
+    // `AGENT_REQUEST_FAILED` strings that no consumer can switch on. The code
+    // comes from the public backend→SDK mapping contract (#1047).
+    const code = agentErrorCodeForStatus(statusCode);
+    const def = ErrorRegistry.require(code);
 
-    super({ category, code, message, recoverable });
+    super({
+      category: def.category,
+      code: def.code,
+      message,
+      recoverable: def.recoverable,
+      details: {
+        attempts,
+        ...(statusCode !== undefined ? { httpStatus: statusCode } : {}),
+      },
+    });
     this.name = "AgentRequestError";
     this.idempotencyKey = idempotencyKey;
     this.attempts = attempts;
     this.statusCode = statusCode;
+  }
+}
+
+/**
+ * Raised when the agent returns a 2xx response whose body is not valid JSON.
+ *
+ * Carries the registered `AGENT_BAD_RESPONSE` code and is never retried: a
+ * malformed body will not become well-formed on a subsequent attempt.
+ */
+export class AgentBadResponseError extends SdkError {
+  readonly idempotencyKey: string;
+  readonly attempts: number;
+
+  constructor(
+    message: string,
+    idempotencyKey: string,
+    attempts: number,
+    cause?: unknown
+  ) {
+    const def = ErrorRegistry.require("AGENT_BAD_RESPONSE");
+    super({
+      category: def.category,
+      code: def.code,
+      message,
+      recoverable: false,
+      details: { attempts },
+      cause,
+    });
+    this.name = "AgentBadResponseError";
+    this.idempotencyKey = idempotencyKey;
+    this.attempts = attempts;
   }
 }
 
@@ -96,8 +140,33 @@ type FetchLike = (
 
 const RETRIABLE_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Maps an HTTP status code to a top-level error category.
+ *
+ * This is the public, consumer-visible mapping from a backend transport
+ * failure to an {@link ErrorCategory}. Keep it in sync with the backend error
+ * contract (`docs/PLATFORM_VALIDATION_CONTRACTS.md`); the error-mapping
+ * contract test enumerates the statuses this must handle.
+ */
+export function categorizeHttpStatus(status: number): ErrorCategory {
+  if (status === 429) return ErrorCategory.POLICY;
+  if (status === 400 || status === 422) return ErrorCategory.VALIDATION;
+  if (status === 401 || status === 403) return ErrorCategory.POLICY;
+  if (status >= 500) return ErrorCategory.EXECUTION;
+  return ErrorCategory.TRANSPORT;
+}
+
+/**
+ * Pick the registered {@link SdkErrorCode} for an agent HTTP failure.
+ *
+ * Always returns a code present in {@link ErrorRegistry}. A 401 specifically
+ * maps to `AGENT_SESSION_EXPIRED` (the agent session must be refreshed) rather
+ * than the generic `UNAUTHORIZED`, since agent calls carry a session token.
+ */
+export function agentErrorCodeForStatus(status?: number): SdkErrorCode {
+  if (status === undefined) return "TRANSPORT_ERROR";
+  if (status === 401) return "AGENT_SESSION_EXPIRED";
+  return HTTP_STATUS_TO_SDK_CODE[status] ?? "TRANSPORT_ERROR";
 }
 
 function canonicalize(value: unknown): unknown {
@@ -176,6 +245,10 @@ export class AgentClient {
   async query<T = AgentResponse>(
     request: AgentQueryRequest
   ): Promise<AgentQueryResult<T>> {
+    // Fail fast (and identically to every other public method) when the caller
+    // has already cancelled: no fetch is dispatched, no retry backoff runs.
+    throwIfAborted(request.signal);
+
     const idempotencyKey =
       request.idempotencyKey ??
       generateIdempotencyKey({
@@ -230,26 +303,51 @@ export class AgentClient {
           }
 
           lastErrorMessage = `Agent query failed: ${message}`;
-          await sleep(retryDelayMs * attempts);
+          await abortableSleep(
+            retryDelayMs * attempts,
+            timed.signal as AbortSignalLike
+          );
           continue;
         }
 
-        const parsed = (await response.json()) as QueryEnvelope<T>;
+        let parsed: QueryEnvelope<T>;
+        try {
+          parsed = (await response.json()) as QueryEnvelope<T>;
+        } catch (parseError) {
+          // A 2xx with an unparseable body is a contract violation by the
+          // agent, not a transient network failure: surface AGENT_BAD_RESPONSE
+          // immediately instead of retrying.
+          const def = ErrorRegistry.require("AGENT_BAD_RESPONSE");
+          throw new AgentBadResponseError(
+            def.message,
+            idempotencyKey,
+            attempts,
+            parseError
+          );
+        }
+
         return {
           idempotencyKey,
           attempts,
           result: parsed.result,
         };
       } catch (error) {
-        const isAbort =
-          error instanceof Error &&
-          (error.name === "AbortError" || error.message.includes("aborted"));
         const isNetwork =
           error instanceof TypeError ||
           (error instanceof Error &&
             error.message.toLowerCase().includes("network"));
 
-        if (error instanceof AgentRequestError) {
+        if (
+          error instanceof AgentRequestError ||
+          error instanceof AgentBadResponseError
+        ) {
+          throw error;
+        }
+
+        // Caller-initiated cancellation (or a timeout) must propagate as an
+        // abort error, never be wrapped in AgentRequestError or retried. This
+        // keeps the abort contract identical across every public SDK method.
+        if (isAbortError(error)) {
           throw error;
         }
 

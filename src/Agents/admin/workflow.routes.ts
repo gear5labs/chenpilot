@@ -9,10 +9,22 @@ import {
   EventCategory,
 } from "../../AuditLog/auditEvent.types";
 import logger from "../../config/logger";
+import {
+  validateRequestBody,
+  updatePolicySchema,
+  initiateWorkflowSchema,
+  workflowDecisionSchema,
+} from "./adminValidation";
+import { IdempotencyService } from "../../Reliability/IdempotencyService";
+import { requireAdminIdempotency } from "./adminIdempotency";
+import { container } from "tsyringe";
 
 const router = Router();
 
 router.use(authenticateToken);
+
+// Initialize idempotency service
+const idempotencyService = container.resolve(IdempotencyService);
 
 router.get("/policies", requireAdminAuth(), async (_req, res) => {
   try {
@@ -31,7 +43,7 @@ router.get("/policies", requireAdminAuth(), async (_req, res) => {
   }
 });
 
-router.put("/policies/:actionType", requireAdminAuth(), async (req, res) => {
+router.put("/policies/:actionType", requireAdminAuth(), requireAdminIdempotency(idempotencyService), async (req, res) => {
   try {
     const { actionType } = req.params;
     if (
@@ -45,10 +57,16 @@ router.put("/policies/:actionType", requireAdminAuth(), async (req, res) => {
       });
     }
 
-    const updates = {
-      ...req.body,
-      allowedIpRanges: req.body.allowedIpRanges,
-    };
+    // Validate request body
+    const validation = validateRequestBody(updatePolicySchema, req.body);
+    if (!validation.success) {
+      return res.status(400).json({
+        success: false,
+        message: validation.error,
+      });
+    }
+
+    const updates = validation.data;
 
     const policy = await adminWorkflowService.upsertPolicy(
       actionType as SensitiveActionType,
@@ -78,9 +96,18 @@ router.put("/policies/:actionType", requireAdminAuth(), async (req, res) => {
   }
 });
 
-router.post("/initiate", requireAdminAuth(), async (req, res) => {
+router.post("/initiate", requireAdminAuth(), requireAdminIdempotency(idempotencyService), async (req, res) => {
   try {
-    const { actionType, payload, metadata, ttlMinutes } = req.body;
+    // Validate request body
+    const validation = validateRequestBody(initiateWorkflowSchema, req.body);
+    if (!validation.success) {
+      return res.status(400).json({
+        success: false,
+        message: validation.error,
+      });
+    }
+
+    const { actionType, payload, metadata, ttlMinutes } = validation.data;
 
     if (
       !actionType ||
@@ -168,9 +195,18 @@ router.get("/instances/:id", requireAdminAuth(), async (req, res) => {
   }
 });
 
-router.post("/instances/:id/approve", requireAdminAuth(), async (req, res) => {
+router.post("/instances/:id/approve", requireAdminAuth(), requireAdminIdempotency(idempotencyService), async (req, res) => {
   try {
-    const { comment } = req.body;
+    // Validate request body
+    const validation = validateRequestBody(workflowDecisionSchema, req.body);
+    if (!validation.success) {
+      return res.status(400).json({
+        success: false,
+        message: validation.error,
+      });
+    }
+
+    const { comment } = validation.data;
     const result = await adminWorkflowService.approveInstance(
       req.params.id,
       req.user!.userId,
@@ -192,9 +228,18 @@ router.post("/instances/:id/approve", requireAdminAuth(), async (req, res) => {
   }
 });
 
-router.post("/instances/:id/reject", requireAdminAuth(), async (req, res) => {
+router.post("/instances/:id/reject", requireAdminAuth(), requireAdminIdempotency(idempotencyService), async (req, res) => {
   try {
-    const { comment } = req.body;
+    // Validate request body
+    const validation = validateRequestBody(workflowDecisionSchema, req.body);
+    if (!validation.success) {
+      return res.status(400).json({
+        success: false,
+        message: validation.error,
+      });
+    }
+
+    const { comment } = validation.data;
     const result = await adminWorkflowService.rejectInstance(
       req.params.id,
       req.user!.userId,

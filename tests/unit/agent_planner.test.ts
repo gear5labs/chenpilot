@@ -103,9 +103,14 @@ jest.mock("../../src/services/networkConfig", () => ({
       return new (this as unknown as { new (): unknown })();
     }
   },
+  assessNetworkClarification: jest.fn(() => ({
+    needsClarification: false,
+    detectedNetworks: [],
+  })),
 }));
 
 import { AgentPlanner } from "../../src/Agents/planner/AgentPlanner";
+import { assessNetworkClarification } from "../../src/services/networkConfig";
 import { PlanExecutor } from "../../src/Agents/planner/PlanExecutor";
 import { toolRegistry } from "../../src/Agents/registry/ToolRegistry";
 import { walletTool } from "../../src/Agents/tools/wallet";
@@ -126,6 +131,22 @@ describe("AgentPlanner", () => {
   });
 
   describe("createPlan", () => {
+    it("asks which network to use before planning an ambiguous request", async () => {
+      (assessNetworkClarification as jest.Mock).mockReturnValueOnce({
+        needsClarification: true,
+        question:
+          "Which network should I use before planning: testnet, public? Reply with one of public, testnet, or futurenet.",
+        detectedNetworks: ["testnet", "public"],
+      });
+
+      await expect(
+        planner.createPlan({
+          userId: "test-user",
+          userInput: "Swap 10 XLM on testnet and mainnet",
+        })
+      ).rejects.toThrow(/Which network should I use before planning/);
+    });
+
     it("should create a plan for simple balance check", async () => {
       const context = {
         userId: "test-user",

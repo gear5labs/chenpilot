@@ -51,12 +51,102 @@ const STELLAR_NETWORKS: Record<
   },
 };
 
+// Environment determination
+const nodeEnv = process.env.NODE_ENV || "development";
+
 // Validate JWT secret meets minimum security requirements
 const jwtSecret = process.env.JWT_SECRET || "secret-token";
 if (jwtSecret.length < 32) {
   throw new Error(
     "JWT_SECRET must be at least 32 characters long. Set a strong secret in your environment."
   );
+}
+
+// Known placeholder/test credential values that must not be used in production
+const KNOWN_PLACEHOLDER_VALUES = new Set([
+  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "sk-test-placeholder",
+  "test-anthropic-key",
+  "mock-anthropic-key-for-test-suite",
+  "test-only-jwt-secret-0123456789abcdef",
+  "01234567890123456789012345678901",
+  "default_test_jwt_secret_32_chars_long_12345",
+  "secret-token",
+  "default-dev-signing-key",
+  "chenpilot-capability-secret-key-default-2026",
+]);
+
+// Reject known placeholder/test credentials in production
+if (nodeEnv === "production") {
+  const sensitiveEnvVars = [
+    "JWT_SECRET",
+    "ENCRYPTION_KEY",
+    "ANTHROPIC_API_KEY",
+    "SPONSOR_SECRET_KEY",
+    "CAPABILITY_SECRET_KEY",
+    "REVOCATION_SIGNING_KEY",
+  ];
+
+  for (const envVar of sensitiveEnvVars) {
+    const value = process.env[envVar];
+    if (value && KNOWN_PLACEHOLDER_VALUES.has(value)) {
+      throw new Error(
+        `Security violation: ${envVar} contains a known placeholder/test value. This must be replaced with a production secret before deployment.`
+      );
+    }
+  }
+}
+
+// Validate CORS configuration for production
+const allowedOrigins = process.env.ALLOWED_ORIGINS;
+
+if (nodeEnv === "production") {
+  if (!allowedOrigins) {
+    throw new Error(
+      "ALLOWED_ORIGINS must be set in production. Use a comma-separated list of allowed origins."
+    );
+  }
+
+  const origins = allowedOrigins.split(",").map((o) => o.trim());
+
+  // Reject wildcard in production
+  if (origins.includes("*")) {
+    throw new Error(
+      "ALLOWED_ORIGINS cannot contain wildcard (*) in production. Specify explicit origins."
+    );
+  }
+
+  // Validate each origin format
+  for (const origin of origins) {
+    if (!origin) {
+      throw new Error("ALLOWED_ORIGINS contains empty origin. Remove empty entries.");
+    }
+
+    try {
+      const url = new URL(origin);
+
+      // Only allow http/https schemes
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error(
+          `ALLOWED_ORIGINS contains invalid protocol '${url.protocol}'. Only http and https are allowed.`
+        );
+      }
+
+      // Ensure origin has a hostname
+      if (!url.hostname) {
+        throw new Error(
+          `ALLOWED_ORIGINS contains invalid origin '${origin}' with no hostname.`
+        );
+      }
+    } catch (err) {
+      if (err instanceof Error) {
+        throw new Error(
+          `ALLOWED_ORIGINS contains malformed origin '${origin}': ${err.message}`
+        );
+      }
+      throw new Error(`ALLOWED_ORIGINS contains malformed origin '${origin}'.`);
+    }
+  }
 }
 
 const encryptionKey = process.env.ENCRYPTION_KEY?.trim();

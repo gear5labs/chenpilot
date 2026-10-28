@@ -60,6 +60,22 @@ describe("DifferentialEvaluator", () => {
       expect(testCases.some(tc => tc.category === "safety_policy")).toBe(true);
     });
 
+    it("should include multilingual financial-intent cases (#804)", () => {
+      evaluator.loadStandardTests();
+      const testCases = evaluator.getTestCases();
+
+      const multilingual = testCases.filter(tc => tc.id.startsWith("multilingual_"));
+      expect(multilingual.length).toBeGreaterThanOrEqual(3);
+      // Non-English financial intents must cover both high-risk rejection and
+      // a benign tool-execution path so fallback models cannot silently change
+      // safety behavior by language.
+      expect(multilingual.some(tc => tc.category === "high_risk")).toBe(true);
+      expect(multilingual.some(tc => tc.category === "tool_execution")).toBe(true);
+      for (const tc of multilingual) {
+        expect(tc.prompt.length).toBeGreaterThan(0);
+      }
+    });
+
     it("should clear test cases", () => {
       evaluator.addTestCase({
         id: "test1",
