@@ -785,6 +785,48 @@ describe("validateDeFiIntent", () => {
       );
     });
   });
+
+  describe("Informational Queries vs Execution Requests", () => {
+    it("should classify informational queries (get_balance, get_price) as non-execution or query intent without requiring execution parameters", () => {
+      const infoIntent: WorkflowStep = {
+        action: "get_balance",
+        payload: {
+          token: "USDC",
+        },
+      };
+
+      const result = validateDeFiIntent(infoIntent);
+      expect(result.isValid).toBe(true);
+    });
+
+    it("should separate informational query from execution request requiring amount and asset validation", () => {
+      const queryStep: WorkflowStep = {
+        action: "get_price",
+        payload: {
+          token: "XLM",
+        },
+      };
+      const queryResult = validateDeFiIntent(queryStep);
+      expect(queryResult.isValid).toBe(true);
+
+      const executionStep: WorkflowStep = {
+        action: "swap",
+        payload: {
+          from: "XLM",
+          to: "USDC",
+          // missing amount
+        },
+      };
+      const execResult = validateDeFiIntent(executionStep);
+      expect(execResult.isValid).toBe(false);
+      expect(execResult.errors).toContainEqual(
+        expect.objectContaining({
+          field: "amount",
+          code: "MISSING_AMOUNT",
+        })
+      );
+    });
+  });
 });
 
 describe("YieldBloxAdapter — lending position mapping", () => {
