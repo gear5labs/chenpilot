@@ -15,6 +15,7 @@ import authRoutes from "../Auth/auth.routes";
 import userPreferencesRoutes from "../Auth/userPreferences.routes";
 import botIdentityRoutes from "../Auth/botIdentity.routes";
 import dataExportRoutes from "../services/dataExport.routes";
+import memoryRoutes from "../Agents/memory/memory.routes";
 import contractMetadataRoutes from "../services/contracts/contractMetadata.routes";
 import contractIdentityRoutes from "../ContractIdentity/contractIdentity.routes";
 import horizonProxyRoutes from "./horizonProxy.routes";
@@ -73,6 +74,9 @@ router.use("/bot-identity", botIdentityRoutes);
 
 // Mount data export routes
 router.use("/export", dataExportRoutes);
+
+// Ownership-scoped agent memory inspection and deletion (#801)
+router.use("/memory", memoryRoutes);
 
 // Mount contract metadata discovery routes
 router.use("/contracts", contractMetadataRoutes);
