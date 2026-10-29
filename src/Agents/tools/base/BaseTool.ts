@@ -109,6 +109,8 @@ export abstract class BaseTool<
       errorCategory,
       errorCode,
     };
+  }
+
   /**
    * Validate capability grant locally prior to executing tool side effects
    */
