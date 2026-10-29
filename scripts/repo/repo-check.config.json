@@ -2,11 +2,23 @@
   "generatedFiles": {
     "policy": "docs/GENERATED_FILES_POLICY.md",
     "emitted": [
-      { "generated": ".js", "source": ".ts" },
-      { "generated": ".d.ts", "source": ".ts" },
-      { "generated": ".js.map", "source": ".ts" }
+      {
+        "generated": ".js",
+        "source": ".ts"
+      },
+      {
+        "generated": ".d.ts",
+        "source": ".ts"
+      },
+      {
+        "generated": ".js.map",
+        "source": ".ts"
+      }
     ],
-    "markers": ["@generated", "DO NOT EDIT"],
+    "markers": [
+      "@generated",
+      "DO NOT EDIT"
+    ],
     "markerLines": 5,
     "tracked": [
       {
@@ -28,22 +40,36 @@
       },
       {
         "class": "soroban-test-snapshot",
-        "detect": ["**/test_snapshots/**"],
-        "allow": ["contracts/*/test_snapshots/**/*.json"],
+        "detect": [
+          "**/test_snapshots/**"
+        ],
+        "allow": [
+          "contracts/*/test_snapshots/**/*.json"
+        ],
         "generator": "cargo test (soroban-sdk testutils)",
         "reason": "Golden ledger state compared by contract tests; reviewed in the PR that changes it."
       },
       {
         "class": "contract-storage-snapshot",
-        "detect": ["**/*.snapshot.json"],
-        "allow": ["contracts/snapshots/*/v*.snapshot.json"],
+        "detect": [
+          "**/*.snapshot.json"
+        ],
+        "allow": [
+          "contracts/snapshots/*/v*.snapshot.json"
+        ],
         "generator": "scripts/extract-storage-schema.ts",
         "reason": "Released storage layout that upgrade compatibility checks compare against."
       },
       {
         "class": "generated-doc",
-        "detect": ["docs/TOOLS.md", "docs/security/privilege-graph.json"],
-        "allow": ["docs/TOOLS.md", "docs/security/privilege-graph.json"],
+        "detect": [
+          "docs/TOOLS.md",
+          "docs/security/privilege-graph.json"
+        ],
+        "allow": [
+          "docs/TOOLS.md",
+          "docs/security/privilege-graph.json"
+        ],
         "generator": "npm run gen:docs / npm run authz:graph",
         "reason": "Reviewable reference output; authz:graph:check fails CI when it drifts from code."
       }
@@ -51,7 +77,11 @@
     "buildOutputs": [
       {
         "class": "compiled-output",
-        "detect": ["dist/**", "**/dist/**", "**/*.tsbuildinfo"],
+        "detect": [
+          "dist/**",
+          "**/dist/**",
+          "**/*.tsbuildinfo"
+        ],
         "probes": [
           "dist/index.js",
           "packages/sdk/dist/index.d.ts",
@@ -61,8 +91,13 @@
       },
       {
         "class": "contract-build-output",
-        "detect": ["contracts/target/**", "**/target/**"],
-        "probes": ["contracts/target/release/core_vault.wasm"],
+        "detect": [
+          "contracts/target/**",
+          "**/target/**"
+        ],
+        "probes": [
+          "contracts/target/release/core_vault.wasm"
+        ],
         "generator": "cargo build / cargo test"
       },
       {
@@ -88,7 +123,11 @@
       },
       {
         "class": "test-report",
-        "detect": ["coverage/**", "**/coverage/**", "redteam-report.json"],
+        "detect": [
+          "coverage/**",
+          "**/coverage/**",
+          "redteam-report.json"
+        ],
         "probes": [
           "coverage/lcov.info",
           "packages/sdk/coverage/lcov.info",
@@ -98,7 +137,9 @@
       },
       {
         "class": "packed-artifact",
-        "detect": ["**/*.tgz"],
+        "detect": [
+          "**/*.tgz"
+        ],
         "probes": [
           "chen-pilot-sdk-core-0.1.0.tgz",
           "packages/sdk/chen-pilot-sdk-core-0.1.0.tgz"
@@ -108,12 +149,27 @@
     ]
   },
   "dependencyAliases": {
-    "workspaces": [".", "packages/sdk", "packages/bot"],
-    "sources": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.mjs", "**/*.cjs"],
-    "exclude": ["tests/repo/**"],
+    "workspaces": [
+      ".",
+      "packages/sdk",
+      "packages/bot"
+    ],
+    "sources": [
+      "**/*.ts",
+      "**/*.tsx",
+      "**/*.js",
+      "**/*.mjs",
+      "**/*.cjs"
+    ],
+    "exclude": [
+      "tests/repo/**"
+    ],
     "groups": [
       {
-        "packages": ["@stellar/stellar-sdk", "stellar-sdk"],
+        "packages": [
+          "@stellar/stellar-sdk",
+          "stellar-sdk"
+        ],
         "reason": "stellar-sdk is the deprecated name of @stellar/stellar-sdk; a workspace declares at most one, and only one it imports."
       }
     ]
@@ -128,14 +184,105 @@
       "repository.url",
       "main"
     ],
-    "entryPoints": ["main", "types", "typings", "module", "exports", "bin"],
-    "packages": [".", "packages/sdk"]
+    "entryPoints": [
+      "main",
+      "types",
+      "typings",
+      "module",
+      "exports",
+      "bin"
+    ],
+    "packages": [
+      ".",
+      "packages/sdk"
+    ]
+  },
+  "duplicateDependencies": {
+    "workspaces": [".", "packages/sdk", "packages/bot"],
+    "allow": [
+      { "name": "@types/jest", "reason": "Root uses Jest 30 types; sdk/bot pinned to Jest 29 types matching their jest major." },
+      { "name": "@types/node", "reason": "Root targets Node 25 types; sdk/bot pinned to Node 20 LTS types." },
+      { "name": "dotenv", "reason": "Root uses dotenv 17; bot pinned to dotenv 16 for telegraf compatibility." },
+      { "name": "jest", "reason": "Root uses Jest 30; sdk/bot pinned to Jest 29." }
+    ]
   },
   "installWorkflow": {
     "packageManager": "pnpm",
-    "command": ["pnpm", "install", "--frozen-lockfile"],
-    "lockfiles": ["pnpm-lock.yaml"],
-    "docs": ["README.md", "CONTRIBUTING.md"],
+    "command": [
+      "pnpm",
+      "install",
+      "--frozen-lockfile"
+    ],
+    "lockfiles": [
+      "pnpm-lock.yaml"
+    ],
+    "docs": [
+      "README.md",
+      "CONTRIBUTING.md"
+    ],
     "workflowsDir": ".github/workflows"
+  },
+  "packageContents": {
+    "packages": {
+      ".": {
+        "allow": [
+          "package.json",
+          "README.md",
+          "dist/**"
+        ],
+        "deny": [
+          "**/.env",
+          "**/.env.*",
+          "**/*.log",
+          "**/npm-debug.log*",
+          "**/__tests__/**",
+          "**/*.test.*",
+          "**/*.spec.*",
+          "tests/**",
+          "test/**",
+          "**/fixtures/**",
+          "**/__fixtures__/**",
+          "**/coverage/**",
+          ".github/**",
+          ".kiro/**",
+          ".kilo/**",
+          ".trae/**",
+          ".agent/**",
+          "src/**",
+          "scripts/**",
+          "contracts/**"
+        ]
+      },
+      "packages/sdk": {
+        "allow": [
+          "package.json",
+          "README.md",
+          "dist/**",
+          "examples/**"
+        ],
+        "deny": [
+          "**/.env",
+          "**/.env.*",
+          "**/*.log",
+          "**/npm-debug.log*",
+          "**/__tests__/**",
+          "**/*.test.*",
+          "**/*.spec.*",
+          "tests/**",
+          "test/**",
+          "**/fixtures/**",
+          "**/__fixtures__/**",
+          "**/coverage/**",
+          "**/benchmarks/**",
+          "src/**",
+          "scripts/**"
+        ]
+      }
+    }
+  },
+  "tsCompat": {
+    "minimumTypeScript": "4.5.2",
+    "consumerFixture": "packages/sdk/__fixtures__/consumption/typescript/consumer.ts",
+    "notes": "4.5.2 is the oldest stable TypeScript satisfying packages/sdk peerDependencies.typescript >=4.5.0"
   }
 }

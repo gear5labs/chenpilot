@@ -30,6 +30,12 @@ export interface CapabilityGrant {
   assetLimits?: Record<string, number>;
   /** Maximum number of tool invocations allowed (default 1 for single-purpose step grants) */
   maxCalls?: number;
+  /** Maximum recursion depth allowed for delegated sub-plans */
+  maxDepth?: number;
+  /** Maximum expanded step count allowed across delegated sub-plans */
+  maxExpandedSteps?: number;
+  /** Current recursion depth */
+  currentDepth: number;
   /** Number of times this grant has been invoked */
   usedCalls: number;
   /** Issuance timestamp (epoch ms) */
@@ -52,6 +58,8 @@ export interface IssueGrantParams {
   allowedActions: string[];
   assetLimits?: Record<string, number>;
   maxCalls?: number;
+  maxDepth?: number;
+  maxExpandedSteps?: number;
   ttlMs?: number;
 }
 
@@ -64,6 +72,8 @@ export interface AttenuateGrantParams {
   allowedActions?: string[];
   assetLimits?: Record<string, number>;
   maxCalls?: number;
+  maxDepth?: number;
+  maxExpandedSteps?: number;
   ttlMs?: number;
 }
 
@@ -90,6 +100,8 @@ export type CapabilityErrorCode =
   | "NETWORK_MISMATCH"
   | "ASSET_LIMIT_EXCEEDED"
   | "CALL_LIMIT_EXCEEDED"
+  | "DEPTH_LIMIT_EXCEEDED"
+  | "STEP_COUNT_LIMIT_EXCEEDED"
   | "REPLAY_DETECTED"
   | "CONFUSED_DEPUTY"
   | "AUTHORITY_BROADENING";

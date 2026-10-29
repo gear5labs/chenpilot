@@ -126,7 +126,11 @@ const options: swaggerJsdoc.Options = {
       },
     },
   },
-  apis: ["./src/Gateway/api.ts", "./src/Gateway/routes.ts"],
+  apis: [
+    "./src/Gateway/api.ts",
+    "./src/Gateway/routes.ts",
+    "./src/services/dataExport.routes.ts",
+  ],
 };
 
 export const swaggerSpec = swaggerJsdoc(options);

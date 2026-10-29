@@ -87,7 +87,7 @@ Evaluate or execute optimal multi-hop trading paths across Stellar DEX.
 
 ### reconciliation_tool
 
-Detect and surface drift between backend records and on-chain reality. Checks transaction status, wallet balances, and contract state for inconsistencies.
+Detect and surface drift between backend records and on-chain reality. Checks transaction status, wallet balances, contract state for inconsistencies. Optionally evaluates system-level accounting invariants for aggregate balance integrity, pending operation health, and completeness.
 
 **Version:** 1.0.0
 
@@ -322,7 +322,7 @@ Fetch statistics for a Stellar AMM liquidity pool by pool ID, including reserves
 
 ### strategy_registry
 
-Interact with the Yield-Aggregator Strategy Registry to vote on Stellar DEX pools or check verification status.
+Interact with the Yield‑Aggregator Strategy Registry to vote on Stellar DEX pools, revoke votes, or retrieve the verified strategy.
 
 **Version:** 1.0.0
 
@@ -330,15 +330,17 @@ Interact with the Yield-Aggregator Strategy Registry to vote on Stellar DEX pool
 
 | Parameter | Type | Required | Description | Options |
 | --- | --- | --- | --- | --- |
-| action | string | Yes | Action to perform:  | - |
-| poolId | string | No | 64-character hexadecimal Stellar AMM liquidity pool ID | - |
+| action | string | Yes | Action to perform:  | `vote`, `revoke_vote`, `get_strategy`, `is_verified` |
+| poolId | string | No | 64‑character hexadecimal Stellar AMM liquidity pool ID | - |
 | aiAgent | string | No | The public key of the AI agent casting the vote (required for  | - |
+| revokeVote | boolean | No | If true, the existing vote will be revoked instead of added | - |
 
 #### Examples
 
-- Vote for pool abc123...
-- What is the current yield strategy?
-- Is this pool verified by the registry?
+- vote pool 0123... with agent GAB...
+- revoke_vote pool 0123... with agent GAB...
+- get_strategy
+- is_verified pool 0123...
 
 ---
 

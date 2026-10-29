@@ -321,6 +321,49 @@ describe("Capability Attenuation System (Issue #633)", () => {
       // Child expiry must not exceed parent expiry
       expect(childGrant.expiresAt).toBeLessThanOrEqual(parentGrant.expiresAt);
     });
+
+    it("should enforce delegated plan recursion depth and step count bounds", () => {
+      const rootGrant = capabilityManager.issueGrant({
+        planId: "plan_bound_01",
+        userId: "user_alice",
+        allowedActions: ["mock_price_tool"],
+        maxDepth: 2,
+        maxExpandedSteps: 10,
+      });
+
+      expect(rootGrant.currentDepth).toBe(0);
+
+      // Depth 1 attenuation
+      const childGrant = capabilityManager.attenuateGrant({
+        parentGrant: rootGrant,
+        subPlanId: "sub_01",
+        maxDepth: 2,
+      });
+      expect(childGrant.currentDepth).toBe(1);
+
+      // Depth 2 attenuation
+      const grandchildGrant = capabilityManager.attenuateGrant({
+        parentGrant: childGrant,
+        subPlanId: "sub_02",
+      });
+      expect(grandchildGrant.currentDepth).toBe(2);
+
+      // Depth 3 attenuation should exceed maxDepth 2
+      expect(() => {
+        capabilityManager.attenuateGrant({
+          parentGrant: grandchildGrant,
+          subPlanId: "sub_03",
+        });
+      }).toThrow(AuthorityBroadeningError);
+
+      // Attempting to broaden depth limit should also fail
+      expect(() => {
+        capabilityManager.attenuateGrant({
+          parentGrant: rootGrant,
+          maxDepth: 5,
+        });
+      }).toThrow(AuthorityBroadeningError);
+    });
   });
 
   describe("3. Confused-Deputy Attack Defenses", () => {

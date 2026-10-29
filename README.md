@@ -379,6 +379,64 @@ Reconnect resumes from a validated cursor:
 Load tests cover fan-out, disconnect storms, and stalled consumers under
 `test/load/realtime-flow-control.load.ts`.
 
+## Realtime Subscriptions and Limits
+
+Room subscriptions are bounded and centrally validated so a client cannot grow
+room state without an explicit quota.
+
+### Subscription limits
+
+| Limit | Env var | Default |
+| ----- | ------- | ------- |
+| Per socket | `REALTIME_MAX_SUBSCRIPTIONS_PER_SOCKET` | `50` |
+| Per user (across all of that user's sockets) | `REALTIME_MAX_SUBSCRIPTIONS_PER_USER` | `200` |
+
+A "subscription" is one `(socket, room)` pair. Subscribing to a room the socket
+already occupies is idempotent and does not consume an extra slot. Slots are
+released on `unsubscribe:*` and fully reclaimed when the socket disconnects.
+
+### Room names and identifiers
+
+Every room name is built through `src/Gateway/roomNames.ts` (`buildRoomName`).
+Caller-supplied identifiers must be 1–128 characters, start with an
+alphanumeric character, and contain only `A-Z a-z 0-9 . _ -`. Identifiers that
+are empty, oversized, malformed, or contain the `:` delimiter are rejected with
+`INVALID_IDENTIFIER` before any join or leave.
+
+### Subscribe / unsubscribe events
+
+| Event | Payload | Effect |
+| ----- | ------- | ------ |
+| `subscribe:transactions` | `transactionId?` | Join `transaction:<id>` |
+| `subscribe:bot-alerts` | `botId?` | Join `bot:<id>`, or `bot:all` when omitted |
+| `unsubscribe:transactions` | `transactionId` | Leave `transaction:<id>` for this socket only |
+| `unsubscribe:bot-alerts` | `botId?` | Leave `bot:<id>` or `bot:all` for this socket only |
+
+Unsubscribe is idempotent: leaving a room the socket is not in reports
+`wasSubscribed: false` and is still a success. Only the requesting socket
+leaves the room; other subscribers are unaffected. Successful unsubscribes
+emit an `unsubscribed` acknowledgement:
+
+```json
+{
+  "channel": "transactions",
+  "transactionId": "abc",
+  "wasSubscribed": true,
+  "requestId": "…"
+}
+```
+
+Errors (auth, limits, invalid identifiers) are emitted on `error` and always
+carry a `requestId` for support correlation:
+
+```json
+{
+  "message": "Per-socket subscription limit of 50 reached. Unsubscribe before adding more.",
+  "code": "SUBSCRIPTION_LIMIT_EXCEEDED",
+  "requestId": "…"
+}
+```
+
 ## Rate Limiting In Multi-Instance Deployments
 
 Gateway rate limiting is configured in

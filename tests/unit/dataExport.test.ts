@@ -1,9 +1,11 @@
-import { DataExportService } from "../../src/services/DataExportService";
+import { DataExportService, ExportOwnershipError } from "../../src/services/DataExportService";
 import { User } from "../../src/Auth/user.entity";
 import { Contact } from "../../src/Contacts/contact.entity";
 import { RefreshToken } from "../../src/Auth/refreshToken.entity";
 import { memoryStore } from "../../src/Agents/memory/memory";
 import AppDataSource from "../../src/config/Datasource";
+import { auditLogService } from "../../src/AuditLog/auditLog.service";
+import { AuditAction, AuditSeverity } from "../../src/AuditLog/auditLog.entity";
 
 jest.mock("../../src/config/Datasource");
 jest.mock("../../src/Agents/memory/memory");
@@ -394,6 +396,175 @@ describe("DataExportService", () => {
 
       expect(result.conversationHistory.totalEntries).toBe(1000);
       expect(result.conversationHistory.entries).toHaveLength(1000);
+    });
+  });
+
+  describe("Ownership & Scope Verification at Request Time", () => {
+    it("should allow export when requested scope matches authenticated principal", async () => {
+      const mockUser: Partial<User> = {
+        id: "user-123",
+        name: "testuser",
+        address: "GTEST123",
+        tokenType: "XLM",
+        role: "user",
+        isDeployed: false,
+        isFunded: false,
+        isEmailVerified: false,
+        createdAt: new Date("2024-01-01"),
+        updatedAt: new Date("2024-01-01"),
+      };
+
+      mockUserRepository.findOne.mockResolvedValue(mockUser);
+      mockContactRepository.find.mockResolvedValue([]);
+      mockRefreshTokenRepository.find.mockResolvedValue([]);
+      (memoryStore.get as jest.Mock).mockReturnValue([]);
+
+      const result = await dataExportService.exportUserData("user-123", {
+        userId: "user-123",
+      });
+      expect(result.profile.id).toBe("user-123");
+    });
+
+    it("should reject export with ExportOwnershipError when requested scope mismatches principal", async () => {
+      await expect(
+        dataExportService.exportUserData("user-123", {
+          userId: "victim-user",
+        })
+      ).rejects.toThrow(ExportOwnershipError);
+
+      expect(auditLogService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "user-123",
+          action: AuditAction.PERMISSION_DENIED,
+          severity: AuditSeverity.WARNING,
+          metadata: expect.objectContaining({
+            requestedUserId: "victim-user",
+            authenticatedUserId: "user-123",
+            reason: "cross_user_export_scope_denied",
+          }),
+        })
+      );
+    });
+  });
+
+  describe("Asynchronous Export & Cross-User Export ID Access", () => {
+    const mockUserA: Partial<User> = {
+      id: "user-A",
+      name: "alice",
+      address: "GALICE",
+      tokenType: "XLM",
+      role: "user",
+      isDeployed: true,
+      isFunded: true,
+      isEmailVerified: true,
+      createdAt: new Date("2024-01-01"),
+      updatedAt: new Date("2024-01-01"),
+    };
+
+    beforeEach(() => {
+      mockUserRepository.findOne.mockImplementation(({ where }) => {
+        if (where.id === "user-A") return Promise.resolve(mockUserA);
+        return Promise.resolve(null);
+      });
+      mockContactRepository.find.mockResolvedValue([]);
+      mockRefreshTokenRepository.find.mockResolvedValue([]);
+      (memoryStore.get as jest.Mock).mockReturnValue([]);
+    });
+
+    it("should allow a user to initiate an async export and retrieve it by exportId", async () => {
+      const job = await dataExportService.requestAsyncExport("user-A");
+      expect(job.id).toBeDefined();
+      expect(job.userId).toBe("user-A");
+      expect(job.status).toBe("completed");
+
+      const retrieved = await dataExportService.getExportJob(job.id, "user-A");
+      expect(retrieved).not.toBeNull();
+      expect(retrieved?.id).toBe(job.id);
+      expect(retrieved?.userId).toBe("user-A");
+
+      const data = await dataExportService.getExportData(job.id, "user-A");
+      expect(data.profile.id).toBe("user-A");
+
+      const buffer = await dataExportService.getExportBuffer(job.id, "user-A");
+      expect(Buffer.isBuffer(buffer)).toBe(true);
+    });
+
+    it("should reject async export request when requested scope mismatches principal and audit denial", async () => {
+      await expect(
+        dataExportService.requestAsyncExport("user-A", { userId: "user-B" })
+      ).rejects.toThrow(ExportOwnershipError);
+
+      expect(auditLogService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "user-A",
+          action: AuditAction.PERMISSION_DENIED,
+          severity: AuditSeverity.WARNING,
+          metadata: expect.objectContaining({
+            requestedUserId: "user-B",
+            authenticatedUserId: "user-A",
+            reason: "cross_user_export_scope_denied",
+          }),
+        })
+      );
+    });
+
+    it("should deny cross-user export ID retrieval and audit the denied request", async () => {
+      const job = await dataExportService.requestAsyncExport("user-A");
+      (auditLogService.log as jest.Mock).mockClear();
+
+      // User B attempts to access User A's export ID
+      await expect(
+        dataExportService.getExportJob(job.id, "user-B")
+      ).rejects.toThrow(ExportOwnershipError);
+
+      expect(auditLogService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "user-B",
+          action: AuditAction.PERMISSION_DENIED,
+          severity: AuditSeverity.WARNING,
+          resource: `export_job/${job.id}`,
+          metadata: expect.objectContaining({
+            exportId: job.id,
+            exportOwnerId: "user-A",
+            authenticatedUserId: "user-B",
+            reason: "cross_user_export_id_access_denied",
+          }),
+        })
+      );
+    });
+
+    it("should deny cross-user data and buffer retrieval and audit the denial", async () => {
+      const job = await dataExportService.requestAsyncExport("user-A");
+      (auditLogService.log as jest.Mock).mockClear();
+
+      await expect(
+        dataExportService.getExportData(job.id, "user-B")
+      ).rejects.toThrow(ExportOwnershipError);
+
+      await expect(
+        dataExportService.getExportBuffer(job.id, "user-B")
+      ).rejects.toThrow(ExportOwnershipError);
+
+      expect(auditLogService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "user-B",
+          action: AuditAction.PERMISSION_DENIED,
+          severity: AuditSeverity.WARNING,
+        })
+      );
+    });
+
+    it("should return null for non-existent export ID (boundary case)", async () => {
+      const result = await dataExportService.getExportJob("non-existent-uuid", "user-A");
+      expect(result).toBeNull();
+    });
+
+    it("should clear user exports upon request (data hygiene)", async () => {
+      const job = await dataExportService.requestAsyncExport("user-A");
+      expect(await dataExportService.getExportJob(job.id, "user-A")).not.toBeNull();
+
+      dataExportService.clearUserExports("user-A");
+      expect(await dataExportService.getExportJob(job.id, "user-A")).toBeNull();
     });
   });
 });

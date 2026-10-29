@@ -20,7 +20,7 @@ import {
   ProviderCreationError,
   UnsupportedProviderTypeError,
 } from "./errors";
-import { ProviderSelectionPreferences, ProviderType } from "./types";
+import { ProviderSelectionPreferences } from "./types";
 
 /**
  * Concrete error class for provider factory operations
@@ -32,9 +32,21 @@ class ProviderFactoryError extends SignatureProviderError {
 }
 
 /**
+ * Provider type identifiers.
+ *
+ * Canonical definition lives here; {@link ./types} re-exports it so consumers
+ * can import `ProviderType` from either entry point without a circular import.
+ */
+export enum ProviderType {
+  MOCK = "mock",
+  LEDGER = "ledger",
+  ALBEDO = "albedo",
+}
+
+/**
  * Provider configuration union type
  */
-type ProviderConfig =
+export type ProviderConfig =
   | { type: ProviderType.MOCK; config?: MockProviderConfig }
   | { type: ProviderType.LEDGER; config?: LedgerProviderConfig }
   | { type: ProviderType.ALBEDO; config?: AlbedoProviderConfig };

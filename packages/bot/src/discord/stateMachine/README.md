@@ -549,9 +549,12 @@ client.on('interactionCreate', async (interaction) => {
     };
 
     const instance = await stateMachineEngine.start(machineId, context);
+    const commandDto = mapDiscordCommandOptions(interaction.commandName, interaction.options.data);
     const input: SlashCommandInput = {
-      commandName: interaction.commandName,
-      options: interaction.options.data,
+      commandName: commandDto.commandName,
+      subcommand: commandDto.subcommand,
+      subcommandGroup: commandDto.subcommandGroup,
+      options: commandDto.options,
     };
 
     const result = await stateMachineEngine.execute(instance.id, input);

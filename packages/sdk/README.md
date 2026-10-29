@@ -33,6 +33,13 @@ Core SDK for Chen Pilot cross-chain operations with Stellar/Soroban support.
 npm install @chen-pilot/sdk-core
 ```
 
+## Requirements
+
+- **TypeScript** `>= 4.5.2` (declared as a `peerDependency`; CI compiles the
+  published declarations and a fixture consumer against that minimum —
+  see `node scripts/repo/check-ts-compat.mjs`)
+- Node.js 18+
+
 ## Quick Start
 
 ### Basic Usage
@@ -303,6 +310,14 @@ console.log("Multi-sig valid:", multiSigResult.thresholdMet);
 
 ## Error Handling and Recovery
 
+Errors emitted by the SDK use a stable, registry-backed taxonomy. Consumers
+can branch on `error.code` (a value from `ErrorRegistry` / `SdkErrorCode`),
+inspect `error.category` (`ErrorCategory`) and `error.recoverable`, and read
+structured `error.details`. Agent failures surface as `AgentRequestError` with
+a **registered** code (e.g. `AGENT_SESSION_EXPIRED`, `TRANSPORT_ERROR`,
+`RATE_LIMITED`) rather than ad-hoc `HTTP_<status>` strings; malformed agent
+responses surface as `AgentBadResponseError` with code `AGENT_BAD_RESPONSE`.
+
 ```typescript
 import {
   signatureProviderErrorRecovery,
@@ -335,6 +350,44 @@ try {
   }
 }
 ```
+
+### Cancellation (AbortSignal)
+
+Every public network method accepts an optional `signal` (any
+`AbortSignalLike`, including a native `AbortController.signal`). When a caller
+cancels, the SDK guarantees a **single, consistent abort contract**:
+
+- Cancellation rejects with an error whose `name === "AbortError"`.
+- The error is never retried and never wrapped in an SDK request error such as
+  `AgentRequestError`, so `instanceof AgentRequestError` is `false` for aborts.
+- Cancelling before dispatch rejects immediately without touching the network;
+  cancelling mid-request or during retry backoff unblocks the caller right away.
+- Use the exported `isAbortError(error)` helper to detect cancellations — it
+  recognises DOM/Node `AbortError`, axios `ERR_CANCELED` cancellations, and
+  errors created by the SDK.
+
+```typescript
+import { AgentClient, isAbortError } from "@chen-pilot/sdk-core";
+
+const controller = new AbortController();
+const client = new AgentClient({ baseUrl: "https://agent.example.com" });
+
+try {
+  await client.query({ userId, query: "hello", signal: controller.signal });
+} catch (error) {
+  if (isAbortError(error)) {
+    // Caller cancelled (or the request timed out) — not a request failure.
+  } else {
+    throw error;
+  }
+}
+
+// Later, or from another task:
+controller.abort();
+```
+
+> A timeout is implemented as an internal abort and therefore also surfaces as
+> an `AbortError`; treat timeouts and explicit cancellation the same way.
 
 ## Provider Discovery and Selection
 

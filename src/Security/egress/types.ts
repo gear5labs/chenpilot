@@ -73,6 +73,8 @@ export interface AdapterEgressConfig {
 export interface EgressRequestBudget {
   /** Max request wall-clock budget in milliseconds. */
   timeLimitMs?: number;
+  /** Max connection establishment timeout in milliseconds. */
+  connectTimeoutMs?: number;
   /** Max redirect hops that will be followed (and each is re-validated). */
   maxRedirects?: number;
 }

@@ -4,8 +4,8 @@
  */
 
 import { TrustSignal, TrustScore, Asset } from '../core/types';
-import { TrustSignals } from './TrustSignals.js';
-import { TrustRegistry } from './TrustRegistry.js';
+import { TrustSignals } from './TrustSignals';
+import { TrustRegistry } from './TrustRegistry';
 
 export interface TrustConfig {
   weights: Record<string, number>;
@@ -17,6 +17,7 @@ export interface TrustConfig {
 }
 
 export class TrustScorer {
+  private static readonly MAX_SIGNAL_AGE_MS = 24 * 60 * 60 * 1000;
   private trustSignals: TrustSignals;
   private trustRegistry: TrustRegistry;
   private config: TrustConfig;
@@ -31,12 +32,25 @@ export class TrustScorer {
    * Calculate overall trust score for an asset
    */
   async calculateTrustScore(asset: Asset): Promise<TrustScore> {
-    const signals = await this.trustSignals.getAllSignals(asset);
-    const overall = this.calculateWeightedScore(signals);
-    const verificationStatus = this.determineVerificationStatus(overall);
+    const fetchedSignals = await this.trustSignals.getAllSignals(asset);
+    const now = Date.now();
+    const signals = fetchedSignals.filter(signal =>
+      Number.isFinite(signal.value)
+      && signal.value >= 0
+      && signal.value <= 100
+      && Number.isFinite(signal.timestamp)
+      && now - signal.timestamp >= 0
+      && now - signal.timestamp <= TrustScorer.MAX_SIGNAL_AGE_MS
+    );
+    const { overall, confidence } = this.calculateWeightedScore(signals);
+    const hasMaliciousSignal = signals.some(signal => signal.value <= this.config.thresholds.malicious);
+    const verificationStatus = hasMaliciousSignal
+      ? 'malicious'
+      : confidence > 0 ? this.determineVerificationStatus(overall) : 'unverified';
 
     return {
       overall,
+      confidence,
       signals,
       verificationStatus,
       lastUpdated: Date.now(),
@@ -46,21 +60,26 @@ export class TrustScorer {
   /**
    * Calculate weighted score from signals
    */
-  private calculateWeightedScore(signals: TrustSignal[]): number {
-    if (signals.length === 0) {
-      return 50; // Neutral score if no signals
-    }
+  private calculateWeightedScore(signals: TrustSignal[]): { overall: number; confidence: number } {
+    const configuredWeights = Object.entries(this.config.weights)
+      .filter(([, weight]) => Number.isFinite(weight) && weight > 0);
+    const totalWeight = configuredWeights.reduce((total, [, weight]) => total + weight, 0);
+    if (totalWeight === 0) return { overall: 0, confidence: 0 };
 
-    let totalWeight = 0;
     let weightedSum = 0;
+    let observedWeight = 0;
 
     for (const signal of signals) {
-      const weight = this.config.weights[signal.type] || 1;
+      const weight = this.config.weights[signal.type] || 0;
+      if (weight === 0) continue;
       weightedSum += signal.value * weight;
-      totalWeight += weight;
+      observedWeight += weight;
     }
 
-    return totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 50;
+    return {
+      overall: Math.round(weightedSum / totalWeight),
+      confidence: Math.round((observedWeight / totalWeight) * 100),
+    };
   }
 
   /**

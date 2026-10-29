@@ -127,6 +127,24 @@
       "description": "Per-socket realtime event buffer before slow-consumer handling."
     },
     {
+      "name": "REALTIME_MAX_SUBSCRIPTIONS_PER_SOCKET",
+      "service": "backend",
+      "owner": "Gateway (`src/Gateway/subscriptionManager.ts`)",
+      "required": false,
+      "default": "50",
+      "secret": false,
+      "description": "Maximum active realtime room subscriptions a single socket may hold."
+    },
+    {
+      "name": "REALTIME_MAX_SUBSCRIPTIONS_PER_USER",
+      "service": "backend",
+      "owner": "Gateway (`src/Gateway/subscriptionManager.ts`)",
+      "required": false,
+      "default": "200",
+      "secret": false,
+      "description": "Maximum active realtime room subscriptions a user may hold across all sockets."
+    },
+    {
       "name": "INBOUND_JSON_LIMIT_BYTES",
       "service": "backend",
       "owner": "Gateway (`src/config/config.ts`)",

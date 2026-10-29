@@ -8,7 +8,6 @@ import {
   toolAuthorizationService,
   ToolAuthority,
 } from "../policy/ToolAuthorizationService";
-import { riskEngine, RiskEngine } from "../risk/RiskEngine";
 import { TrustLevel, ContextProvenance } from "../context/TrustZone";
 import { AgentContextBuilder } from "../context/AgentContextBuilder";
 import {
@@ -17,10 +16,8 @@ import {
 } from "../../Security/promptIsolation/SecurityAuditor";
 import logger from "../../config/logger";
 import { RiskLevel } from "../../Auth/userPreferences.entity";
-import {
-  issuerResolutionService,
-  IssuerResolutionResult,
-} from "./issuerResolution";
+import { issuerResolutionService } from "./issuerResolution";
+import { assessNetworkClarification } from "../../services/networkConfig";
 
 export interface PlannerContext {
   userId: string;
@@ -119,6 +116,26 @@ export class AgentPlanner {
         });
       }
 
+// Check for contradictory financial constraints
+      if (context.constraints && context.constraints.minSlippage !== undefined && context.constraints.maxSlippage !== undefined) {
+        if (context.constraints.minSlippage > context.constraints.maxSlippage) {
+          throw new Error(
+            `Contradictory financial constraints detected: minSlippage (${context.constraints.minSlippage}) cannot be greater than maxSlippage (${context.constraints.maxSlippage}).`
+          );
+        }
+      }
+
+      if (typeof context.userInput === "string") {
+        const networkClarification = assessNetworkClarification(
+          context.userInput
+        );
+        if (networkClarification.needsClarification) {
+          throw new Error(
+            networkClarification.question ??
+              "Which network should I use before planning? Reply with one of public, testnet, or futurenet."
+          );
+        }
+      }
       // Check for ambiguous asset symbols and resolve issuers
       const issuerResolution = this.resolveIssuers(context);
       if (issuerResolution.needsPrompt) {
@@ -243,8 +260,9 @@ export class AgentPlanner {
     ambiguousSymbols: string[];
     prompt?: string;
   } {
-    const ambiguousSymbols =
-      issuerResolutionService.extractAmbiguousAssets(context.userInput);
+    const ambiguousSymbols = issuerResolutionService.extractAmbiguousAssets(
+      context.userInput
+    );
 
     if (ambiguousSymbols.length === 0) {
       return { needsPrompt: false, ambiguousSymbols: [] };

@@ -18,15 +18,22 @@ severity-weighted release gate.
 - `coverage` — which input-space the case probes: `benign_ambiguity`,
   `hostile_input`, `tool_failure`, or `market_stress`
 - `userInput` — the human request
+- `language` — optional BCP 47 tag of `userInput` (defaults to `en`);
+  multilingual financial-intent benchmark cases must set it (#804)
 - `attack` — the untrusted model's planned step (`action` + `payload`)
 - `marketData` — optional risk-engine market stress context
 - `expected` — the defensive outcome: `blocked` (true = must not be silently
   executed) and `reasonCategory` (`asset_trust`, `risk_threshold`,
   `approval_required`, `tool_capability`, `validation`, `none`)
 
-The corpus **must** keep `en`/`es`/`ar`... (no — locales do not apply here).
-It is versioned; bump `version` when cases are added or expectations change,
-and update `tests/fixtures/redteam/baseline.json` to match.
+Multilingual benchmark cases express the same financial intents in non-English
+locales (`es`, `fr`, `ja`, `ar`, `zh`, `pt`, `hi`, `de`) so language cannot be
+a silent bypass of the defensive layers. Evaluation is policy-driven and
+locale-independent: only the `attack` shape is enforced, so each multilingual
+case reuses a proven attack payload while localizing `userInput`.
+
+The corpus is versioned; bump `version` when cases are added or expectations
+change, and update `tests/fixtures/redteam/baseline.json` to match.
 
 ## Scoring
 

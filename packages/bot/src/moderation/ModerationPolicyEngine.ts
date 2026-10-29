@@ -21,6 +21,8 @@ import type {
   ModerationRule,
   ModerationVerdict,
 } from "./types";
+import { appendFile, mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 
 /** Severity ordering used to combine suggested and escalated actions. */
 const DECISION_SEVERITY: Record<ModerationDecision, number> = {
@@ -228,5 +230,18 @@ export class InMemoryAuditSink implements ModerationAuditSink {
 
   getEntries(): readonly ModerationAuditEntry[] {
     return this.entries;
+  }
+}
+
+/** Append-only JSONL audit sink for deployments that need records across restarts. */
+export class JsonLinesAuditSink implements ModerationAuditSink {
+  constructor(private readonly filePath: string) {}
+
+  async record(entry: ModerationAuditEntry): Promise<void> {
+    await mkdir(dirname(this.filePath), { recursive: true });
+    await appendFile(this.filePath, `${JSON.stringify(entry)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
   }
 }

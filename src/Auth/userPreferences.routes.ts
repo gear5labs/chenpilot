@@ -40,6 +40,40 @@ router.get("/:userId", async (req: Request, res: Response) => {
  * POST /api/user/preferences/:userId/check-risk
  * Check if a risk level is allowed for a user
  */
+/**
+ * PUT /api/user/preferences/:userId
+ * Update user preferences with explicit consent validation
+ */
+router.put("/:userId", async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const updates = req.body;
+
+    if (updates.explicitConsent !== true && updates.requireConsent !== true) {
+      return res.status(403).json({
+        success: false,
+        message: "Explicit consent is required before saving conversational preferences",
+      });
+    }
+
+    const updated = await userPreferencesService.updatePreferences(userId, updates);
+
+    return res.status(200).json({
+      success: true,
+      data: updated,
+    });
+  } catch (error: any) {
+    logger.error("Error updating user preferences", {
+      error,
+      userId: req.params.userId,
+    });
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Failed to update user preferences",
+    });
+  }
+});
+
 router.post("/:userId/check-risk", async (req: Request, res: Response) => {
   try {
     const { userId } = req.params;

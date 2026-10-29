@@ -59,13 +59,21 @@ class AssetIntelligence {
   private invalidator: CacheInvalidator;
 
   async getAssetInfo(asset: Asset): Promise<AssetInfo>;
-  async getAssetPrice(asset: Asset): Promise<PriceInfo>;
+  async getAssetPrice(asset: Asset): Promise<PriceResult>;
   async getTrustScore(asset: Asset): Promise<TrustScore>;
   async checkCompatibility(asset: Asset, context: CompatibilityContext): Promise<CompatibilityResult>;
   async invalidateAsset(asset: Asset): Promise<void>;
   async refreshAsset(asset: Asset): Promise<void>;
 }
 ```
+
+`PriceResult` is a discriminated union: an available quote has `status: 'available'` and a real `PriceInfo`; missing or failing configured feeds return `status: 'unavailable'` with a reason. Unavailable results are not cached as quotes, and zero is never used as a placeholder price.
+
+Metadata is read from the configured Horizon endpoint and, when a TOML URL is configured or Horizon supplies a home domain, from the matching Stellar TOML currency record. Missing assets, provider failures, and malformed currency entries fail with `METADATA_UNAVAILABLE` or `ASSET_NOT_FOUND`; returned metadata records provider URLs and fetch times in `provenance`. Metadata fields not supplied by a provider remain unset.
+
+Trust scoring uses only finite signals from the last 24 hours. Unknown, invalid, and stale signals contribute no score; the total is normalized against all configured signal weights, and `confidence` reports the percentage of configured weight represented by fresh signals. No available signal yields score and confidence zero with `unverified` status. Any fresh signal at or below the malicious threshold forces `malicious` status.
+
+Compatibility results are cached by asset plus the full network, operation, and version context. A result for one operation or version must not satisfy another context.
 
 ### 2. AssetCache (Unified Caching Layer)
 

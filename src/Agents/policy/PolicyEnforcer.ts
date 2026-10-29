@@ -262,10 +262,10 @@ export class PolicyEnforcer {
     return { allowed: true };
   }
 
-  private checkAssetTrust(
+  private async checkAssetTrust(
     action: string,
     payload: Record<string, unknown>
-  ): PolicyResult {
+  ): Promise<PolicyResult> {
     const canonical = this.normalizeAction(action);
     if (!HIGH_RISK_TOOLS.has(action) && !HIGH_RISK_TOOLS.has(canonical)) {
       return { allowed: true };
@@ -298,7 +298,7 @@ export class PolicyEnforcer {
           logger.warn("Revocation check failed during policy enforcement", { asset: upper, field });
         }
 
-        if (!WELL_KNOWN_ASSETS.has(upper)) {
+        if (!TRUSTED_ASSETS.has(upper)) {
           return {
             allowed: false,
             reason: `Asset '${value}' in field '${field}' is not on the trusted asset list.`,

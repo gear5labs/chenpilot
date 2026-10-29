@@ -18,6 +18,7 @@ export const DEFAULT_ADAPTER_EGRESS: AdapterEgressConfig = {
 /** Default request budget applied when none is provided. */
 export const DEFAULT_REQUEST_BUDGET = {
   timeLimitMs: 15_000,
+  connectTimeoutMs: 5_000,
   maxRedirects: 3,
 };
 

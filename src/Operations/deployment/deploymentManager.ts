@@ -9,6 +9,7 @@ export enum DeploymentStatus {
   DRAINING = "draining",
   FENCED = "fenced",
   UPGRADING = "upgrading",
+  PAUSED = "paused",
   COMPLETED = "completed",
   FAILED = "failed",
 }
@@ -16,6 +17,11 @@ export enum DeploymentStatus {
 /**
  * Instance state for deployment coordination
  */
+export interface CriticalHealth {
+  agent: boolean;
+  dataFlows: boolean;
+}
+
 export interface InstanceState {
   instanceId: string;
   version: string;
@@ -23,6 +29,8 @@ export interface InstanceState {
   drainStartTime?: number;
   activeConnections: number;
   lastHealthCheck: number;
+  /** Present only after an operator records agent and data-flow health. */
+  criticalHealth?: CriticalHealth;
 }
 
 /**
@@ -34,6 +42,8 @@ export interface DeploymentConfig {
   drainTimeoutMs: number;
   minHealthyInstances: number;
   enableVersionFencing: boolean;
+  /** How long to wait for agent and data-flow health before rolling back. */
+  healthTimeoutMs?: number;
 }
 
 /**
@@ -53,6 +63,8 @@ export class DeploymentManager {
   private instances: Map<string, InstanceState> = new Map();
   private currentVersion: string = "1.0.0";
   private deploymentStatus: DeploymentStatus = DeploymentStatus.IDLE;
+  private paused = false;
+  private versionFenceEnabled = false;
 
   constructor(initialVersion: string = "1.0.0") {
     this.currentVersion = initialVersion;
@@ -179,11 +191,85 @@ export class DeploymentManager {
   }
 
   /**
+   * Stop new cutovers and new work until an operator resumes or reverts.
+   */
+  pause(): void {
+    this.paused = true;
+    this.deploymentStatus = DeploymentStatus.PAUSED;
+    logger.info("Deployment paused");
+  }
+
+  resume(): void {
+    this.paused = false;
+    if (this.deploymentStatus === DeploymentStatus.PAUSED) {
+      this.deploymentStatus = DeploymentStatus.IDLE;
+    }
+    logger.info("Deployment resumed");
+  }
+
+  isPaused(): boolean {
+    return this.paused;
+  }
+
+  /**
+   * Instances whose version does not match the version currently in service.
+   */
+  detectVersionDrift(): string[] {
+    return this.getAllInstances()
+      .filter((instance) => instance.version !== this.currentVersion)
+      .map((instance) => instance.instanceId);
+  }
+
+  /**
+   * Record agent and data-flow health. A failed check blocks the cutover.
+   */
+  recordCriticalHealth(instanceId: string, health: CriticalHealth): void {
+    const instance = this.instances.get(instanceId);
+    if (!instance) {
+      throw new Error(`Instance ${instanceId} not found`);
+    }
+    if (typeof health.agent !== "boolean" || typeof health.dataFlows !== "boolean") {
+      throw new Error("agent and dataFlows health flags are required");
+    }
+    instance.criticalHealth = { agent: health.agent, dataFlows: health.dataFlows };
+    instance.lastHealthCheck = Date.now();
+  }
+
+  /**
+   * Move every instance back to a known version and clear a pause.
+   */
+  revertToVersion(version: string): void {
+    if (!version.trim()) {
+      throw new Error("version is required");
+    }
+    for (const instance of this.getAllInstances()) {
+      instance.version = version;
+      instance.status = DeploymentStatus.IDLE;
+      instance.criticalHealth = undefined;
+    }
+    this.currentVersion = version;
+    this.paused = false;
+    this.deploymentStatus = DeploymentStatus.IDLE;
+    logger.warn("Reverted deployment", { version });
+  }
+
+  /**
    * Check if an instance should accept requests based on version fencing
    */
   shouldAcceptRequest(instanceId: string, minVersion?: string): boolean {
+    if (this.paused) {
+      return false;
+    }
+
     const instance = this.instances.get(instanceId);
     if (!instance) {
+      return false;
+    }
+
+    if (
+      this.versionFenceEnabled &&
+      instance.version !== this.currentVersion
+    ) {
       return false;
     }
 
@@ -213,7 +299,18 @@ export class DeploymentManager {
    */
   async executeDeployment(config: DeploymentConfig): Promise<DeploymentResult> {
     const startTime = Date.now();
+
+    if (this.paused) {
+      return {
+        success: false,
+        message: "Deployment paused",
+        completedAt: Date.now(),
+        durationMs: Date.now() - startTime,
+      };
+    }
+
     this.deploymentStatus = DeploymentStatus.UPGRADING;
+    this.versionFenceEnabled = config.enableVersionFencing;
 
     logger.info("Starting zero-downtime deployment", config);
 
@@ -249,7 +346,10 @@ export class DeploymentManager {
       }
 
       // Step 3: Wait for health checks
-      await this.waitForHealthChecks(instancesToUpgrade, 30000);
+      await this.waitForHealthChecks(
+        instancesToUpgrade,
+        config.healthTimeoutMs ?? 30000
+      );
 
       // Step 4: Upgrade remaining instances
       const remainingInstances = this.getInstancesByVersion(this.currentVersion).filter(
@@ -332,8 +432,8 @@ export class DeploymentManager {
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
-      const allHealthy = instances.every(
-        (instance) => Date.now() - instance.lastHealthCheck < 5000
+      const allHealthy = instances.every((instance) =>
+        this.isInstanceHealthy(instance)
       );
 
       if (allHealthy) {
@@ -344,6 +444,17 @@ export class DeploymentManager {
     }
 
     throw new Error("Health check timeout");
+  }
+
+  private isInstanceHealthy(instance: InstanceState): boolean {
+    const fresh = Date.now() - instance.lastHealthCheck < 5000;
+    if (!fresh) {
+      return false;
+    }
+    if (!instance.criticalHealth) {
+      return true;
+    }
+    return instance.criticalHealth.agent && instance.criticalHealth.dataFlows;
   }
 
   /**

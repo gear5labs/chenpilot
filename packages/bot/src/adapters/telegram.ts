@@ -1,3 +1,4 @@
+import { renderTransactionPreview } from "../../src/Security/antiPhishing/xdrPreview";
 import { Telegraf, Context } from 'telegraf';
 import { TransactionNotificationData } from './types';
 import { createTrustlineOperation } from '@chen-pilot/sdk-core';
@@ -344,7 +345,15 @@ export class TelegramAdapter {
   }
 
   private formatTransactionMessage(data: TransactionNotificationData): string {
-    const statusEmoji = data.successful ? "âœ…" : "âŒ";
+    if (data.xdr) {
+      const preview = renderTransactionPreview(data.xdr);
+      if (!preview.safe) {
+        return `<b>${preview.message}</b>\n\n🚫 <b>TRANSACTION BLOCKED</b>`;
+      }
+      return preview.message.replace(/\*\*/g, "<b>").replace(/`/g, "<code>") + "\n\n✅ <b>Safe to Sign</b>";
+    }
+
+    const statusEmoji = data.successful ? "✅" : "❌";
     const timestamp = new Date(data.timestamp).toLocaleString();
 
     let message = `<b>Transaction ${data.successful ? "Confirmed" : "Failed"}</b> ${statusEmoji}\n\n`;

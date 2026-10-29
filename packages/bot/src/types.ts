@@ -56,6 +56,11 @@ export interface TransactionNotificationData {
    * Ledger number when transaction was confirmed
    */
   ledger?: number;
+
+  /**
+   * The compiled transaction envelope XDR for anti-phishing preview
+   */
+  xdr?: string;
 }
 
 /**

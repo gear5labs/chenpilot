@@ -4,6 +4,7 @@ export * from "./networkIntelligence";
 export * from "./networkIdentity";
 export * from "./errors";
 export * from "./errorRegistry";
+export * from "./errorMapping";
 export * from "./eventDecoding";
 export * from "./inspectionReport";
 export * from "./compatibility";

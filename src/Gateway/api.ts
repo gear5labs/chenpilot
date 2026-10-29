@@ -51,9 +51,13 @@ app.use("/settings", express.static(path.join(__dirname, "../../public")));
 app.use(helmet());
 
 // CORS configuration
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+  : "*";
+
 app.use(
   cors({
-    origin: process.env.ALLOWED_ORIGINS || "*",
+    origin: allowedOrigins,
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   })

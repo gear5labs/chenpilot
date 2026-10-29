@@ -3,19 +3,19 @@
  * Coordinates all asset intelligence operations
  */
 
-import { AssetCache } from './AssetCache.js';
-import { CacheInvalidator } from './CacheInvalidator.js';
-import { MetadataRevisionStore } from './MetadataRevisionStore.js';
-import { TrustScorer } from '../trust/TrustScorer.js';
-import { TrustSignals } from '../trust/TrustSignals.js';
-import { TrustRegistry } from '../trust/TrustRegistry.js';
-import { AssetValidator } from '../compatibility/AssetValidator.js';
-import { NetworkCompatibility } from '../compatibility/NetworkCompatibility.js';
-import { VersionCompatibility } from '../compatibility/VersionCompatibility.js';
+import { AssetCache } from './AssetCache';
+import { CacheInvalidator } from './CacheInvalidator';
+import { MetadataRevisionStore } from './MetadataRevisionStore';
+import { TrustScorer } from '../trust/TrustScorer';
+import { TrustSignals } from '../trust/TrustSignals';
+import { TrustRegistry } from '../trust/TrustRegistry';
+import { AssetValidator } from '../compatibility/AssetValidator';
+import { NetworkCompatibility } from '../compatibility/NetworkCompatibility';
+import { VersionCompatibility } from '../compatibility/VersionCompatibility';
 import { 
   Asset, 
   AssetData, 
-  PriceInfo, 
+  PriceResult,
   TrustScore, 
   CompatibilityResult, 
   CompatibilityContext,
@@ -24,7 +24,7 @@ import {
   AssetIntelligenceError,
   ErrorCode,
   MetadataRevision,
-} from './types.js';
+} from './types';
 
 export class AssetIntelligence {
   private cache: AssetCache;
@@ -131,31 +131,19 @@ export class AssetIntelligence {
   /**
    * Get asset price information
    */
-  async getAssetPrice(asset: Asset): Promise<PriceInfo | null> {
+  async getAssetPrice(asset: Asset): Promise<PriceResult> {
     try {
       // Check cache first
       const cached = await this.cache.get(asset, 'price');
       if (cached && cached.price) {
-        return cached.price;
+        return { status: 'available', price: cached.price };
       }
 
-      // TODO: Implement actual price fetching from configured sources
-      const priceInfo: PriceInfo = {
-        price: 0, // Placeholder
-        priceChange24h: 0,
-        volume24h: 0,
-        source: 'placeholder',
-        timestamp: Date.now(),
+      const hasConfiguredSource = this.config.providers.price.sources.some(source => source.enabled);
+      return {
+        status: 'unavailable',
+        reason: hasConfiguredSource ? 'provider_unavailable' : 'no_configured_source',
       };
-
-      // Cache the result
-      const assetData: AssetData = {
-        price: priceInfo,
-        lastUpdated: Date.now(),
-      };
-      await this.cache.set(asset, 'price', assetData);
-
-      return priceInfo;
     } catch (error) {
       throw new AssetIntelligenceError(
         'PRICE_UNAVAILABLE',
@@ -204,8 +192,8 @@ export class AssetIntelligence {
       // Check cache first
       const cacheKey = `${context.network}:${context.operation || 'any'}:${context.version || 'any'}`;
       const cached = await this.cache.get(asset, 'compatibility');
-      if (cached && cached.compatibility && cached.compatibility[context.network]) {
-        return cached.compatibility[context.network];
+      if (cached?.compatibility?.[cacheKey]) {
+        return cached.compatibility[cacheKey];
       }
 
       // Check network compatibility
@@ -228,7 +216,8 @@ export class AssetIntelligence {
       // Cache the result
       const assetData: AssetData = {
         compatibility: {
-          [context.network]: result,
+          ...cached?.compatibility,
+          [cacheKey]: result,
         },
         lastUpdated: Date.now(),
       };
@@ -295,18 +284,89 @@ export class AssetIntelligence {
     await this.cache.clear();
   }
 
-  /**
-   * Fetch asset metadata (placeholder implementation)
-   */
+  /** Fetch metadata only from the configured Horizon and Stellar TOML providers. */
   private async fetchMetadata(asset: Asset) {
-    // TODO: Implement actual metadata fetching from configured providers
+    const horizonUrl = this.config.providers.metadata.horizonUrl.replace(/\/$/, '');
+    if (!horizonUrl) {
+      throw new AssetIntelligenceError('METADATA_UNAVAILABLE', 'No Horizon metadata provider is configured', asset);
+    }
+
+    const assetUrl = new URL(`${horizonUrl}/assets`);
+    assetUrl.searchParams.set('asset_code', asset.code);
+    if (asset.issuer) assetUrl.searchParams.set('asset_issuer', asset.issuer);
+
+    const assetResponse = await this.fetchProvider(assetUrl.toString());
+    if (!assetResponse.ok) {
+      throw new AssetIntelligenceError('METADATA_UNAVAILABLE', `Horizon returned HTTP ${assetResponse.status}`, asset);
+    }
+
+    const assetPayload = await assetResponse.json() as { _embedded?: { records?: Array<Record<string, unknown>> } };
+    const record = assetPayload?._embedded?.records?.find(candidate =>
+      candidate.asset_code === asset.code && (!asset.issuer || candidate.asset_issuer === asset.issuer)
+    );
+    if (!record) {
+      throw new AssetIntelligenceError('ASSET_NOT_FOUND', `Asset ${asset.code} was not found by Horizon`, asset);
+    }
+
+    const now = Date.now();
+    const provenance: NonNullable<AssetData['metadata']>['provenance'] = [
+      { provider: 'horizon', url: assetUrl.toString(), fetchedAt: now },
+    ];
+    const homeDomain = typeof record.home_domain === 'string' ? record.home_domain : undefined;
+    const tomlUrl = this.config.providers.metadata.tomlUrl
+      || (homeDomain ? `https://${homeDomain}/.well-known/stellar.toml` : undefined);
+    const metadata: NonNullable<AssetData['metadata']> = { homeDomain, tomlUrl, provenance };
+
+    if (tomlUrl) {
+      const tomlResponse = await this.fetchProvider(tomlUrl);
+      if (!tomlResponse.ok) {
+        throw new AssetIntelligenceError('METADATA_UNAVAILABLE', `Stellar TOML returned HTTP ${tomlResponse.status}`, asset);
+      }
+      const toml = await tomlResponse.text();
+      const currency = this.parseTomlCurrency(toml, asset);
+      if (!currency) {
+        throw new AssetIntelligenceError('METADATA_UNAVAILABLE', `Stellar TOML has no valid entry for ${asset.code}`, asset);
+      }
+      Object.assign(metadata, currency);
+      provenance.push({ provider: 'stellar_toml', url: tomlUrl, fetchedAt: Date.now() });
+    }
+
+    return metadata;
+  }
+
+  private async fetchProvider(url: string): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      return await fetch(url, { signal: controller.signal });
+    } catch (error) {
+      throw new AssetIntelligenceError(
+        'METADATA_UNAVAILABLE',
+        `Metadata provider request failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private parseTomlCurrency(toml: string, asset: Asset): Partial<NonNullable<AssetData['metadata']>> | null {
+    const blocks = toml.split(/^\s*\[\[CURRENCIES\]\]\s*$/m).slice(1);
+    const block = blocks.find(candidate => {
+      const code = candidate.match(/^\s*code\s*=\s*["']([^"']+)["']/m)?.[1];
+      const issuer = candidate.match(/^\s*issuer\s*=\s*["']([^"']+)["']/m)?.[1];
+      return code === asset.code && (!asset.issuer || issuer === asset.issuer);
+    });
+    if (!block) return null;
+
+    const readString = (key: string) => block.match(new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']*)["']`, 'm'))?.[1];
+    const decimalsText = block.match(/^\s*display_decimals\s*=\s*(\d+)\s*$/m)?.[1];
+    const decimals = decimalsText === undefined ? undefined : Number(decimalsText);
+    if (decimals !== undefined && (!Number.isInteger(decimals) || decimals < 0 || decimals > 18)) return null;
     return {
-      name: asset.code,
-      description: `Asset ${asset.code}`,
-      homeDomain: undefined,
-      decimals: 7,
-      isAuthRequired: false,
-      authRevoked: false,
+      name: readString('name'),
+      description: readString('desc'),
+      image: readString('image'),
+      decimals,
     };
   }
 

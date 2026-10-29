@@ -60,6 +60,7 @@ jest.mock("../../services/redis/client", () => ({
 const mockMemoryStore = {
   clear: jest.fn(),
   get: jest.fn().mockReturnValue([]),
+  purgeExpiredWorkflowContext: jest.fn().mockReturnValue(0),
 };
 
 jest.mock("../../Agents/memory/memory", () => ({
@@ -566,6 +567,13 @@ describe("RetentionEngine", () => {
 
   it("stop() can be called safely when not running", () => {
     expect(() => engine.stop()).not.toThrow();
+  });
+
+  it("excludes expired workflow context during the retention pass", async () => {
+    mockMemoryStore.purgeExpiredWorkflowContext.mockReturnValue(2);
+    const result = await engine.runRetentionPass();
+    expect(mockMemoryStore.purgeExpiredWorkflowContext).toHaveBeenCalled();
+    expect(result.deletedCounts.conversation_memory).toBe(2);
   });
 });
 

@@ -415,6 +415,12 @@ The permission matrix guard can replace or complement the existing role guard, p
 
 ## Caching
 
+### Discord Command Role Gate
+
+The Discord command `RoleGate` fetches member role IDs from Discord before authorizing a gated command. Successful lookups are cached for at most five minutes (10,000 entries); a lookup timeout or API error denies the gated command and is not cached. Member role changes invalidate that member's cache, guild role/configuration changes invalidate the guild cache, and changing gate or admin-role configuration clears the cache. The default lookup timeout is five seconds.
+
+Call `invalidateCache(userId, guildId)`, `invalidateGuildCache(guildId)`, or `clearCache()` when applying role changes outside Discord's gateway events.
+
 ### Backend User Data Cache
 
 User data is cached for 5 minutes to reduce backend API calls:

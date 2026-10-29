@@ -71,6 +71,21 @@ export interface TrustlineInfo {
   balance: string;
 }
 
+/**
+ * A parsed Horizon trustline balance record used for destination-capacity
+ * checks. Mirrors the fields Horizon returns on `account.balances[]` that the
+ * SDK cares about, plus the authorization + liability fields needed to decide
+ * whether an incoming payment can be received.
+ */
+export interface TrustlineRecord {
+  assetCode: string;
+  assetIssuer: string;
+  balance: string;
+  limit: string;
+  authorized: boolean;
+  buyingLiabilities?: string;
+}
+
 export interface AssetToTrust {
   assetCode: string;
   assetIssuer: string;
@@ -670,20 +685,7 @@ export class TrustlineWorkflowBuilder {
       operationCount,
     };
   }
-export function validateDestinationReceivingCapacity(
-  trustline: TrustlineRecord | null,
-  amount: string
-): boolean {
-  if (!trustline || !trustline.authorized) return false;
 
-  const balanceNum = parseFloat(trustline.balance);
-  const limitNum = parseFloat(trustline.limit);
-  const buyingLiabilitiesNum = parseFloat(trustline.buyingLiabilities || '0');
-  const amountNum = parseFloat(amount);
-
-  const availableCapacity = limitNum - (balanceNum + buyingLiabilitiesNum);
-  return amountNum <= availableCapacity;
-}
   async build(): Promise<TrustlineWorkflowResult> {
     const preview = await this.preview();
     const estimate = this.estimate(preview);
@@ -698,6 +700,21 @@ export function validateDestinationReceivingCapacity(
   getCurrentStep(): TrustlineWorkflowStep {
     return this.step;
   }
+}
+
+export function validateDestinationReceivingCapacity(
+  trustline: TrustlineRecord | null,
+  amount: string
+): boolean {
+  if (!trustline || !trustline.authorized) return false;
+
+  const balanceNum = parseFloat(trustline.balance);
+  const limitNum = parseFloat(trustline.limit);
+  const buyingLiabilitiesNum = parseFloat(trustline.buyingLiabilities || "0");
+  const amountNum = parseFloat(amount);
+
+  const availableCapacity = limitNum - (balanceNum + buyingLiabilitiesNum);
+  return amountNum <= availableCapacity;
 }
 
 export default hasValidStellarTrustline;

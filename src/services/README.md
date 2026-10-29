@@ -318,6 +318,54 @@ docker logs redis-cache
 3. Check liquidity for asset pair
 4. Review Horizon API rate limits
 
+---
+
+# Data Export Service & API Contract
+
+The `DataExportService` and associated `/export` routes handle sensitive user personal data, compliance exports, and GDPR right-to-erasure workflows.
+
+## Security & Scope Constraints
+
+- **Authenticated Principal Binding**: Every export operation is strictly bound to the authenticated principal (`req.user.userId`).
+- **Request-Time Ownership Verification**: Any requested target scope (via query parameters `userId`/`user_id` or request body `userId`/`scope.userId`) is compared against the authenticated principal. If a caller requests data for a different user, the request is rejected with `403 Forbidden` and audited immediately.
+- **Asynchronous Retrieval Verification**: Asynchronous exports are assigned an `exportId`. All asynchronous retrieval paths (`/export/status/:exportId` and `/export/download/:exportId`) verify that the requesting principal owns the export. Cross-user access attempts are rejected with `403 Forbidden` and audited.
+- **Erasure Receipt Ownership**: Proof-of-erasure receipts retrieved via `/export/erasure-receipt/:receiptId` verify that the receipt's `subjectIdHash` matches the SHA-256 hash of the authenticated principal, preventing cross-user receipt enumeration.
+- **Audit Ledger**: All denied cross-user scope or export ID requests are logged to the audit ledger with `action: AuditAction.PERMISSION_DENIED`, `severity: AuditSeverity.WARNING`, and security context (actor ID, target ID, resource).
+
+## API Endpoints
+
+### Synchronous Endpoints
+
+| Method | Endpoint | Description | Status |
+| --- | --- | --- | --- |
+| `GET` | `/export/profile` | Export user profile data as JSON | `200 OK` |
+| `GET` | `/export/download` | Download user profile export JSON file | `200 OK` |
+| `GET` | `/export/metadata` | Retrieve export summary metadata | `200 OK` |
+
+### Asynchronous Export Endpoints
+
+| Method | Endpoint | Description | Status |
+| --- | --- | --- | --- |
+| `POST` | `/export` or `/export/request` | Initiate an asynchronous data export | `202 Accepted` |
+| `GET` | `/export/status/:exportId` | Retrieve status of asynchronous export | `200 OK` / `403` / `404` |
+| `GET` | `/export/download/:exportId` | Download completed asynchronous export file | `200 OK` / `403` / `404` |
+
+### Lifecycle & Erasure Endpoints
+
+| Method | Endpoint | Description | Status |
+| --- | --- | --- | --- |
+| `POST` | `/export/erase` | Permanently erase user data and purge export jobs | `200 OK` / `409` |
+| `GET` | `/export/erasure-report` | Get current data lifecycle status for authenticated user | `200 OK` |
+| `GET` | `/export/erasure-receipt/:receiptId` | Retrieve and verify cryptographic proof-of-erasure receipt | `200 OK` / `403` / `404` |
+
+## Error Responses
+
+- `401 Unauthorized`: Missing or invalid authentication token.
+- `403 Forbidden`: Cross-user export request, scope mismatch, or attempting to access an `exportId`/`receiptId` owned by another user.
+- `404 Not Found`: Export ID or erasure receipt ID does not exist.
+- `409 Conflict`: Active legal hold prevents user erasure.
+
 ## License
 
 MIT
+

@@ -19,15 +19,33 @@ export interface RoleCacheEntry {
   ttl: number;
 }
 
+export interface RoleGateOptions {
+  fetchRoles?: (userId: string, guildId: string) => Promise<string[]>;
+  cacheTtlMs?: number;
+  maxCacheEntries?: number;
+  fetchTimeoutMs?: number;
+  now?: () => number;
+}
+
 export class RoleGate {
   private gates: Map<string, RoleGate>;
   private roleCache: Map<string, RoleCacheEntry>;
   private adminRoleIds: Set<string>;
+  private readonly fetchRoles: (userId: string, guildId: string) => Promise<string[]>;
+  private readonly cacheTtlMs: number;
+  private readonly maxCacheEntries: number;
+  private readonly fetchTimeoutMs: number;
+  private readonly now: () => number;
 
-  constructor() {
+  constructor(options: RoleGateOptions = {}) {
     this.gates = new Map();
     this.roleCache = new Map();
     this.adminRoleIds = new Set();
+    this.fetchRoles = options.fetchRoles ?? (async () => []);
+    this.cacheTtlMs = Math.max(0, Math.min(options.cacheTtlMs ?? 300_000, 300_000));
+    this.maxCacheEntries = Math.max(1, Math.min(options.maxCacheEntries ?? 10_000, 10_000));
+    this.fetchTimeoutMs = Math.max(1, Math.min(options.fetchTimeoutMs ?? 5_000, 30_000));
+    this.now = options.now ?? Date.now;
   }
 
   /**
@@ -35,6 +53,7 @@ export class RoleGate {
    */
   registerGate(gate: RoleGate): void {
     this.gates.set(gate.command, gate);
+    this.clearCache();
   }
 
   /**
@@ -42,6 +61,7 @@ export class RoleGate {
    */
   unregisterGate(command: string): void {
     this.gates.delete(command);
+    this.clearCache();
   }
 
   /**
@@ -97,26 +117,46 @@ export class RoleGate {
    * Get user roles with caching
    */
   private async getUserRoles(userId: string, guildId: string): Promise<string[]> {
+    if (!guildId) return [];
+
     const cacheKey = `${userId}:${guildId}`;
     const cached = this.roleCache.get(cacheKey);
 
-    if (cached && Date.now() - cached.cachedAt < cached.ttl) {
+    if (cached && this.now() - cached.cachedAt < cached.ttl) {
       return cached.roles;
     }
+    this.roleCache.delete(cacheKey);
 
-    // TODO: Fetch roles from Discord API
-    const roles: string[] = []; // Placeholder
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const roles = await Promise.race([
+        this.fetchRoles(userId, guildId),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('Discord role lookup timed out')), this.fetchTimeoutMs);
+        }),
+      ]);
 
-    // Cache the result
-    this.roleCache.set(cacheKey, {
-      userId,
-      roles,
-      guildId,
-      cachedAt: Date.now(),
-      ttl: 300000, // 5 minutes
-    });
-
-    return roles;
+      const cachedAt = this.now();
+      for (const [key, entry] of this.roleCache.entries()) {
+        if (cachedAt - entry.cachedAt >= entry.ttl) this.roleCache.delete(key);
+      }
+      if (!this.roleCache.has(cacheKey) && this.roleCache.size >= this.maxCacheEntries) {
+        const oldestKey = this.roleCache.keys().next().value;
+        if (oldestKey !== undefined) this.roleCache.delete(oldestKey);
+      }
+      this.roleCache.set(cacheKey, {
+        userId,
+        roles: [...roles],
+        guildId,
+        cachedAt,
+        ttl: this.cacheTtlMs,
+      });
+      return roles;
+    } catch {
+      return [];
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
   }
 
   /**
@@ -131,6 +171,7 @@ export class RoleGate {
    */
   setAdminRoleIds(roleIds: string[]): void {
     this.adminRoleIds = new Set(roleIds);
+    this.clearCache();
   }
 
   /**
@@ -138,6 +179,7 @@ export class RoleGate {
    */
   addAdminRoleId(roleId: string): void {
     this.adminRoleIds.add(roleId);
+    this.clearCache();
   }
 
   /**
@@ -155,13 +197,20 @@ export class RoleGate {
     this.roleCache.clear();
   }
 
+  /** Invalidate membership cached for every user in one guild. */
+  invalidateGuildCache(guildId: string): void {
+    for (const [key, entry] of this.roleCache.entries()) {
+      if (entry.guildId === guildId) this.roleCache.delete(key);
+    }
+  }
+
   /**
    * Clean up expired cache entries
    */
   cleanupCache(): void {
-    const now = Date.now();
+    const now = this.now();
     for (const [key, entry] of this.roleCache.entries()) {
-      if (now - entry.cachedAt > entry.ttl) {
+      if (now - entry.cachedAt >= entry.ttl) {
         this.roleCache.delete(key);
       }
     }

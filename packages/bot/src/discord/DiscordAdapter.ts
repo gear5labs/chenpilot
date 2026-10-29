@@ -9,6 +9,9 @@ import {
   Message,
   TextChannel,
   ChannelType,
+  Interaction,
+  ButtonInteraction,
+  ChatInputCommandInteraction,
 } from 'discord.js';
 import { ButtonHandler } from './modules/interaction/ButtonHandler';
 import { ThreadSafety } from './modules/thread/ThreadSafety';
@@ -17,11 +20,18 @@ import { SafeBackendClient } from '../commands/services/BackendClient';
 import {
   ModerationPolicyEngine,
   InMemoryAuditSink,
+  JsonLinesAuditSink,
   createDefaultModerationPolicy,
   isModerationEnabled,
   discordMessageToModerationEvent,
+  type ModerationAuditSink,
   type ModerationResult,
 } from '../moderation/index';
+import { mapDiscordCommandOptions } from './commandOptionsMapper';
+import {
+  CommandOptionValidationError,
+  DiscordCommandDto,
+} from './dto/commandOptions.dto';
 
 /**
  * Channels that can receive a plain-text follow-up (warning notice or
@@ -51,6 +61,10 @@ export interface DiscordAdapterConfig {
    * (shared with the legacy adapter's audit log) when omitted.
    */
   moderationLogChannelId?: string;
+  /** Optional append-only JSONL file for durable moderation audit records. */
+  moderationAuditFilePath?: string;
+  /** Optional custom audit sink; takes precedence over moderationAuditFilePath. */
+  moderationAuditSink?: ModerationAuditSink;
 }
 
 export class DiscordAdapter {
@@ -60,7 +74,7 @@ export class DiscordAdapter {
   private roleGate: RoleGate;
   private backendClient: SafeBackendClient;
   private moderationEngine: ModerationPolicyEngine;
-  private moderationAuditSink: InMemoryAuditSink;
+  private moderationAuditSink: ModerationAuditSink;
   private moderationEnabled: boolean;
   private moderationLogChannelId?: string;
   private config: DiscordAdapterConfig;
@@ -81,7 +95,13 @@ export class DiscordAdapter {
     // Initialize modular components
     this.buttonHandler = new ButtonHandler();
     this.threadSafety = new ThreadSafety();
-    this.roleGate = new RoleGate();
+    this.roleGate = new RoleGate({
+      fetchRoles: async (userId, guildId) => {
+        const guild = await this.client.guilds.fetch(guildId);
+        const member = await guild.members.fetch({ user: userId, force: true });
+        return member.roles.cache.map((role) => role.id);
+      },
+    });
     this.backendClient = new SafeBackendClient(config.backendUrl);
 
     // Configure role gate
@@ -94,7 +114,11 @@ export class DiscordAdapter {
       config.moderationLogChannelId ||
       process.env.MODERATION_LOG_CHANNEL_ID ||
       process.env.DISCORD_AUDIT_LOG_CHANNEL_ID;
-    this.moderationAuditSink = new InMemoryAuditSink();
+    this.moderationAuditSink =
+      config.moderationAuditSink ??
+      (config.moderationAuditFilePath
+        ? new JsonLinesAuditSink(config.moderationAuditFilePath)
+        : new InMemoryAuditSink());
     const { rules, escalation } = createDefaultModerationPolicy();
     this.moderationEngine = new ModerationPolicyEngine({
       rules,
@@ -137,12 +161,34 @@ export class DiscordAdapter {
     this.client.on('messageCreate', async (message) => {
       await this.handleMessage(message);
     });
+
+    this.client.on('guildMemberUpdate', (_oldMember, member) => {
+      this.roleGate.invalidateCache(member.id, member.guild.id);
+    });
+    this.client.on('guildMemberAdd', (member) => {
+      this.roleGate.invalidateCache(member.id, member.guild.id);
+    });
+    this.client.on('guildMemberRemove', (member) => {
+      this.roleGate.invalidateCache(member.id, member.guild.id);
+    });
+    this.client.on('roleCreate', (role) => {
+      this.roleGate.invalidateGuildCache(role.guild.id);
+    });
+    this.client.on('roleUpdate', (_oldRole, role) => {
+      this.roleGate.invalidateGuildCache(role.guild.id);
+    });
+    this.client.on('roleDelete', (role) => {
+      this.roleGate.invalidateGuildCache(role.guild.id);
+    });
+    this.client.on('guildUpdate', (_oldGuild, guild) => {
+      this.roleGate.invalidateGuildCache(guild.id);
+    });
   }
 
   /**
    * Handle Discord interactions
    */
-  private async handleInteraction(interaction: any): Promise<void> {
+  private async handleInteraction(interaction: Interaction): Promise<void> {
     try {
       if (interaction.isButton()) {
         await this.handleButtonInteraction(interaction);
@@ -153,15 +199,30 @@ export class DiscordAdapter {
       } else if (interaction.isChatInputCommand()) {
         await this.handleCommandInteraction(interaction);
       }
-    } catch {
-      // TODO: Log error
+    } catch (error) {
+      // Keep diagnostics structured and exclude raw interaction data or error messages.
+      const interactionType = typeof interaction?.isButton === 'function' && interaction.isButton()
+        ? 'button'
+        : typeof interaction?.isModalSubmit === 'function' && interaction.isModalSubmit()
+          ? 'modal'
+          : typeof interaction?.isStringSelectMenu === 'function' && interaction.isStringSelectMenu()
+            ? 'select'
+            : typeof interaction?.isChatInputCommand === 'function' && interaction.isChatInputCommand()
+              ? 'command'
+              : 'unknown';
+      console.error('[DiscordAdapter] Interaction failed', {
+        errorClass: error instanceof Error ? error.name : 'UnknownError',
+        interactionType,
+        commandName: typeof interaction?.commandName === 'string' ? interaction.commandName : undefined,
+        correlationId: typeof interaction?.id === 'string' ? interaction.id : 'unknown',
+      });
     }
   }
 
   /**
    * Handle button interaction
    */
-  private async handleButtonInteraction(interaction: any): Promise<void> {
+  private async handleButtonInteraction(interaction: ButtonInteraction): Promise<void> {
     const discordInteraction = {
       type: 'button' as const,
       id: interaction.id,
@@ -210,42 +271,101 @@ export class DiscordAdapter {
   /**
    * Handle command interaction
    */
-  private async handleCommandInteraction(interaction: any): Promise<void> {
+  private async handleCommandInteraction(interaction: ChatInputCommandInteraction): Promise<void> {
     const commandName = interaction.commandName;
 
     // Check role gate
-    if (interaction.guildId) {
-      const canExecute = await this.roleGate.checkGate(
-        commandName,
-        interaction.user.id,
-        interaction.guildId
-      );
+    const canExecute = await this.roleGate.checkGate(
+      commandName,
+      interaction.user.id,
+      interaction.guildId ?? '',
+    );
 
-      if (!canExecute) {
+    if (!canExecute) {
+      await interaction.reply({
+        content: 'You do not have permission to use this command',
+        ephemeral: true,
+      });
+      return;
+    }
+
+    // Validate and map raw options into versioned DTO
+    let commandDto: DiscordCommandDto;
+    try {
+      commandDto = mapDiscordCommandOptions(commandName, interaction.options?.data);
+    } catch (error) {
+      if (error instanceof CommandOptionValidationError) {
         await interaction.reply({
-          content: 'You do not have permission to use this command',
+          content: `Invalid command options: ${error.message}`,
           ephemeral: true,
         });
         return;
       }
+      throw error;
     }
 
-    // TODO: Execute command via backend
+    // Defer eligible interactions before backend work to avoid Discord 3s initial response timeout
+    let isDeferred = Boolean(interaction.deferred);
+    if (!isDeferred && !interaction.replied && typeof interaction.deferReply === 'function') {
+      try {
+        await interaction.deferReply();
+        isDeferred = true;
+      } catch (error) {
+        console.error('[DiscordAdapter] Failed to defer command interaction:', error);
+      }
+    }
+
     try {
       const result = await this.backendClient.executeCommand(
         commandName,
-        interaction.options.data,
+        commandDto,
         interaction.user.id
       );
 
-      await interaction.reply({
-        content: JSON.stringify(result),
-        ephemeral: false,
-      });
+      await this.sendInteractionResponse(
+        interaction,
+        JSON.stringify(result),
+        false,
+        isDeferred
+      );
     } catch {
+      await this.sendInteractionResponse(
+        interaction,
+        'Failed to execute command',
+        true,
+        isDeferred
+      );
+    }
+  }
+
+  /**
+   * Send interaction response using follow-up (editReply / followUp) if deferred/replied,
+   * or initial reply if not yet acknowledged. Ensures each interaction is acknowledged exactly once.
+   */
+  private async sendInteractionResponse(
+    interaction: ChatInputCommandInteraction,
+    content: string,
+    ephemeral = false,
+    deferredState = false
+  ): Promise<void> {
+    const isDeferred = deferredState || Boolean(interaction.deferred);
+
+    if (isDeferred) {
+      if (typeof interaction.editReply === 'function') {
+        await interaction.editReply({ content });
+      } else if (typeof interaction.followUp === 'function') {
+        await interaction.followUp({ content, ephemeral });
+      }
+    } else if (interaction.replied) {
+      if (typeof interaction.followUp === 'function') {
+        await interaction.followUp({ content, ephemeral });
+      } else if (typeof interaction.editReply === 'function') {
+        await interaction.editReply({ content });
+      }
+    } else if (typeof interaction.reply === 'function') {
       await interaction.reply({
-        content: 'Failed to execute command',
-        ephemeral: true,
+        content,
+        ephemeral,
       });
     }
   }
@@ -356,7 +476,7 @@ export class DiscordAdapter {
    * Read-only access to the moderation audit trail — used by tests and
    * admin tooling that needs to inspect recent decisions.
    */
-  getModerationAuditSink(): InMemoryAuditSink {
+  getModerationAuditSink(): ModerationAuditSink {
     return this.moderationAuditSink;
   }
 

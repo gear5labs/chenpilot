@@ -240,6 +240,10 @@ const notification = createCustomNotification({
 });
 ```
 
+### Discord Output Limits
+
+Discord message content is split into ordered chunks of at most 2,000 characters. Transaction-critical labeled facts are checked after splitting. Embed titles, descriptions, and fields are bounded to Discord's field and aggregate limits; any excess embed text is delivered in the message chunks instead of being silently discarded. Confidential-labeled lines and embed fields (private key, secret, password, passphrase, mnemonic/seed, API key, and access/refresh token) are omitted before delivery. The embed is attached only to the first message chunk.
+
 ## Configuration
 
 ### Retry Configuration

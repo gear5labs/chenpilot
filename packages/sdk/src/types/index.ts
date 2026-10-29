@@ -95,7 +95,12 @@ export type ExecutionResult = AgentResponse;
 
 /** Vault operation payload for the AI agent. */
 export interface VaultOperationRequest {
-  [key: string]: unknown;
+  vaultId: string;
+  operationType: string;
+  asset: string;
+  amount: string;
+  destination?: string;
+  metadata?: Record<string, unknown>;
 }
 
 /** Vault operation result. */
@@ -290,6 +295,8 @@ export interface NetworkStatusConfig {
   horizonUrl?: string;
   /** Optional request timeout in milliseconds. */
   timeout?: number;
+  /** Optional external signal to cancel the status request. */
+  signal?: AbortSignalLike;
 }
 
 /** Network health information. */
@@ -399,6 +406,197 @@ export interface MetadataListResponse {
   hasMore: boolean;
 }
 
+// ─── Contract compatibility metadata types ───────────────────────────────────
+
+/** Capability identifier for a contract */
+export type ContractCapability = string;
+
+/** Metadata for a specific contract version */
+export interface ContractVersionMetadata {
+  /** Semantic version, e.g., "1.2.3" */
+  version: string;
+  /** Optional description of this version */
+  description?: string;
+  /** Capabilities supported by this version */
+  capabilities: ContractCapability[];
+  /** Arbitrary compatibility metadata */
+  metadata?: Record<string, unknown>;
+}
+
+/** Compatibility metadata for a contract across versions */
+export interface ContractCompatibilityMetadata {
+  /** Contract identifier (Stellar contract ID) */
+  contractId: string;
+  /** List of supported versions */
+  versions: ContractVersionMetadata[];
+  /** Default version to use when none specified */
+  defaultVersion?: string;
+}
+
+// ─── Failure / recovery analysis types ──────────────────────────────────────
+
+/** Failure classification types */
+export enum FailureType {
+  CONNECTION = "connection",
+  AUTHENTICATION = "authentication",
+  HARDWARE_WALLET = "hardware_wallet",
+  NETWORK = "network",
+  TRANSACTION = "transaction",
+  CROSS_CHAIN = "cross_chain",
+  UNKNOWN = "unknown",
+}
+
+/** Structured retry guidance for the client */
+export interface RetryGuidance {
+  shouldRetry: boolean;
+  retryAfterMs?: number;
+  maxRetries: number;
+  currentAttempt: number;
+  backoffStrategy?: "fixed" | "exponential" | "exponential_with_jitter";
+}
+
+/** User/Operator recovery instructions */
+export interface RecoveryInstructions {
+  userActions: string[];
+  operatorActions?: string[];
+  nextSteps: string[];
+}
+
+/** Structured failure analysis result */
+export interface FailureAnalysis {
+  type: FailureType;
+  isRecoverable: boolean;
+  requiresManualIntervention: boolean;
+  retryGuidance?: RetryGuidance;
+  recoveryInstructions: RecoveryInstructions;
+  metadata?: Record<string, unknown>;
+}
+
+// ─── Soroban fee bumping types ───────────────────────────────────────────────
+
+/** Fee bump retry strategy for resource-limit exhaustion */
+export type FeeBumpStrategy = "conservative" | "moderate" | "aggressive";
+
+/** Soroban resource limits for a transaction invocation */
+export interface ResourceLimits {
+  cpuInstructions: number;
+  readBytes: number;
+  writeBytes: number;
+  readLedgerEntries: number;
+  writeLedgerEntries: number;
+  txSizeByte: number;
+}
+
+/** Parsed resource exhaustion error from a Soroban RPC response */
+export interface TransactionResourceError {
+  resource: keyof ResourceLimits;
+  required: number;
+  limit: number;
+  message: string;
+}
+
+/** Information passed to the onBump callback */
+export interface FeeBumpAttemptInfo {
+  attempt: number;
+  previousLimits: ResourceLimits;
+  newLimits: ResourceLimits;
+  error: TransactionResourceError;
+}
+
+/** Configuration for the fee bumping engine */
+export interface FeeBumpConfig {
+  strategy?: FeeBumpStrategy;
+  maxAttempts?: number;
+  initialLimits?: ResourceLimits;
+  onBump?: (info: FeeBumpAttemptInfo) => void;
+  /** Optional signal that aborts the entire bump-and-retry loop. */
+  signal?: AbortSignalLike;
+}
+
+/** Result of a fee bumping attempt */
+export interface FeeBumpResult<T = unknown> {
+  success: boolean;
+  result?: T;
+  error?: string;
+  finalLimits: ResourceLimits;
+  attempts: Array<{
+    attempt: number;
+    limits: ResourceLimits;
+    error?: string;
+  }>;
+  estimatedFee: number;
+}
+
+// ─── Multi-sig account configuration types ───────────────────────────────────
+
+/** Threshold category for multi-sig operations */
+export enum ThresholdCategory {
+  /** Low threshold for basic operations */
+  LOW = "low",
+  /** Medium threshold for standard operations */
+  MEDIUM = "medium",
+  /** High threshold for critical operations */
+  HIGH = "high",
+}
+
+/** A signer with associated weight */
+export interface Signer {
+  /** Public key or address of the signer */
+  address: string;
+  /** Weight assigned to this signer (0-255) */
+  weight: number;
+}
+
+/** Threshold requirements for different operation categories */
+export interface ThresholdConfig {
+  /** Threshold for low-security operations (default: 0) */
+  low: number;
+  /** Threshold for medium-security operations (default: 0) */
+  medium: number;
+  /** Threshold for high-security operations (master weight) */
+  high: number;
+}
+
+/** Multi-signature account configuration */
+export interface MultiSigConfig {
+  /** Master account address */
+  masterAccount: string;
+  /** List of signers with their weights */
+  signers: Signer[];
+  /** Threshold requirements for operations */
+  thresholds: ThresholdConfig;
+}
+
+/** Validation result for multi-sig configuration */
+export interface MultiSigValidationResult {
+  /** Whether the configuration is valid */
+  valid: boolean;
+  /** List of validation errors */
+  errors: string[];
+  /** List of validation warnings */
+  warnings: string[];
+}
+
+/** Options for building multi-sig configuration */
+export interface MultiSigBuilderOptions {
+  /** Whether to validate configuration automatically (default: true) */
+  autoValidate?: boolean;
+  /** Whether to allow duplicate signers (default: false) */
+  allowDuplicates?: boolean;
+  /** Maximum number of signers allowed (default: 20) */
+  maxSigners?: number;
+}
+
+/** Result of multi-sig configuration build */
+export interface MultiSigBuildResult {
+  /** The built configuration */
+  config: MultiSigConfig;
+  /** Validation result */
+  validation: MultiSigValidationResult;
+  /** Estimated transaction fee in stroops */
+  estimatedFee?: number;
+}
+
 // ─── Multi-step Idempotency types ──────────────────────────────────────────
 
 export type IdempotencyStepStatus =
@@ -415,11 +613,53 @@ export interface IdempotencyStep {
   idempotencyKey: string;
   result?: unknown;
   error?: string;
-  finalLimits: ResourceLimits;
-  attempts: Array<{
-    attempt: number;
-    limits: ResourceLimits;
-    error?: string;
-  }>;
-  estimatedFee: number;
+  lastUpdated: number;
+  retryCount: number;
+}
+
+export interface IdempotencyTrackerConfig {
+  namespace: string;
+  workflowId: string;
+  clientRequestId?: string;
+  ttl?: number;
+}
+
+export interface IdempotencyWorkflow {
+  idempotencyKey: string;
+  namespace: string;
+  workflowId: string;
+  status: "active" | "completed" | "failed";
+  steps: Map<string, IdempotencyStep>;
+  metadata?: Record<string, unknown>;
+  createdAt: number;
+  lastUpdated: number;
+  ttl: number;
+}
+
+export interface StepExecutionOptions {
+  skipIfCompleted?: boolean;
+  maxRetries?: number;
+  retryDelayMs?: number;
+  timeoutMs?: number;
+}
+
+export interface StepRecoveryPlan {
+  stepsToRetry: string[];
+  stepsToSkip: string[];
+  canContinue: boolean;
+  recommendation: string;
+}
+
+export type StepExecutor = (
+  stepId: string,
+  step: IdempotencyStep,
+  attempt: number
+) => Promise<unknown>;
+
+export interface StepRecoveryStrategyFn {
+  maxRetries?: number;
+  retryDelayMs?: number;
+  canRetry?: boolean;
+  shouldRetry?: (error: Error, attempt: number) => boolean;
+  onFailure?: (step: IdempotencyStep, error: Error) => Promise<void>;
 }

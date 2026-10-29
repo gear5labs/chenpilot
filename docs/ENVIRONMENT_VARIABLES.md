@@ -147,6 +147,8 @@ at the end of the table so reviewers can see them.
 | `PUBLIC_*` | Contracts (`src/services/contracts/contractMetadataRegistry.ts`) | No | — | No | Family: public-network overrides, same suffixes as `TESTNET_*`. |
 | `RBAC_CONTRACT_ID` | Contracts (`src/services/contracts/contractMetadataRegistry.ts`) | No | — | No | RBAC contract address. |
 | `REALTIME_MAX_BUFFERED_EVENTS` | Gateway (`src/Gateway/socketManager.ts`) | No | `100` | No | Per-socket realtime event buffer before slow-consumer handling. |
+| `REALTIME_MAX_SUBSCRIPTIONS_PER_SOCKET` | Gateway (`src/Gateway/subscriptionManager.ts`) | No | `50` | No | Maximum active realtime room subscriptions a single socket may hold. |
+| `REALTIME_MAX_SUBSCRIPTIONS_PER_USER` | Gateway (`src/Gateway/subscriptionManager.ts`) | No | `200` | No | Maximum active realtime room subscriptions a user may hold across all sockets. |
 | `REDIS_DB` | Data (`src/config/config.ts`) | No | `0` | No | Redis logical database index. |
 | `REDIS_HOST` | Data (`src/config/config.ts`) | No | `localhost` | No | Redis host for caching and rate limiting. |
 | `REDIS_PASSWORD` | Data (`src/config/config.ts`) | No | — | Yes | Redis password, when the server requires `AUTH`. |

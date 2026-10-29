@@ -1,3 +1,5 @@
+import { APIEmbed, Client, GatewayIntentBits, Message, TextChannel, Collection, Invite, GuildMember, Interaction, ChatInputCommandInteraction, ThreadChannel } from 'discord.js';
+import { renderTransactionPreview } from "../../src/Security/antiPhishing/xdrPreview";
 import { Client, GatewayIntentBits, Message, TextChannel, Collection, Invite, GuildMember, Interaction, ChatInputCommandInteraction, ThreadChannel } from 'discord.js';
 import { TransactionNotificationData, PriceAlert } from './types';
 import { createTrustlineOperation } from '@chen-pilot/sdk-core';
@@ -1374,6 +1376,14 @@ export class DiscordAdapter {
   }
 
   private formatTransactionMessage(data: TransactionNotificationData): string {
+    if (data.xdr) {
+      const preview = renderTransactionPreview(data.xdr);
+      if (!preview.safe) {
+        return `**${preview.message}**\n\n🚫 **TRANSACTION BLOCKED**`;
+      }
+      return preview.message + "\n\n✅ **Safe to Sign**";
+    }
+
     const statusEmoji = data.successful ? "✅" : "❌";
     const timestamp = new Date(data.timestamp).toLocaleString();
 
@@ -1395,7 +1405,7 @@ export class DiscordAdapter {
     return message;
   }
 
-  async sendNotification(userId: string, message: string): Promise<boolean> {
+  async sendNotification(userId: string, message: string, embed?: APIEmbed): Promise<boolean> {
     if (!this.client || !this.client.user) {
       console.warn("⚠️ Discord bot not initialized");
       return false;
@@ -1408,15 +1418,14 @@ export class DiscordAdapter {
 
     const channel = this.client.channels.cache.get(channelId);
     if (!channel || !channel.isTextBased()) {
-    const channel = this.client.channels.cache.get(
-      channelId
-    ) as TextChannel;
-    if (!channel) {
       return false;
     }
 
     try {
-      await (channel as TextChannel).send(message);
+      await (channel as TextChannel).send({
+        content: message,
+        ...(embed ? { embeds: [embed] } : {}),
+      });
       return true;
     } catch (error) {
       console.error("Error sending Discord notification:", error);

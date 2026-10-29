@@ -206,4 +206,51 @@ router.get("/instances/:instanceId/should-accept", (req: Request, res: Response)
   }
 });
 
+/**
+ * Pause cutovers and new work.
+ */
+router.post("/pause", (_req: Request, res: Response) => {
+  deploymentManager.pause();
+  res.json({ success: true, status: deploymentManager.getDeploymentStatus() });
+});
+
+/**
+ * Allow cutovers again after a pause.
+ */
+router.post("/resume", (_req: Request, res: Response) => {
+  deploymentManager.resume();
+  res.json({ success: true, status: deploymentManager.getDeploymentStatus() });
+});
+
+/**
+ * Roll every instance back to a known version.
+ */
+router.post("/revert", (req: Request, res: Response) => {
+  try {
+    const version = req.body?.version;
+    if (typeof version !== "string" || !version.trim()) {
+      return res.status(400).json({ error: "version is required" });
+    }
+    deploymentManager.revertToVersion(version);
+    res.json({
+      success: true,
+      currentVersion: deploymentManager.getCurrentVersion(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+/**
+ * List instances that are not on the version currently in service.
+ */
+router.get("/drift", (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    driftedInstanceIds: deploymentManager.detectVersionDrift(),
+  });
+});
+
 export default router;

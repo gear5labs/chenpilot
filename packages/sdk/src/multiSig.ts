@@ -8,6 +8,18 @@ import {
   ThresholdCategory,
 } from "./types";
 
+// Re-export the public multi-sig types so consumers can import them either
+// from "./types" or from this module.
+export type {
+  MultiSigConfig,
+  MultiSigValidationResult,
+  MultiSigBuilderOptions,
+  MultiSigBuildResult,
+  Signer,
+  ThresholdConfig,
+};
+export { ThresholdCategory };
+
 /**
  * Builder class for creating and managing multi-signature account configurations.
  * Provides a fluent API for setting up complex multi-sig requirements with validation.

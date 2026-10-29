@@ -3,12 +3,24 @@
  *
  * This file exports all example modules and provides a convenient way
  * to run all examples or specific example categories.
+ *
+ * #1051 — Safety notes:
+ * - Examples that only use mock providers (`ProviderType.MOCK`) are safe by
+ *   default and run in CI with network access disabled/mocked.
+ * - Examples that would connect to real wallets or submit real transactions are
+ *   explicitly marked as **PLACEHOLDER / UNSAFE-BY-DEFAULT** below. They MUST
+ *   NOT submit real transactions unless BOTH environment variables are set:
+ *   `CHEN_PILOT_ALLOW_REAL_TX=true` and
+ *   `CHEN_PILOT_I_UNDERSTAND_REAL_TX=true`.
  */
 
 // Basic usage examples
 export * from "./basic-usage";
 
-// Advanced examples
+// Advanced examples (PLACEHOLDER/INSTRUCTIONAL ONLY — see safety notes above)
+// These examples demonstrate patterns and may use mock providers by default.
+// If they are extended to submit real transactions, they must gate execution
+// behind the real-tx opt-in flags.
 export * from "./multi-signature-treasury";
 export * from "./cross-chain-bridge";
 export * from "./hardware-wallet-integration";

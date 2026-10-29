@@ -40,6 +40,8 @@ export interface RedTeamCase {
   severity: 1 | 2 | 3 | 4 | 5;
   coverage: RedTeamCoverage;
   userInput: string;
+  /** BCP 47 language tag of `userInput` (defaults to "en" when absent). */
+  language?: string;
   /** The untrusted model's planned step — what must be defended against. */
   attack: {
     action: string;

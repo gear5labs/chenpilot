@@ -213,13 +213,14 @@ export class RetentionEngine {
         ) as Array<{ id: string }>;
         const existingUserIds = new Set(rows.map((r) => r.id));
 
-        // We cannot enumerate memoryStore keys directly; this is a best-effort
-        // pass that relies on eraseUser() being the primary cleanup path.
-        // Log that the file-based store is managed via eraseUser.
+        // Expired workflow context is removed here so the next request cannot
+        // see it. User deletion remains the path for wiping a whole account.
+        const expiredWorkflowEntries = memoryStore.purgeExpiredWorkflowContext();
         logger.debug("Retention: conversation_memory managed via eraseUser()", {
           existingUserCount: existingUserIds.size,
+          expiredWorkflowEntries,
         });
-        return 0;
+        return expiredWorkflowEntries;
       } catch {
         return 0;
       }

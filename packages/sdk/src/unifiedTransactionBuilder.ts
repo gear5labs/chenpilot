@@ -116,7 +116,7 @@ export class UnifiedTransactionBuilder {
         this.chainBuilder = new StellarSdk.TransactionBuilder(
           new StellarSdk.Account(this.source.publicKey(), "0"),
           {
-            fee: this.fee,
+            fee: String(this.fee),
             networkPassphrase: this.networkPassphrase,
             timebounds: this.timebounds,
           }
@@ -429,8 +429,8 @@ export function createSponsoredTrustline(
   sponsor: StellarSdk.Keypair,
   sponsoredAccount: string,
   asset: StellarSdk.Asset,
-  limit?: string,
-  networkPassphrase: string
+  networkPassphrase: string,
+  limit?: string
 ): string {
   const builder = new UnifiedTransactionBuilder({
     source: sponsor,

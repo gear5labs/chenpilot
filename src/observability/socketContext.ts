@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { Socket } from "socket.io";
 import { ExecutionContext, getExecutionContext, runWithExecutionContext } from "../observability/context";
 
@@ -10,9 +11,9 @@ export interface SocketContext {
 export function createSocketContext(socket: Socket, userId?: string): ExecutionContext {
   const current = getExecutionContext();
   return {
-    requestId: current?.requestId || undefined,
-    executionId: current?.executionId || undefined,
-    rootExecutionId: current?.rootExecutionId || undefined,
+    requestId: current?.requestId || randomUUID(),
+    executionId: current?.executionId || randomUUID(),
+    rootExecutionId: current?.rootExecutionId || current?.executionId || randomUUID(),
     parentExecutionId: current?.parentExecutionId,
     userId,
     roles: userId ? [] : undefined,
@@ -26,6 +27,31 @@ export function createSocketContext(socket: Socket, userId?: string): ExecutionC
     component: "websocket",
     messageId: socket.id,
   };
+}
+
+/**
+ * Run `callback` under a fresh socket request context.
+ *
+ * Unlike `propagateSocketContext` (which reuses any ambient ids), this always
+ * mints a new `requestId` for the inbound socket event so that a single
+ * subscribe/unsubscribe/error can be correlated across logs and the client
+ * error payload.
+ */
+export function runWithSocketRequest<T>(
+  socket: Socket,
+  userId: string | undefined,
+  callback: () => T
+): T {
+  const current = getExecutionContext();
+  return runWithExecutionContext(
+    {
+      ...createSocketContext(socket, userId),
+      requestId: randomUUID(),
+      executionId: current?.executionId || randomUUID(),
+      rootExecutionId: current?.rootExecutionId || current?.executionId || randomUUID(),
+    },
+    callback
+  );
 }
 
 export function propagateSocketContext<T>(

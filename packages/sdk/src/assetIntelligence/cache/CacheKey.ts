@@ -70,8 +70,21 @@ export class CacheKey {
    * Normalize asset to consistent string representation
    */
   private static normalizeAsset(asset: Asset): string {
-    const issuer = asset.issuer || 'native';
-    return `${asset.network}:${asset.code}:${issuer}`;
+    if (!asset || typeof asset.code !== 'string' || typeof asset.network !== 'string') {
+      throw new Error('Asset code and network are required');
+    }
+
+    const network = asset.network.trim().toLowerCase();
+    const code = asset.code.trim().toUpperCase();
+    const issuer = (asset.issuer || 'native').trim().toUpperCase();
+
+    if (!network || !code || !issuer || /[:|]/.test(network) || /[:|]/.test(code) || /[:|]/.test(issuer)) {
+      throw new Error('Asset identifiers cannot contain cache-key delimiters');
+    }
+
+    // Length-prefix each component so different identifiers cannot collide
+    // when they are later combined into a persistent cache key.
+    return [network, code, issuer].map((part) => `${part.length}:${part}`).join('|');
   }
 
   /**
