@@ -1,7 +1,7 @@
-import { injectable } from "tsyringe";
+﻿import { injectable } from "tsyringe";
 import { Repository } from "typeorm";
 import crypto from "crypto";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { User } from "./user.entity";
 import AppDataSource from "../config/Datasource";
 import { type TokenService, tokenService } from "../services/token.service";
@@ -291,3 +291,4 @@ export class AuthService {
 }
 
 export const authService = new AuthService();
+

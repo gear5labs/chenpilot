@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "@chen-pilot/bot",
   "version": "0.1.0",
   "description": "Unified Telegram & Discord bot for Chen Pilot",
@@ -10,10 +10,9 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "@chen-pilot/sdk-core": "workspace:*",
+    "@chen-pilot/sdk-core": "*",
     "axios": "^1.7.2",
-    "chartjs-node-canvas": "^4.1.6",
-    "discord.js": "^14.16.3",
+        "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
     "stellar-sdk": "^13.0.0",
     "telegraf": "^4.16.3"
@@ -28,3 +27,4 @@
     "typescript": "^5.7.3"
   }
 }
+
