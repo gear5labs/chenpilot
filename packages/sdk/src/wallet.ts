@@ -1,5 +1,7 @@
 // packages/sdk/src/wallet.ts
 
+import { parsePublicAmount } from "./fixedAmount";
+
 export interface RpcClientInterface {
   getAccount(accountId: string): Promise<any>;
 }
@@ -61,19 +63,19 @@ export interface AccountBalanceData {
  * Computes spendable XLM taking into account account reserves, selling liabilities, and fees.
  */
 export function computeSpendableXlm(data: AccountBalanceData): string {
-  const totalBalance = parseFloat(data.balance || '0');
-  const sellingLiabilities = parseFloat(data.sellingLiabilities || '0');
+  const decimals = 7;
+  const scale = 10n ** BigInt(decimals);
+  const totalBalance = parsePublicAmount(data.balance || "0", decimals);
+  const sellingLiabilities = parsePublicAmount(data.sellingLiabilities || "0", decimals);
   const numSubentries = data.numSubentries || 0;
-  
-  const baseReserve = parseFloat(data.baseReserve || '0.5');
-  const reserveBase = parseFloat(data.reserveBase || '1.0');
-  const estimatedFee = parseFloat(data.estimatedFee || '0.0001'); // 1 stroop default or configured fee
+  const baseReserve = parsePublicAmount(data.baseReserve || "0.5", decimals);
+  const reserveBase = parsePublicAmount(data.reserveBase || "1.0", decimals);
+  const estimatedFee = parsePublicAmount(data.estimatedFee || "0.0001", decimals);
 
-  // Total Reserve = ReserveBase + (numSubentries * baseReserve)
-  const totalReserve = reserveBase + numSubentries * baseReserve;
-
-  // Spendable = Total Balance - Total Reserve - Selling Liabilities - Estimated Fee
+  const totalReserve = reserveBase + BigInt(numSubentries) * baseReserve;
   const spendable = totalBalance - totalReserve - sellingLiabilities - estimatedFee;
-
-  return Math.max(0, spendable).toFixed(7);
+  const floored = spendable > 0n ? spendable : 0n;
+  const intPart = floored / scale;
+  const frac = (floored % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return frac ? `${intPart}.${frac}` : intPart.toString();
 }

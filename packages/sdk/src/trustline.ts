@@ -702,19 +702,22 @@ export class TrustlineWorkflowBuilder {
   }
 }
 
+/** Compare a payment amount to remaining trustline capacity without binary floats. */
 export function validateDestinationReceivingCapacity(
   trustline: TrustlineRecord | null,
   amount: string
 ): boolean {
   if (!trustline || !trustline.authorized) return false;
-
-  const balanceNum = parseFloat(trustline.balance);
-  const limitNum = parseFloat(trustline.limit);
-  const buyingLiabilitiesNum = parseFloat(trustline.buyingLiabilities || "0");
-  const amountNum = parseFloat(amount);
-
-  const availableCapacity = limitNum - (balanceNum + buyingLiabilitiesNum);
-  return amountNum <= availableCapacity;
+  try {
+    const decimals = 7;
+    const balance = parseScaledAmount(trustline.balance, decimals);
+    const limit = parseScaledAmount(trustline.limit, decimals);
+    const buying = parseScaledAmount(trustline.buyingLiabilities || "0", decimals);
+    const payment = parseScaledAmount(amount, decimals);
+    return payment <= limit - (balance + buying);
+  } catch {
+    return false;
+  }
 }
 
 export default hasValidStellarTrustline;
