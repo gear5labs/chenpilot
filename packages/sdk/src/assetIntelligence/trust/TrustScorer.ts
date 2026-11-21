@@ -4,6 +4,7 @@
  */
 
 import { TrustSignal, TrustScore, Asset } from '../core/types';
+import type { AbortSignalLike } from '../../types';
 import { TrustSignals } from './TrustSignals';
 import { TrustRegistry } from './TrustRegistry';
 
@@ -29,21 +30,26 @@ export class TrustScorer {
   }
 
   /**
-   * Calculate overall trust score for an asset
+   * Calculate overall trust score for an asset.
+   *
+   * @param asset - The asset to score.
+   * @param signal - Optional cancellation signal.  When the signal fires, the
+   *   returned promise rejects with an AbortError before any partial result is
+   *   returned or cached.
    */
-  async calculateTrustScore(asset: Asset): Promise<TrustScore> {
-    const fetchedSignals = await this.trustSignals.getAllSignals(asset);
+  async calculateTrustScore(asset: Asset, signal?: AbortSignalLike): Promise<TrustScore> {
+    const fetchedSignals = await this.trustSignals.getAllSignals(asset, signal);
     const now = Date.now();
-    const signals = fetchedSignals.filter(signal =>
-      Number.isFinite(signal.value)
-      && signal.value >= 0
-      && signal.value <= 100
-      && Number.isFinite(signal.timestamp)
-      && now - signal.timestamp >= 0
-      && now - signal.timestamp <= TrustScorer.MAX_SIGNAL_AGE_MS
+    const signals = fetchedSignals.filter(s =>
+      Number.isFinite(s.value)
+      && s.value >= 0
+      && s.value <= 100
+      && Number.isFinite(s.timestamp)
+      && now - s.timestamp >= 0
+      && now - s.timestamp <= TrustScorer.MAX_SIGNAL_AGE_MS
     );
     const { overall, confidence } = this.calculateWeightedScore(signals);
-    const hasMaliciousSignal = signals.some(signal => signal.value <= this.config.thresholds.malicious);
+    const hasMaliciousSignal = signals.some(s => s.value <= this.config.thresholds.malicious);
     const verificationStatus = hasMaliciousSignal
       ? 'malicious'
       : confidence > 0 ? this.determineVerificationStatus(overall) : 'unverified';

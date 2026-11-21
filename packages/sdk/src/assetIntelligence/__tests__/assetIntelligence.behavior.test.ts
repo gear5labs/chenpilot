@@ -185,3 +185,213 @@ describe('TrustScorer handling of unavailable and stale signals', () => {
     });
   });
 });
+
+// ─── Cancellation and per-provider deadline tests ────────────────────────────
+
+/**
+ * Minimal AbortController stub that works in both Node and DOM environments.
+ * Returns the controller so tests can fire `.abort()` at a chosen moment.
+ */
+function makeController(): AbortController {
+  return new AbortController();
+}
+
+describe('AssetIntelligence cancellation and per-provider deadlines', () => {
+  let intelligence: AssetIntelligence;
+
+  beforeEach(() => {
+    intelligence = new AssetIntelligence(config);
+  });
+
+  afterEach(() => {
+    intelligence.destroy();
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  // ── getAssetInfo ──────────────────────────────────────────────────────────
+
+  it('rejects immediately when the signal is already aborted before getAssetInfo starts', async () => {
+    const controller = makeController();
+    controller.abort();
+
+    // fetch should never be called — the guard at the top of getAssetInfo fires first.
+    const fetchSpy = jest.spyOn(global, 'fetch');
+
+    await expect(intelligence.getAssetInfo(asset, { signal: controller.signal }))
+      .rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not populate the cache when getAssetInfo is aborted mid-flight', async () => {
+    const controller = makeController();
+
+    // Horizon fetch resolves normally …
+    jest.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(horizonResponse([
+        { asset_code: 'USDC', asset_issuer: 'GISSUER', home_domain: 'issuer.example' },
+      ]))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => '[[CURRENCIES]]\ncode="USDC"\nissuer="GISSUER"\nname="USD Coin"\ndisplay_decimals=6',
+      } as Response);
+
+    // … but the caller aborts after metadata completes, before trust/compatibility.
+    jest.spyOn((intelligence as any).trustScorer, 'calculateTrustScore')
+      .mockImplementation(async () => {
+        controller.abort();                        // fire the signal during the trust call
+        return { overall: 0, confidence: 0, signals: [], verificationStatus: 'unverified', lastUpdated: Date.now() };
+      });
+
+    const cacheSpy = jest.spyOn((intelligence as any).cache, 'set');
+
+    await expect(intelligence.getAssetInfo(asset, { signal: controller.signal }))
+      .rejects.toMatchObject({ name: 'AbortError' });
+
+    // The cache must NOT have been written with partial data.
+    expect(cacheSpy).not.toHaveBeenCalledWith(expect.anything(), 'general', expect.anything());
+  });
+
+  it('releases in-flight state: a subsequent getAssetInfo after abort fetches fresh data', async () => {
+    const controller = makeController();
+    controller.abort();
+
+    jest.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(horizonResponse([
+        { asset_code: 'USDC', asset_issuer: 'GISSUER', home_domain: 'issuer.example' },
+      ]))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => '[[CURRENCIES]]\ncode="USDC"\nissuer="GISSUER"\nname="USD Coin"\ndisplay_decimals=6',
+      } as Response);
+    jest.spyOn((intelligence as any).trustScorer, 'calculateTrustScore').mockResolvedValue({
+      overall: 0, confidence: 0, signals: [], verificationStatus: 'unverified', lastUpdated: Date.now(),
+    });
+    jest.spyOn(intelligence, 'checkCompatibility').mockResolvedValue({
+      compatible: true, reasons: [], warnings: [], lastChecked: Date.now(),
+    });
+
+    // First call — aborted immediately, nothing cached.
+    await expect(intelligence.getAssetInfo(asset, { signal: controller.signal }))
+      .rejects.toMatchObject({ name: 'AbortError' });
+
+    // Second call — no external signal, should succeed and populate the cache.
+    const result = await intelligence.getAssetInfo(asset);
+    expect(result?.metadata).toMatchObject({ name: 'USD Coin' });
+  });
+
+  // ── getTrustScore ─────────────────────────────────────────────────────────
+
+  it('rejects immediately when the signal is already aborted before getTrustScore starts', async () => {
+    const controller = makeController();
+    controller.abort();
+
+    const scoreSpy = jest.spyOn((intelligence as any).trustScorer, 'calculateTrustScore');
+
+    await expect(intelligence.getTrustScore(asset, { signal: controller.signal }))
+      .rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(scoreSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not cache a partial trust score when the signal fires during the trust fetch', async () => {
+    const controller = makeController();
+
+    jest.spyOn((intelligence as any).trustScorer, 'calculateTrustScore')
+      .mockImplementation(async () => {
+        controller.abort();
+        return { overall: 42, confidence: 50, signals: [], verificationStatus: 'unverified', lastUpdated: Date.now() };
+      });
+
+    const cacheSpy = jest.spyOn((intelligence as any).cache, 'set');
+
+    await expect(intelligence.getTrustScore(asset, { signal: controller.signal }))
+      .rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(cacheSpy).not.toHaveBeenCalledWith(expect.anything(), 'trust', expect.anything());
+  });
+
+  // ── checkCompatibility ────────────────────────────────────────────────────
+
+  it('rejects immediately when the signal is already aborted before checkCompatibility starts', async () => {
+    const controller = makeController();
+    controller.abort();
+
+    const checkSpy = jest.spyOn((intelligence as any).networkCompatibility, 'checkCompatibility');
+
+    await expect(
+      intelligence.checkCompatibility(asset, { network: 'testnet' }, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(checkSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not cache a partial compatibility result when the signal fires during the check', async () => {
+    const controller = makeController();
+
+    jest.spyOn((intelligence as any).networkCompatibility, 'checkCompatibility')
+      .mockImplementation(async () => {
+        controller.abort();
+        return { compatible: true, reasons: [], warnings: [], lastChecked: Date.now() };
+      });
+    jest.spyOn((intelligence as any).assetValidator, 'validateMetadata')
+      .mockResolvedValue({ verified: true, status: 'verified', reasons: [], score: 100 });
+
+    const cacheSpy = jest.spyOn((intelligence as any).cache, 'set');
+
+    await expect(
+      intelligence.checkCompatibility(asset, { network: 'testnet' }, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(cacheSpy).not.toHaveBeenCalledWith(expect.anything(), 'compatibility', expect.anything());
+  });
+
+  // ── Per-provider deadline boundary ────────────────────────────────────────
+
+  it('rejects with AbortError when the metadata deadline fires before Horizon responds', async () => {
+    // Fetch hangs indefinitely — the metadataMs deadline should abort it.
+    jest.spyOn(global, 'fetch').mockImplementation(
+      () => new Promise<Response>(() => { /* never resolves */ }),
+    );
+
+    // Use a very short deadline so the test does not rely on real timers.
+    jest.useFakeTimers();
+
+    const lookupPromise = intelligence.getAssetInfo(asset, {
+      deadlines: { metadataMs: 50 },
+    });
+
+    // Advance past the deadline.
+    jest.advanceTimersByTime(100);
+
+    await expect(lookupPromise).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('resolves normally when all providers respond within their deadline', async () => {
+    jest.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(horizonResponse([
+        { asset_code: 'USDC', asset_issuer: 'GISSUER', home_domain: 'issuer.example' },
+      ]))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => '[[CURRENCIES]]\ncode="USDC"\nissuer="GISSUER"\nname="USD Coin"\ndisplay_decimals=6',
+      } as Response);
+    jest.spyOn((intelligence as any).trustScorer, 'calculateTrustScore').mockResolvedValue({
+      overall: 0, confidence: 0, signals: [], verificationStatus: 'unverified', lastUpdated: Date.now(),
+    });
+    jest.spyOn(intelligence, 'checkCompatibility').mockResolvedValue({
+      compatible: true, reasons: [], warnings: [], lastChecked: Date.now(),
+    });
+
+    // Generous deadlines — every mock resolves immediately so this must succeed.
+    const result = await intelligence.getAssetInfo(asset, {
+      deadlines: { metadataMs: 10_000, trustMs: 10_000, compatibilityMs: 10_000 },
+    });
+
+    expect(result?.metadata).toMatchObject({ name: 'USD Coin' });
+  });
+});
