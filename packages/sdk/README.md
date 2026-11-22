@@ -25,6 +25,7 @@ Core SDK for Chen Pilot cross-chain operations with Stellar/Soroban support.
 - **Event Subscriptions**: Subscribe to Soroban contract events
 - **Recovery Engine**: Handle cross-chain transaction failures and retries
 - **Plan Verification**: Verify and validate transaction plans
+- **Air-Gapped Signing Manifests**: Deterministic, verifiable descriptions of XDR for offline review ([docs](docs/AIR_GAPPED_SIGNING.md))
 - **TypeScript Support**: Full type definitions included
 
 ## Installation
@@ -682,7 +683,11 @@ See [NETWORK_STATUS.md](./NETWORK_STATUS.md) for details.
 Check the `examples/` directory for complete usage examples:
 
 - `networkStatus.example.ts` - Network status monitoring
+- `airGappedSigning.ts` - QR/file air-gapped signing with verifiable manifests
 - More examples coming soon
+
+See [docs/AIR_GAPPED_SIGNING.md](docs/AIR_GAPPED_SIGNING.md) for the signing
+manifest flow, encoding, verification, and threat model.
 
 ## Testing
 

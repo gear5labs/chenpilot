@@ -96,6 +96,7 @@ export {
 export * from "./advancedOps";
 export * from "./signerSession";
 export * from "./offlineSigning";
+export * from "./signingManifest";
 export * from "./performance";
 export {
   AssetIntelligence,

@@ -357,6 +357,33 @@ export const SDK_ERROR_DEFINITIONS = [
     message: "Transaction fee too low",
     description: "The offered fee was below the network minimum.",
   },
+  {
+    code: "SIGNING_MANIFEST_INVALID",
+    module: M.TRANSACTION,
+    category: C.VALIDATION,
+    recoverable: false,
+    message: "Invalid signing manifest",
+    description:
+      "A signing manifest was malformed, non-canonically encoded, or exceeded a bound.",
+  },
+  {
+    code: "SIGNING_MANIFEST_MISMATCH",
+    module: M.TRANSACTION,
+    category: C.VALIDATION,
+    recoverable: false,
+    message: "Signing manifest mismatch",
+    description:
+      "A signing manifest did not match the transaction XDR or expected network. " +
+      "details.field names the first mismatched field.",
+  },
+  {
+    code: "SIGNING_MANIFEST_VERSION_UNSUPPORTED",
+    module: M.TRANSACTION,
+    category: C.COMPATIBILITY,
+    recoverable: false,
+    message: "Unsupported signing manifest version",
+    description: "The signing manifest schema version is not understood by this SDK.",
+  },
 
   // ── Contract registry ────────────────────────────────────────────────────────
   {
