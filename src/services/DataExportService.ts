@@ -8,6 +8,7 @@ import { memoryStore } from "../Agents/memory/memory";
 import logger from "../config/logger";
 import { auditLogService } from "../AuditLog/auditLog.service";
 import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
+import { formatCsv } from "../Reporting/csvEscaper";
 
 export interface ExportScope {
   userId?: string;
@@ -275,6 +276,28 @@ export class DataExportService {
   async exportUserDataAsBuffer(userId: string): Promise<Buffer> {
     const jsonString = await this.exportUserDataAsJSON(userId);
     return Buffer.from(jsonString, "utf-8");
+  }
+
+  async exportUserDataAsCsv(userId: string): Promise<string> {
+    const exportData = await this.exportUserData(userId);
+    const headers = ["Category", "Field", "Value", "Timestamp", "Notes"];
+    const rows: unknown[][] = [
+      ["Profile", "ID", exportData.profile.id, exportData.profile.createdAt, ""],
+      ["Profile", "Name", exportData.profile.name, exportData.profile.updatedAt, ""],
+      ["Profile", "Address", exportData.profile.address, "", ""],
+      ["Profile", "Email", exportData.profile.email || "", "", ""],
+      ["Profile", "Role", exportData.profile.role, "", ""],
+      ["Profile", "TokenType", exportData.profile.tokenType, "", ""],
+    ];
+    for (const contact of exportData.contacts) {
+      rows.push(["Contact", contact.name, contact.address, contact.createdAt, contact.nickname || ""]);
+    }
+    return formatCsv(headers, rows);
+  }
+
+  async exportUserDataAsCsvBuffer(userId: string): Promise<Buffer> {
+    const csvString = await this.exportUserDataAsCsv(userId);
+    return Buffer.from(csvString, "utf-8");
   }
 
   async requestAsyncExport(

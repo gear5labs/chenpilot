@@ -182,6 +182,71 @@ router.get(
 );
 
 /**
+ * GET /export/download/csv - Download user profile data as a sanitized, RFC 4180 CSV file
+ * Requires authentication
+ * Constrains scope to authenticated principal
+ */
+router.get(
+  "/download/csv",
+  authenticateToken,
+  async (req: Request, res: Response) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          message: "Authentication required",
+        });
+      }
+
+      if (!(await verifyExportScope(req, res))) return;
+
+      const userId = req.user.userId;
+      const userName = req.user.username || "user";
+
+      logger.info("User profile CSV download requested", { userId });
+
+      const exportBuffer =
+        await dataExportService.exportUserDataAsCsvBuffer(userId);
+
+      const filename = `${userName}_profile_export_${new Date().toISOString().split("T")[0]}.csv`;
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${filename}"`
+      );
+      res.setHeader("Content-Length", exportBuffer.length.toString());
+
+      logger.info("User profile CSV download completed", {
+        userId,
+        filename,
+        fileSize: exportBuffer.length,
+      });
+
+      return res.send(exportBuffer);
+    } catch (error) {
+      if (error instanceof ExportOwnershipError) {
+        return res.status(403).json({
+          success: false,
+          message: error.message,
+        });
+      }
+      logger.error("Profile CSV download error", {
+        error,
+        userId: req.user?.userId,
+      });
+      return res.status(500).json({
+        success: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to download profile CSV data",
+      });
+    }
+  }
+);
+
+/**
  * GET /export/metadata - Get export metadata without full data
  * Requires authentication
  * Constrains scope to authenticated principal
