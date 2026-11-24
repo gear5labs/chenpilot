@@ -81,6 +81,9 @@ export enum AuditAction {
   BOT_LINK_TOKEN_GENERATED = "bot_link_token_generated",
   BOT_LINK_TOKEN_VERIFIED = "bot_link_token_verified",
 
+  // Bot session revocation
+  BOT_SESSIONS_REVOKED = "bot_sessions_revoked",
+
   // Wallet ownership challenges
   WALLET_CHALLENGE_ISSUED = "wallet_challenge_issued",
   WALLET_CHALLENGE_VERIFIED = "wallet_challenge_verified",

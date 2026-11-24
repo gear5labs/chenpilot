@@ -159,6 +159,10 @@ router.get("/identities/:userId", authenticateToken, async (req: Request, res: R
 /**
  * DELETE /api/bot-identity/unlink
  * Unlink a bot identity
+ *
+ * Removes the platform-to-user link and deactivates all active bot
+ * conversational sessions for that platform. JWT sessions are left
+ * intact so the user can re-link if desired.
  */
 router.delete("/unlink", authenticateToken, async (req: Request, res: Response) => {
   try {
@@ -176,7 +180,7 @@ router.delete("/unlink", authenticateToken, async (req: Request, res: Response) 
 
     res.json({
       success: true,
-      message: "Identity unlinked successfully",
+      message: "Identity unlinked and bot sessions deactivated successfully",
     });
   } catch (error) {
     logger.error("Failed to unlink identity", { error });
@@ -186,5 +190,71 @@ router.delete("/unlink", authenticateToken, async (req: Request, res: Response) 
     });
   }
 });
+
+/**
+ * POST /api/bot-identity/revoke-sessions
+ * Revoke all bot-linked sessions for the authenticated user.
+ *
+ * Body (optional):
+ *   - platform: "telegram" | "discord" — limit revocation to one platform
+ *   - revokeJwtSessions: boolean — also revoke all JWT refresh-token sessions
+ *     (full logout from every device). Default false.
+ *
+ * This is the "kill switch" for bot-linked access. Use it when access is lost,
+ * suspected compromised, or no longer needed.
+ *
+ * Response:
+ *   200 { success, botSessionsDeactivated, jwtSessionsRevoked }
+ *   401 if not authenticated
+ */
+router.post(
+  "/revoke-sessions",
+  authenticateToken,
+  async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.user as { userId: string };
+      const { platform, revokeJwtSessions } = req.body ?? {};
+
+      // Validate platform if provided
+      if (
+        platform !== undefined &&
+        !["telegram", "discord"].includes(platform)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid platform. Must be 'telegram' or 'discord'",
+        });
+      }
+
+      const result = await botIdentityService.revokeAllBotLinkedSessions(
+        userId,
+        {
+          platform: platform as BotPlatform | undefined,
+          revokeJwtSessions: Boolean(revokeJwtSessions),
+        }
+      );
+
+      res.json({
+        success: true,
+        message: `${result.botSessionsDeactivated} bot session(s) deactivated${
+          result.jwtSessionsRevoked > 0
+            ? `, ${result.jwtSessionsRevoked} JWT session(s) revoked`
+            : ""
+        }`,
+        botSessionsDeactivated: result.botSessionsDeactivated,
+        jwtSessionsRevoked: result.jwtSessionsRevoked,
+      });
+    } catch (error) {
+      logger.error("Failed to revoke bot sessions", { error });
+      res.status(500).json({
+        success: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to revoke sessions",
+      });
+    }
+  }
+);
 
 export default router;
