@@ -524,7 +524,22 @@ export interface FeeBumpResult<T = unknown> {
     limits: ResourceLimits;
     error?: string;
   }>;
+  /** Estimated fee in stroops based on the final resource limits. */
   estimatedFee: number;
+  /**
+   * Unix epoch ms when this estimate was computed.  Consumers that cache the
+   * result should compare this against the current time to decide whether to
+   * re-simulate before submitting.
+   */
+  estimatedAt: number;
+  /**
+   * How the fee was derived:
+   * - `"resource_calculation"` — derived from the final `ResourceLimits` via
+   *   the bumping engine's internal cost model.
+   * - `"fallback"`            — the engine could not complete normally; the
+   *   fee is an approximation based on the last known limits.
+   */
+  feeSource: "resource_calculation" | "fallback";
 }
 
 // ─── Multi-sig account configuration types ───────────────────────────────────

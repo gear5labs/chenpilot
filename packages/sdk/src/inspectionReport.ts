@@ -6,10 +6,71 @@
  * user approves it. This module defines a versioned, serializable report shape
  * and a pure builder that assembles it from simulation output, so any app can
  * render the result directly without re-deriving the format.
+ *
+ * ## Fee-estimate provenance and freshness
+ *
+ * Network congestion can change rapidly; an estimate that was valid at
+ * simulation time may be dangerously stale by the time the user approves or the
+ * transaction is submitted.  Every `InspectionFeeEstimate` therefore carries a
+ * `provenance` block that records:
+ *
+ *   - `estimatedAt`     — the Unix ms timestamp when the estimate was computed.
+ *   - `simulationLedger` — (optional) the ledger sequence the simulation ran
+ *                          against, so callers can correlate the estimate with
+ *                          the on-chain state it reflects.
+ *   - `network`         — the Soroban/Horizon network the simulation targeted.
+ *   - `source`          — `"simulation"` (live RPC call) | `"fallback"` (the
+ *                          caller supplied no `minResourceFee` and the builder
+ *                          fell back to the base fee alone).
+ *
+ * Use `isFeeEstimateStale(estimate, ttlMs)` to decide whether the estimate is
+ * still usable before building or submitting a transaction.  The builder also
+ * emits a `FEE_ESTIMATE_STALE` warning automatically when the caller passes a
+ * `feeEstimateAge` that exceeds `feeEstimateTtlMs`.
  */
 
 /** Report format version. Bump on breaking shape changes. */
 export const INSPECTION_REPORT_VERSION = "1" as const;
+
+/**
+ * Default TTL for a fee estimate.  Stellar ledgers close every ~5 s and fee
+ * statistics are recalculated each ledger; 60 s gives a comfortable window
+ * while still catching stale estimates before they cause a failed submission.
+ */
+export const DEFAULT_FEE_ESTIMATE_TTL_MS = 60_000;
+
+/**
+ * Provenance metadata attached to every `InspectionFeeEstimate`.
+ *
+ * Serializes cleanly to JSON — no methods, no non-primitive values.
+ */
+export interface FeeEstimateProvenance {
+  /**
+   * Unix epoch ms when the fee estimate was computed.  Set by
+   * `buildInspectionReport` via the same `now` clock that populates
+   * `generatedAt`, so the two values are always consistent.
+   */
+  estimatedAt: number;
+  /**
+   * Ledger sequence the simulation ran against, when available.  Absent for
+   * estimates that come from a failed simulation or a fallback path.
+   */
+  simulationLedger?: number;
+  /**
+   * Network the simulation targeted (`"testnet"` | `"mainnet"` | any string
+   * accepted by the caller).  Defaults to `"unknown"` when the caller does not
+   * supply one.
+   */
+  network: string;
+  /**
+   * How the fee values were derived:
+   * - `"simulation"` — the RPC simulation returned a `minResourceFee`.
+   * - `"fallback"`   — no `minResourceFee` was available; the estimate uses the
+   *                    inclusion fee alone.  Such estimates are inherently less
+   *                    precise for Soroban calls.
+   */
+  source: "simulation" | "fallback";
+}
 
 /** Overall verdict for a transaction. */
 export type InspectionStatus = "ok" | "warning" | "error";
@@ -27,7 +88,14 @@ export interface InspectionWarning {
   severity: WarningSeverity;
 }
 
-/** Fee estimate, in stroops, expressed as decimal strings to stay exact. */
+/**
+ * Fee estimate, in stroops, expressed as decimal strings to stay exact.
+ *
+ * Every estimate now carries a `provenance` block so callers can determine
+ * whether the estimate is still usable.  Use `isFeeEstimateStale()` or check
+ * `provenance.estimatedAt` directly before building or submitting a
+ * transaction.
+ */
 export interface InspectionFeeEstimate {
   /** Lowest fee likely to succeed. */
   min: string;
@@ -37,6 +105,36 @@ export interface InspectionFeeEstimate {
   max: string;
   /** Unit of the values above. */
   currency: "stroops";
+  /**
+   * Where and when this estimate came from.  Always present on estimates
+   * produced by `buildInspectionReport`; may be absent on hand-crafted or
+   * legacy objects, in which case treat the estimate as stale.
+   */
+  provenance: FeeEstimateProvenance;
+}
+
+/**
+ * Returns `true` when the fee estimate is older than `ttlMs` milliseconds.
+ *
+ * Pass `now` to override the wall clock (useful in tests).
+ *
+ * When `estimate.provenance` is absent (legacy / hand-crafted object), the
+ * estimate is treated as unconditionally stale to fail safely.
+ *
+ * @example
+ * ```ts
+ * if (isFeeEstimateStale(report.feeEstimate)) {
+ *   // Re-simulate before submitting
+ * }
+ * ```
+ */
+export function isFeeEstimateStale(
+  estimate: InspectionFeeEstimate,
+  ttlMs: number = DEFAULT_FEE_ESTIMATE_TTL_MS,
+  now: () => number = Date.now
+): boolean {
+  if (!estimate.provenance) return true; // missing provenance → always stale
+  return now() - estimate.provenance.estimatedAt >= ttlMs;
 }
 
 /** A signer the transaction requires, with why it is needed. */
@@ -159,6 +257,31 @@ export interface InspectionInput {
   feeMultipliers?: { min?: number; recommended?: number; max?: number };
   /** Injectable clock for deterministic tests. */
   now?: () => number;
+  /**
+   * Network the simulation ran against.  Stored verbatim in
+   * `feeEstimate.provenance.network`.  Defaults to `"unknown"`.
+   */
+  network?: string;
+  /**
+   * Ledger sequence the simulation ran against, when available.  Stored in
+   * `feeEstimate.provenance.simulationLedger` so consumers can verify the
+   * estimate reflects current on-chain state.
+   */
+  simulationLedger?: number;
+  /**
+   * Maximum age (ms) of an **externally produced** fee estimate before the
+   * builder emits a `FEE_ESTIMATE_STALE` warning.  Only applies when
+   * `feeEstimateAge` is also provided.  Defaults to
+   * {@link DEFAULT_FEE_ESTIMATE_TTL_MS}.
+   */
+  feeEstimateTtlMs?: number;
+  /**
+   * Age (ms) of a pre-computed fee estimate being passed into this build.
+   * When provided alongside `feeEstimateTtlMs` (or the default TTL) and the
+   * age exceeds the TTL, the builder adds a `FEE_ESTIMATE_STALE` warning so
+   * callers that reuse cached reports are alerted.
+   */
+  feeEstimateAge?: number;
 }
 
 function toBigInt(value: string | number | undefined, fallback = 0n): bigint {
@@ -222,11 +345,23 @@ export function buildInspectionReport(
   const min = scale(recommendedRaw, mult.min ?? 1);
   const max = scale(recommendedRaw, mult.max ?? 1.5);
 
+  // Build provenance: record when this estimate was produced, what network it
+  // targets, and whether it came from a live simulation or a fallback path.
+  const provenance: FeeEstimateProvenance = {
+    estimatedAt: now(),
+    network: input.network ?? "unknown",
+    source: sim.minResourceFee !== undefined ? "simulation" : "fallback",
+    ...(input.simulationLedger !== undefined
+      ? { simulationLedger: input.simulationLedger }
+      : {}),
+  };
+
   const feeEstimate: InspectionFeeEstimate = {
     min: min.toString(),
     recommended: recommended.toString(),
     max: max.toString(),
     currency: "stroops",
+    provenance,
   };
 
   const simulation: SimulationSummary = {
@@ -258,6 +393,31 @@ export function buildInspectionReport(
     warnings.push({
       code: "NO_SIGNERS",
       message: "No required signers were provided",
+      severity: "info",
+    });
+  }
+
+  // Warn when the caller indicates the fee estimate was produced earlier and
+  // the age already exceeds the configured (or default) TTL.  This catches the
+  // common case where a cached report is re-used without re-simulating.
+  if (input.feeEstimateAge !== undefined) {
+    const ttl = input.feeEstimateTtlMs ?? DEFAULT_FEE_ESTIMATE_TTL_MS;
+    if (input.feeEstimateAge >= ttl) {
+      warnings.push({
+        code: "FEE_ESTIMATE_STALE",
+        message: `Fee estimate is ${input.feeEstimateAge} ms old (TTL: ${ttl} ms). Re-simulate before submitting.`,
+        severity: "warning",
+      });
+    }
+  }
+
+  // Fallback source gets a standing informational note so reviewers know the
+  // estimate may not reflect Soroban resource costs.
+  if (provenance.source === "fallback") {
+    warnings.push({
+      code: "FEE_ESTIMATE_FALLBACK",
+      message:
+        "No minResourceFee was available from simulation. The fee estimate covers only the base inclusion fee and may be insufficient for Soroban contract calls.",
       severity: "info",
     });
   }

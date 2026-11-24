@@ -179,6 +179,8 @@ export class FeeBumpingEngine {
           finalLimits: currentLimits,
           attempts,
           estimatedFee: estimateResourceFee(currentLimits),
+          estimatedAt: Date.now(),
+          feeSource: "resource_calculation",
         };
       } catch (error) {
         const errorMessage =
@@ -200,6 +202,8 @@ export class FeeBumpingEngine {
             finalLimits: currentLimits,
             attempts,
             estimatedFee: estimateResourceFee(currentLimits),
+            estimatedAt: Date.now(),
+            feeSource: "resource_calculation",
           };
         }
 
@@ -211,6 +215,8 @@ export class FeeBumpingEngine {
             finalLimits: currentLimits,
             attempts,
             estimatedFee: estimateResourceFee(currentLimits),
+            estimatedAt: Date.now(),
+            feeSource: "resource_calculation",
           };
         }
 
@@ -241,6 +247,8 @@ export class FeeBumpingEngine {
       finalLimits: currentLimits,
       attempts,
       estimatedFee: estimateResourceFee(currentLimits),
+      estimatedAt: Date.now(),
+      feeSource: "fallback",
     };
   }
 
