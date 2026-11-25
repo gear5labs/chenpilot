@@ -18,6 +18,10 @@ after the user confirms a summary of exactly what will happen.
 | `missingFields` | Required fields that are missing or invalid |
 | `summaryHash` | Hash of all of the above |
 
+## Previewing Edits
+
+`RecurringPaymentMandateService.previewMandateUpdate(id, changes)` allows callers to inspect the projected next execution amount, timing, and confirmation summary prior to committing any change.
+
 ## Rules
 
 - **Activation:** `approveMandate(id, summaryHash, actor)` succeeds only if
@@ -36,4 +40,4 @@ after the user confirms a summary of exactly what will happen.
 **Breaking change:** `approveMandate(id)` now requires the `summaryHash` of the
 summary shown to the user.
 
-Tests: `src/Payments/__tests__/mandateConfirmation.test.ts`.
+Tests: `src/Payments/__tests__/mandateConfirmation.test.ts` and `src/Payments/__tests__/mandatePreview.test.ts`.

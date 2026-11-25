@@ -101,6 +101,17 @@ export class RecurringPaymentMandateService {
     return this.cloneMandate(mandate);
   }
 
+  /** Preview the projected confirmation summary and next execution amount/timing for proposed changes without committing them. */
+  previewMandateUpdate(id: string, changes: MandateChanges): MandateConfirmationSummary {
+    const mandate = this.requireMandate(id);
+    const projected: PaymentMandate = {
+      ...mandate,
+      ...changes,
+      requirement: changes.requirement ? { ...mandate.requirement, ...changes.requirement } : { ...mandate.requirement },
+    };
+    return buildConfirmationSummary(projected);
+  }
+
   /** Change a mandate's terms; any prior confirmation is invalidated (#1102). */
   updateMandate(id: string, changes: MandateChanges): PaymentMandate {
     const mandate = this.requireMandate(id);
