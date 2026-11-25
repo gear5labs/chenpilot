@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Chen Pilot! We're building the mo
 
 1.  **Fork the Project**: Create your own copy of the repository.
 2.  **Environment Setup**:
-    - Install Node.js (18+).
+    - Install Node.js 22.13+ for the repository development toolchain (the application runtime supports Node.js 18+).
     - Install `pnpm` (`npm install -g pnpm`).
     - Run `pnpm install`.
     - Copy `.env.example` to `.env` and configure your keys. [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md) lists every variable, its owner, whether it is required, its default, and whether it is secret.
@@ -119,7 +119,7 @@ When an issue's implementation or delivery reports are complete, archive them as
 
 ### Repository checks
 
-CI runs these checks on every push and pull request (`.github/workflows/repository-checks.yml`). They use only Node built-ins and npm, so they need no install. Run them locally before you push:
+CI runs these checks on every push and pull request (`.github/workflows/repository-checks.yml`). The checker tests include a TypeScript compatibility check, so install the workspace dependencies before running them locally:
 
 | Command | What it checks |
 | --- | --- |

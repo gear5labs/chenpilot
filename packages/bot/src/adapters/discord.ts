@@ -1,4 +1,4 @@
-import { APIEmbed, Client, GatewayIntentBits, Message, TextChannel, Collection, Invite, GuildMember, Interaction, ChatInputCommandInteraction, ThreadChannel } from 'discord.js';
+import { APIEmbed, Client, GatewayIntentBits, Message, TextChannel, Collection, Invite, GuildMember, Interaction, ChatInputCommandInteraction, ThreadChannel, PermissionFlagsBits } from 'discord.js';
 import { renderTransactionPreview } from "../../src/Security/antiPhishing/xdrPreview";
 import { Client, GatewayIntentBits, Message, TextChannel, Collection, Invite, GuildMember, Interaction, ChatInputCommandInteraction, ThreadChannel } from 'discord.js';
 import { TransactionNotificationData, PriceAlert } from './types';
@@ -8,11 +8,19 @@ import { PriceChartService } from '../priceChart';
 import { withPerformanceProfiling } from '../performanceProfiler';
 import { extractCommandName } from '../utils/commandUtils';
 import { RateLimiter, DEFAULT_RATE_LIMIT, STRICT_RATE_LIMIT } from '../rateLimiter';
+import {
+  submitAbuseReport,
+  validateAbuseReport,
+} from '../moderation/abuseReport';
+import {
+  formatPortfolioPage,
+  InvalidPortfolioPageError,
+} from '../commands/portfolioPagination';
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000';
 const HORIZON_URL = process.env.HORIZON_URL || 'https://horizon.stellar.org';
 const DEBOUNCE_MS = 2000;
-const SENSITIVE_COMMANDS = ['!trustline', '!swap', '!multisig', '!validate'];
+const SENSITIVE_COMMANDS = ['!trustline', '!swap', '!multisig', '!validate', '!abuse-report'];
 const SCAM_DETECTION_ENABLED = (process.env.SCAM_DETECTION_ENABLED ?? 'true') === 'true';
 const SCAM_DETECTION_CHANNELS: string[] = (process.env.SCAM_DETECTION_CHANNELS ?? '').split(',').filter(Boolean);
 const ADVANCED_ROLE_NAMES: string[] = (process.env.ADVANCED_ROLE_NAMES ?? 'admin,moderator').split(',').filter(Boolean);
@@ -835,6 +843,10 @@ export class DiscordAdapter {
           // #118: !report command — portfolio report in preferred currency
           if (message.content.startsWith("!report")) {
             const currency = this.userCurrency.get(userId) ?? "USD";
+            const page = Number(message.content.trim().split(/\s+/)[1] ?? "1");
+            if (!Number.isInteger(page) || page < 1) {
+              return message.reply("❌ Page must be a positive whole number.");
+            }
             await message.reply(
               `⏳ Fetching portfolio report in **${currency}**...`
             );
@@ -844,16 +856,21 @@ export class DiscordAdapter {
               );
               if (!res.ok) throw new Error(`HTTP ${res.status}`);
               const data = (await res.json()) as {
-                totalValue: number;
-                assets: { code: string; balance: number; value: number }[];
+                totalValue: number | null;
+                assets: {
+                  code: string;
+                  issuer?: string;
+                  balance: number;
+                  value: number | null;
+                }[];
               };
-              let reply = `📊 **Portfolio Report (${currency})**\n\n`;
-              reply += `**Total Value:** ${data.totalValue.toFixed(4)} ${currency}\n\n`;
-              for (const a of data.assets) {
-                reply += `• **${a.code}**: ${a.balance} ≈ ${a.value.toFixed(4)} ${currency}\n`;
+              return message.reply(
+                formatPortfolioPage({ ...data, currency }, page, 2_000)
+              );
+            } catch (error) {
+              if (error instanceof InvalidPortfolioPageError) {
+                return message.reply(`❌ ${error.message}`);
               }
-              return message.reply(reply);
-            } catch {
               return message.reply(
                 `❌ Could not fetch portfolio. Make sure your account is registered.`
               );
@@ -1493,7 +1510,9 @@ export class DiscordAdapter {
     const commandName = interaction.commandName;
 
     // Defer reply so longer-running commands (price chart, AI help) don't hit the 3s timeout
-    await interaction.deferReply();
+    await interaction.deferReply(
+      commandName === 'abuse-report' ? { ephemeral: true } : undefined
+    );
 
     try {
       switch (commandName) {
@@ -1721,8 +1740,76 @@ export class DiscordAdapter {
           return;
         }
 
+        case 'abuse-report': {
+          const rateLimit = this.checkRateLimit(userId, '!abuse-report');
+          if (!rateLimit.allowed) {
+            await interaction.editReply(
+              rateLimit.message ?? '⏳ Report rate limit exceeded. Please try again later.'
+            );
+            return;
+          }
+
+          const report = {
+            platform: 'discord' as const,
+            reporterId: userId,
+            command: interaction.options.getString('command', true),
+            details: interaction.options.getString('details', true),
+            reportedUserId:
+              interaction.options.getString('reported-user-id') ?? undefined,
+          };
+          const validationError = validateAbuseReport(report);
+          if (validationError) {
+            await interaction.editReply(`❌ ${validationError}`);
+            return;
+          }
+
+          const moderationChannelId = process.env.MODERATION_LOG_CHANNEL_ID;
+          if (!moderationChannelId) {
+            await interaction.editReply(
+              '❌ Abuse reporting is temporarily unavailable because the moderator channel is not configured.'
+            );
+            return;
+          }
+
+          try {
+            const channel = await this.client.channels.fetch(moderationChannelId);
+            if (!(channel instanceof TextChannel)) {
+              throw new Error('Configured moderator destination is not a guild text channel.');
+            }
+            const everyonePermissions = channel.permissionsFor(
+              channel.guild.roles.everyone
+            );
+            if (
+              !everyonePermissions ||
+              everyonePermissions.has(PermissionFlagsBits.ViewChannel)
+            ) {
+              throw new Error('Configured moderator channel is visible to everyone.');
+            }
+            await submitAbuseReport(report, async (message) => {
+              await channel.send({
+                content: message,
+                allowedMentions: { parse: [] },
+              });
+            });
+          } catch (error) {
+            console.error(
+              '[DiscordAdapter] Failed to submit abuse report:',
+              error instanceof Error ? error.name : 'UnknownError'
+            );
+            await interaction.editReply(
+              '❌ Your report could not be submitted. No report was recorded; please try again later or contact a moderator directly.'
+            );
+            return;
+          }
+          await interaction.editReply(
+            '✅ Your report was sent privately to the moderators. Thank you.'
+          );
+          return;
+        }
+
         case 'report': {
           const currency = this.userCurrency.get(userId) ?? 'USD';
+          const page = interaction.options.getInteger('page') ?? 1;
           await interaction.editReply(
             `⏳ Fetching portfolio report in **${currency}**...`
           );
@@ -1732,16 +1819,22 @@ export class DiscordAdapter {
             );
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = (await res.json()) as {
-              totalValue: number;
-              assets: { code: string; balance: number; value: number }[];
+              totalValue: number | null;
+              assets: {
+                code: string;
+                issuer?: string;
+                balance: number;
+                value: number | null;
+              }[];
             };
-            let reply = `📊 **Portfolio Report (${currency})**\n\n`;
-            reply += `**Total Value:** ${data.totalValue.toFixed(4)} ${currency}\n\n`;
-            for (const a of data.assets) {
-              reply += `• **${a.code}**: ${a.balance} ≈ ${a.value.toFixed(4)} ${currency}\n`;
+            await interaction.editReply(
+              formatPortfolioPage({ ...data, currency }, page, 2_000)
+            );
+          } catch (error) {
+            if (error instanceof InvalidPortfolioPageError) {
+              await interaction.editReply(`❌ ${error.message}`);
+              return;
             }
-            await interaction.editReply(reply);
-          } catch {
             await interaction.editReply(
               '❌ Could not fetch portfolio. Make sure your account is registered.'
             );

@@ -9,19 +9,16 @@ import type { CommandContext, CommandHandler, CommandReply } from "../types";
 import { SUPPORTED_CURRENCIES } from "../types";
 import type { SupportedCurrency } from "../types";
 import { getUserCurrency } from "./currency";
+import {
+  formatPortfolioPage,
+  InvalidPortfolioPageError,
+  type PortfolioReportData,
+} from "../portfolioPagination";
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:3000";
 
-interface PortfolioResponse {
+interface PortfolioResponse extends PortfolioReportData {
   address: string;
-  currency: string;
-  totalValue: number | null;
-  assets: {
-    code: string;
-    issuer?: string;
-    balance: number;
-    value: number | null;
-  }[];
   fetchedAt: string;
 }
 
@@ -39,54 +36,43 @@ async function fetchPortfolio(
   return res.json() as Promise<PortfolioResponse>;
 }
 
-function formatPortfolio(data: PortfolioResponse): string {
-  const shortAddr = `${data.address.slice(0, 4)}...${data.address.slice(-4)}`;
-  const netWorth =
-    data.totalValue !== null
-      ? `${data.totalValue.toFixed(4)} ${data.currency}`
-      : "price data unavailable";
-
-  let text =
-    `💼 Stellar Portfolio Summary\n` +
-    `📬 Account: ${shortAddr}\n` +
-    `💰 Net Worth: ${netWorth}\n` +
-    `🕐 ${new Date(data.fetchedAt).toUTCString()}\n\n` +
-    `Assets\n`;
-
-  if (data.assets.length === 0) {
-    text += "No assets found on this account.\n";
-  } else {
-    for (const a of data.assets) {
-      const valueStr =
-        a.value !== null
-          ? ` ≈ ${a.value.toFixed(4)} ${data.currency}`
-          : "";
-      const issuerStr = a.issuer
-        ? ` (${a.issuer.slice(0, 6)}...)`
-        : "";
-      text += `• ${a.code}${issuerStr}: ${a.balance.toFixed(7)}${valueStr}\n`;
-    }
-  }
-
-  text += `\nTip: use /currency <USD|XLM|BTC> to change currency.`;
-  return text;
-}
-
 export const portfolioHandler: CommandHandler = {
   name: "portfolio",
   description: "View your Stellar portfolio and estimated net worth",
 
   async execute(ctx: CommandContext): Promise<CommandReply> {
-    // Accept optional currency override as first arg
+    // Keep the existing currency argument and accept an optional page number.
     const rawCurrency = ctx.args[0]?.toUpperCase();
     const currency: SupportedCurrency =
       rawCurrency &&
       (SUPPORTED_CURRENCIES as readonly string[]).includes(rawCurrency)
         ? (rawCurrency as SupportedCurrency)
         : getUserCurrency(ctx.platform, ctx.userId);
+    const pageArg =
+      rawCurrency &&
+      (SUPPORTED_CURRENCIES as readonly string[]).includes(rawCurrency)
+        ? ctx.args[1]
+        : ctx.args[0];
+    const page = pageArg ? Number(pageArg) : 1;
+    if (!Number.isInteger(page) || page < 1) {
+      return { text: "❌ Page must be a positive whole number." };
+    }
 
     const data = await fetchPortfolio(ctx.userId, currency);
-    return { text: formatPortfolio(data) };
+    try {
+      return {
+        text: formatPortfolioPage(
+          data,
+          page,
+          ctx.platform === "discord" ? 2_000 : 4_096
+        ),
+      };
+    } catch (error) {
+      if (error instanceof InvalidPortfolioPageError) {
+        return { text: `❌ ${error.message}` };
+      }
+      throw error;
+    }
   },
 };
 

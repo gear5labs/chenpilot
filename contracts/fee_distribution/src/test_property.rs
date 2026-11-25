@@ -113,12 +113,14 @@ fn test_cumulative_index_matches_high_precision_reference() {
         let mut exact = vec![Rational::zero(); n as usize];
         // Integer total value the contract has paid out (claims) + pending.
         let mut paid = vec![0i128; n as usize];
+        let mut total_lp_distributed = 0i128;
+        let mut total_claimed = 0i128;
+        let mut total_treasury = 0i128;
+        let mut total_ai_agent = 0i128;
 
         let mut fee_source = Address::generate(&env);
-        let mut distribute_nonce_guard: i128 = 0;
-        let _ = &mut distribute_nonce_guard;
 
-        for _step in 0..40 {
+        for step in 0..40 {
             let ui = rng.below(n) as usize;
             let total_int: i128 = shares_int.iter().sum::<i128>();
             match rng.below(100) {
@@ -128,6 +130,14 @@ fn test_cumulative_index_matches_high_precision_reference() {
                     stellar_asset.mint(&fee_source, &amount);
                     token_client.approve(&fee_source, &contract_id, &amount, &(env.ledger().sequence() + 10_000));
                     let rec = client.distribute(&token_addr, &fee_source, &amount);
+                    assert_eq!(
+                        rec.amount,
+                        rec.treasury_share + rec.ai_agent_share + rec.lp_share,
+                        "seed {seed} step {step}: distribution split lost or created value"
+                    );
+                    total_treasury += rec.treasury_share;
+                    total_ai_agent += rec.ai_agent_share;
+                    total_lp_distributed += rec.lp_share;
                     // Linear distribution reference: only the LP residual reaches stakers.
                     let ts = total_int;
                     if ts > 0 && rec.lp_share > 0 {
@@ -158,18 +168,42 @@ fn test_cumulative_index_matches_high_precision_reference() {
                     // claim
                     let claimed = client.claim(&token_addr, &users[ui]);
                     paid[ui] += claimed;
+                    total_claimed += claimed;
                 }
             }
+
+            let total_staked: i128 = shares_int.iter().sum();
+            let expected_contract_balance =
+                total_staked + total_lp_distributed - total_claimed;
+            assert_eq!(
+                token_client.balance(&contract_id),
+                expected_contract_balance,
+                "seed {seed} step {step}: contract balance does not reconcile to principal plus unclaimed LP fees"
+            );
+            assert_eq!(token_client.balance(&treasury), total_treasury);
+            assert_eq!(token_client.balance(&ai_agent_pool), total_ai_agent);
+            assert_eq!(token_client.balance(&fee_source), 0);
         }
 
         // Final settle: catch every user up to the current index before
         // checking the invariant (mirrors a final claim by each participant).
         let claimed = client.claim(&token_addr, &users[0]);
         paid[0] += claimed;
+        total_claimed += claimed;
         for i in 1..n as usize {
             let claimed = client.claim(&token_addr, &users[i]);
             paid[i] += claimed;
+            total_claimed += claimed;
         }
+
+        let total_staked: i128 = shares_int.iter().sum();
+        assert_eq!(
+            token_client.balance(&contract_id),
+            total_staked + total_lp_distributed - total_claimed,
+            "seed {seed}: final contract balance does not reconcile"
+        );
+        assert_eq!(token_client.balance(&treasury), total_treasury);
+        assert_eq!(token_client.balance(&ai_agent_pool), total_ai_agent);
 
         // Verify invariants against the high-precision reference.
         for i in 0..n as usize {

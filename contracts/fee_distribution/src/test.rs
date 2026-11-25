@@ -55,6 +55,41 @@ fn test_rounding_dust_stays_in_contract_reward_pool() {
 }
 
 #[test]
+fn test_small_distribution_amounts_reconcile_without_losing_rounding_units() {
+    let (_, token_addr, token_client, stellar_asset, contract_id, client) = setup();
+    let fee_source = Address::generate(&client.env);
+    let mut total_lp_share = 0i128;
+    let mut total_treasury_share = 0i128;
+    let mut total_ai_agent_share = 0i128;
+
+    for amount in 1..=20i128 {
+        stellar_asset.mint(&fee_source, &amount);
+        token_client.approve(
+            &fee_source,
+            &contract_id,
+            &amount,
+            &(client.env.ledger().sequence() + 100),
+        );
+        let record = client.distribute(&token_addr, &fee_source, &amount);
+
+        assert_eq!(
+            record.amount,
+            record.treasury_share + record.ai_agent_share + record.lp_share
+        );
+        total_lp_share += record.lp_share;
+        total_treasury_share += record.treasury_share;
+        total_ai_agent_share += record.ai_agent_share;
+        assert_eq!(token_client.balance(&contract_id), total_lp_share);
+        assert_eq!(token_client.balance(&fee_source), 0);
+        assert_eq!(token_client.balance(&client.get_config().treasury), total_treasury_share);
+        assert_eq!(
+            token_client.balance(&client.get_config().ai_agent_pool),
+            total_ai_agent_share
+        );
+    }
+}
+
+#[test]
 #[should_panic(expected = "amount must be positive")]
 fn test_non_positive_distribution_rejected() {
     let env = Env::default();

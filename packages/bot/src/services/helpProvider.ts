@@ -68,6 +68,13 @@ const FEATURES: BotFeature[] = [
       "overview",
     ],
   },
+  {
+    name: "Abuse Reports",
+    description:
+      "Privately report misuse of a bot command to moderators. Do not include passwords or secret keys.",
+    command: "/abuse-report",
+    keywords: ["abuse", "report", "misuse", "moderator", "command"],
+  },
 ];
 
 export function searchFeatures(query: string): BotFeature[] {
@@ -124,7 +131,9 @@ export function formatHelpMessage(
   features.forEach((f) => {
     // Convert / command to ! for Discord if needed, but keeping it generic for now
     const displayCommand =
-      format === "markdown" ? f.command.replace("/", "!") : f.command;
+      format === "markdown" && f.command !== "/abuse-report"
+        ? f.command.replace("/", "!")
+        : f.command;
     message += `${bold(f.name)} (${displayCommand})\n`;
     message += `${f.description}\n\n`;
   });

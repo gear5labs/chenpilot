@@ -7,7 +7,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest --config ../../jest.config.js --rootDir ../.. --runInBand --runTestsByPath packages/bot/src/__tests__/abuseReport.test.ts packages/bot/src/__tests__/portfolioPagination.test.ts packages/bot/src/__tests__/swapWizard.test.ts packages/bot/src/__tests__/helpProvider.test.ts"
   },
   "dependencies": {
     "@chen-pilot/sdk-core": "*",
@@ -27,4 +27,3 @@
     "typescript": "^5.7.3"
   }
 }
-

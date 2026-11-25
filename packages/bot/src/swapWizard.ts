@@ -240,8 +240,11 @@ export class SwapWizard implements Workflow {
     exclude?: string
   ): Array<Array<{ text: string; callback_data: string }>> {
     const assets = SWAP_ASSETS.filter((a) => a !== exclude);
+    const label = action === CallbackAction.SELECT_FROM_ASSET ? "Sell" : "Buy";
     return [
-      assets.map((asset) => inlineBtn(asset, action, { a: asset })),
+      assets.map((asset) =>
+        inlineBtn(`${label} ${asset} asset`, action, { a: asset })
+      ),
       [inlineBtn("❌ Cancel", CallbackAction.CANCEL_SWAP)],
     ];
   }

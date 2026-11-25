@@ -113,6 +113,7 @@ at the end of the table so reviewers can see them.
 | `INBOUND_JSON_LIMIT_BYTES` | Gateway (`src/config/config.ts`) | No | `1048576` | No | Maximum JSON request body size. |
 | `INBOUND_WEBHOOK_LIMIT_BYTES` | Gateway (`src/config/config.ts`) | No | `1048576` | No | Maximum webhook request body size. |
 | `INTERVENTION_SIGNING_SECRET` | Agents (`src/Agents/planner`) | No | — | Yes | HMAC secret for operator interventions. Interventions are disabled when unset. |
+| `JOB_SHUTDOWN_DEADLINE_MS` | Jobs (`src/jobs/jobWorker.ts`) | No | `25000` | No | Grace period for in-flight job handlers during shutdown, in milliseconds. |
 | `JWT_ACCESS_SECRET` | Auth (`src/Auth/jwt.service.ts`) | Yes | — | Yes | Signs access tokens. |
 | `JWT_REFRESH_SECRET` | Auth (`src/Auth/jwt.service.ts`) | Yes | — | Yes | Signs refresh tokens. |
 | `JWT_RESET_EXPIRY` | Auth (`src/config/config.ts`) | No | `1h` | No | Password reset token lifetime. |
@@ -215,8 +216,8 @@ at the end of the table so reviewers can see them.
 | `MARKET_DIGEST_TIME` | Bot (`packages/bot/src/services/marketDigestScheduler.ts`) | No | `09:00` | No | Daily digest time, `HH:MM` UTC. |
 | `MODERATION_ACTION` | Bot (`packages/bot/src/moderation`) | No | `flag` | No | `flag` (warn) or `block` (delete). |
 | `MODERATION_ENABLED` | Bot (`packages/bot/src/moderation`) | No | `true` | No | `false` disables moderation. |
-| `MODERATION_LOG_CHANNEL_ID` | Bot (`packages/bot/src/discord`) | No | `DISCORD_AUDIT_LOG_CHANNEL_ID` | No | Discord moderation log channel. |
-| `MODERATION_LOG_CHAT_ID` | Bot (`packages/bot/src/commands/adapters`) | No | — | No | Telegram moderation log chat. |
+| `MODERATION_LOG_CHANNEL_ID` | Bot (`packages/bot/src/adapters/discord.ts`, `packages/bot/src/discord`) | No | `DISCORD_AUDIT_LOG_CHANNEL_ID` | No | Discord moderation log channel. Configure explicitly for private abuse-report delivery. |
+| `MODERATION_LOG_CHAT_ID` | Bot (`packages/bot/src/adapters/telegram.ts`, `packages/bot/src/commands/adapters`) | No | — | No | Telegram moderation log chat. Configure for private abuse-report delivery. |
 | `SCAM_DETECTION_CHANNELS` | Bot (`packages/bot/src/adapters/discord.ts`) | No | empty | No | Channel IDs to monitor. Empty monitors all public channels. |
 | `SCAM_DETECTION_ENABLED` | Bot (`packages/bot/src/adapters/discord.ts`) | No | `true` | No | Legacy Discord adapter scam-link detection. |
 | `TELEGRAM_ANNOUNCEMENT_CHAT_ID` | Bot (`packages/bot/src/index.ts`) | No | — | No | Chat for release announcements. |

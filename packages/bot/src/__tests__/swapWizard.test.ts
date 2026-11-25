@@ -112,6 +112,9 @@ describe("SwapWizard", () => {
       expect(res.message).toMatch(/Which asset do you want to \*\*sell\*\*/);
       expect(res.buttons).toBeDefined();
       expect(res.buttons![0].length).toBeGreaterThan(1);
+      expect(res.buttons![0].map((button) => button.text)).toContain(
+        "Sell XLM asset"
+      );
     });
   });
 
@@ -136,6 +139,9 @@ describe("SwapWizard", () => {
       expect(res.data?.fromAsset).toBe("XLM");
       expect(res.buttons).toBeDefined();
       expect(res.message).toMatch(/Selling \*\*XLM\*\*/);
+      expect(res.buttons![0].map((button) => button.text)).toContain(
+        "Buy USDC asset"
+      );
     });
 
     it("should process SELECT_TO_ASSET callback", async () => {

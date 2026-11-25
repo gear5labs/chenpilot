@@ -29,7 +29,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       # Only a TypeScript runner is needed, so install it outside the repo.
       # This job must not depend on the full dependency tree or on the Rust

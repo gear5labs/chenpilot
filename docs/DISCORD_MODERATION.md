@@ -79,3 +79,37 @@ All detections are recorded via `logAuditAction()` with:
 - Detection reason and matched pattern
 - Action taken (`flag` or `block`)
 - Timestamp
+
+## User Abuse Reports
+
+Users can report misuse of a bot command without posting evidence in a public
+channel:
+
+- **Discord:** Use `/abuse-report` with the command involved and up to 1,000
+  characters of details. A reported user ID is optional. The acknowledgement is
+  private; evidence is forwarded only to the moderator channel and is not
+  echoed into the originating channel.
+- **Telegram:** Use `/abuse-report <command> | <what happened>` in a private
+  chat with the bot. Group submissions are rejected without forwarding their
+  details.
+
+Configure a dedicated, moderator-restricted destination before enabling reports:
+
+| Variable | Description |
+|----------|-------------|
+| `MODERATION_LOG_CHANNEL_ID` | Discord channel that receives user abuse reports |
+| `MODERATION_LOG_CHAT_ID` | Telegram chat that receives user abuse reports |
+
+These settings intentionally do not fall back to general audit channels. The
+Discord destination must be a guild text channel that is not visible to
+`@everyone`; configure role access so only moderators can view it. If a
+destination is missing, invalid, public, or the bot cannot send to it, the user
+receives an explicit failure response and the report is not acknowledged as submitted.
+Reports are delivered as plain text with platform mentions disabled where
+supported; they are not stored in a separate database. Access and retention are
+therefore governed by the configured moderator destination's permissions and
+history settings. Do not include passwords, recovery phrases, or secret keys.
+
+The report command is separate from `/report`, which continues to return a
+portfolio. Submissions are rate-limited through the existing strict command
+limiter.

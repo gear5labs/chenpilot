@@ -47,7 +47,7 @@ This document summarizes the test coverage and evidence for each contract in the
 | Multi-Hop Swap | `test.rs` | ~10 | ~80% | No |
 | Flash Loan Guard | `test.rs` + `test_invariants.rs` + `test_freshness.rs` | ~25 | ~95% | Yes |
 | Core Vault | `test.rs` | ~18 | ~85% | No |
-| Fee Distribution | `test.rs` | ~8 | ~80% | No |
+| Fee Distribution | `test.rs` + `test_property.rs` + `test_diff_fuzz.rs` | ~8 | ~80% | Yes |
 | HTLC | `test.rs` | ~12 | ~85% | No |
 | Intent Market Validator | `test.rs` | ~10 | ~75% | No |
 | Lending Liquidation | `test.rs` | ~14 | ~80% | No |
@@ -431,24 +431,19 @@ fn test_borrow_sufficient() {
 
 ## Fee Distribution Tests
 
-### Test File Location
-`contracts/fee_distribution/src/test.rs`
+### Test File Locations
+- `contracts/fee_distribution/src/test.rs`
+- `contracts/fee_distribution/src/test_property.rs`
+- `contracts/fee_distribution/src/test_diff_fuzz.rs`
 
 ### Test Cases
 
-#### Initialization Tests
-- `test_initialize`: Verifies initialization
-- `test_update_config`: Tests config update
-
-#### Distribution Tests
-- `test_distribute`: Tests fee distribution
-- `test_distribute_unauthorized_panics`: Tests unauthorized distribution
-
-#### Recipient Tests
-- `test_add_recipient`: Tests recipient addition
-- `test_remove_recipient`: Tests recipient removal
-- `test_claim`: Tests fee claiming
-- `test_claim_unauthorized_panics`: Tests unauthorized claim
+#### Distribution and Conservation
+- `test_distribute_emits_reconcilable_record`: Checks split records and balances.
+- `test_rounding_dust_stays_in_contract_reward_pool`: Confirms LP residue remains in the contract.
+- `test_small_distribution_amounts_reconcile_without_losing_rounding_units`: Checks amounts 1 through 20, including integer split boundaries.
+- `test_cumulative_index_matches_high_precision_reference`: Runs seeded stake, unstake, distribution, and claim sequences against exact rational per-user accruals. It checks no over-claim, bounded user dust, exact treasury/AI balances, split conservation, and the contract balance equation after every operation.
+- Differential fuzz tests in `test_diff_fuzz.rs` check cumulative-index behavior against the reference model.
 
 ### Coverage
 - **Lines**: 80%

@@ -447,6 +447,27 @@ These invariants preserve single-writer safety for durable operations and financ
 
 **Enforcement**: Recipient whitelist check.
 
+### FD4: Distribution Split Conservation
+**Invariant**: Every positive fee amount is accounted for exactly across the
+treasury, AI-agent, and LP shares.
+
+**Formal**: `amount == treasury_share + ai_agent_share + lp_share`
+
+**Enforcement**: `distribute` computes the LP share as the residual after the
+two basis-point shares, and property tests verify the equality for generated
+distributions.
+
+### FD5: Rounding Residue Conservation
+**Invariant**: Integer rounding during LP index updates or claims cannot create
+or destroy token units; unclaimed LP fees and all rounding residue remain in the
+contract reward pool.
+
+**Formal**: `contract_balance == total_staked + total_lp_distributed - total_claimed`
+
+**Enforcement**: The seeded property test checks this balance equation after
+every generated stake, unstake, distribution, and claim, and separately checks
+that recipient balances equal the exact accumulated split amounts.
+
 ---
 
 ## HTLC Invariants

@@ -1,0 +1,40 @@
+name: Bot Tests
+
+on:
+  push:
+    paths:
+      - "packages/bot/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/bot-tests.yml"
+  pull_request:
+    paths:
+      - "packages/bot/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/bot-tests.yml"
+
+jobs:
+  bot-tests:
+    name: Bot Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 10.13.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run bot unit tests
+        run: pnpm --filter @chen-pilot/bot test

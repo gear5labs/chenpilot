@@ -103,6 +103,39 @@ export const slashCommandDefinitions: RESTPostAPIChatInputApplicationCommandsJSO
     new SlashCommandBuilder()
       .setName("report")
       .setDescription("Get your portfolio report in your preferred currency")
+      .addIntegerOption((opt: SlashCommandNumberOption) =>
+        opt
+          .setName("page")
+          .setDescription("Portfolio page number (defaults to 1)")
+          .setRequired(false)
+          .setMinValue(1)
+      )
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("abuse-report")
+      .setDescription("Privately report misuse of a bot command to moderators")
+      .addStringOption((opt: SlashCommandStringOption) =>
+        opt
+          .setName("command")
+          .setDescription("The command involved, e.g. /swap")
+          .setMaxLength(100)
+          .setRequired(true)
+      )
+      .addStringOption((opt: SlashCommandStringOption) =>
+        opt
+          .setName("details")
+          .setDescription("What happened? Do not include passwords or secret keys")
+          .setMaxLength(1_000)
+          .setRequired(true)
+      )
+      .addStringOption((opt: SlashCommandStringOption) =>
+        opt
+          .setName("reported-user-id")
+          .setDescription("Optional user ID involved in the incident")
+          .setMaxLength(100)
+          .setRequired(false)
+      )
       .toJSON(),
 
     new SlashCommandBuilder()

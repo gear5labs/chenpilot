@@ -4,8 +4,21 @@ import { TransactionNotificationData } from './types';
 import { createTrustlineOperation } from '@chen-pilot/sdk-core';
 import { getAliases, SUPPORTED_CURRENCIES, SupportedCurrency } from '../commands';
 import { PriceChartService } from '../priceChart';
+import { RateLimiter, DEFAULT_RATE_LIMIT, STRICT_RATE_LIMIT } from '../rateLimiter';
+import {
+  submitAbuseReport,
+  validateAbuseReport,
+} from '../moderation/abuseReport';
 
 const BACKEND_URL = process.env.NODE_URL || 'http://localhost:3000';
+const DEBOUNCE_MS = 2_000;
+const SENSITIVE_COMMANDS = [
+  '/trustline',
+  '/swap',
+  '/multisig',
+  '/validate',
+  '/abuse-report',
+];
 
 export class TelegramAdapter {
   private bot: Telegraf | undefined;
@@ -88,7 +101,78 @@ export class TelegramAdapter {
     this.bot = new Telegraf(this.token);
 
     this.bot.command(getAliases('start'), (ctx) => ctx.reply('Welcome to Chen Pilot! I am your AI-powered Stellar DeFi assistant.'));
-    this.bot.command(getAliases('help'), (ctx) => ctx.reply('Commands: /start, /balance, /swap, /trustline\n\nYou can also use short aliases like /b for balance, /t for trustline, etc.'));
+    this.bot.command(getAliases('help'), (ctx) => ctx.reply('Commands: /start, /balance, /swap, /trustline, /abuse-report\n\nUse /abuse-report <command> | <what happened> in a private chat. Do not include passwords or secret keys.'));
+
+    this.bot.command('abuse-report', async (ctx) => {
+      if (ctx.chat.type !== 'private') {
+        return ctx.reply(
+          '🔒 For privacy, submit abuse reports in a private chat with the bot using /abuse-report.'
+        );
+      }
+
+      const reporterId = ctx.from?.id;
+      if (!reporterId) {
+        return ctx.reply('❌ Could not identify the reporter. Please try again.');
+      }
+
+      const rateLimit = this.checkRateLimit(
+        reporterId,
+        '/abuse-report'
+      );
+      if (!rateLimit.allowed) {
+        return ctx.reply(
+          rateLimit.message ?? '⏳ Report rate limit exceeded. Please try again later.'
+        );
+      }
+
+      const messageText = ctx.message.text.replace(
+        /^\/abuse-report(?:@\w+)?\s*/i,
+        ''
+      );
+      const separatorIndex = messageText.indexOf('|');
+      if (separatorIndex < 0) {
+        return ctx.reply(
+          'Usage: /abuse-report <command> | <what happened>\nDo not include passwords, recovery phrases, or secret keys.'
+        );
+      }
+
+      const report = {
+        platform: 'telegram' as const,
+        reporterId: String(reporterId),
+        command: messageText.slice(0, separatorIndex).trim(),
+        details: messageText.slice(separatorIndex + 1).trim(),
+      };
+      const validationError = validateAbuseReport(report);
+      if (validationError) return ctx.reply(`❌ ${validationError}`);
+
+      const moderationChatId = process.env.MODERATION_LOG_CHAT_ID;
+      if (!moderationChatId) {
+        return ctx.reply(
+          '❌ Abuse reporting is temporarily unavailable because the moderator chat is not configured.'
+        );
+      }
+
+      try {
+        const bot = this.bot;
+        if (!bot) throw new Error('Telegram bot is not initialized.');
+        await submitAbuseReport(report, async (message) => {
+          await bot.telegram.sendMessage(
+            moderationChatId,
+            message,
+            { disable_web_page_preview: true }
+          );
+        });
+      } catch (error) {
+        console.error(
+          '[TelegramAdapter] Failed to submit abuse report:',
+          error instanceof Error ? error.name : 'UnknownError'
+        );
+        return ctx.reply(
+          '❌ Your report could not be submitted. No report was recorded; please try again later or contact a moderator directly.'
+        );
+      }
+      return ctx.reply('✅ Your report was sent privately to the moderators. Thank you.');
+    });
 
     this.bot.command('trustline', async (ctx) => {
       const text = ctx.message.text.split(' ').slice(1).join(' ');

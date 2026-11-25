@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { deepStrictEqual, ok } from "node:assert";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
@@ -13,11 +13,19 @@ test("generated docs check", async (t) => {
     const docsPath = join(projectRoot, "docs/TOOLS.md");
     
     // Generate once
-    execSync("pnpm run gen:docs", { cwd: projectRoot, stdio: "pipe" });
+    execFileSync(
+      process.execPath,
+      [join(projectRoot, "scripts/generateToolDocs.mjs")],
+      { cwd: projectRoot, stdio: "pipe" }
+    );
     const firstGeneration = readFileSync(docsPath, "utf-8");
     
     // Generate again
-    execSync("pnpm run gen:docs", { cwd: projectRoot, stdio: "pipe" });
+    execFileSync(
+      process.execPath,
+      [join(projectRoot, "scripts/generateToolDocs.mjs")],
+      { cwd: projectRoot, stdio: "pipe" }
+    );
     const secondGeneration = readFileSync(docsPath, "utf-8");
     
     deepStrictEqual(
