@@ -8,3 +8,17 @@ export {
 export type { QuoteCommitmentPayload } from "./quoteCommitment";
 export { QuoteDriftError, QuoteExpiredError } from "./errors";
 export * from "./costComponents";
+
+export type {
+  QuoteExpiryPolicy,
+  QuoteExpiryCheck,
+  QuoteRefreshResult,
+  QuoteRefreshHandler,
+} from "./quoteExpiry";
+export {
+  buildQuoteExpiryPolicy,
+  checkQuoteExpiry,
+  validateQuoteBeforeSigning,
+  refreshQuote,
+  QUOTE_DEFAULT_EXPIRY_SECONDS,
+} from "./quoteExpiry";
