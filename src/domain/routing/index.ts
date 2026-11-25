@@ -15,3 +15,13 @@ export {
   parseStellarAsset,
   stellarAssetToString,
 } from './path';
+
+export type {
+  LegMinOutput,
+  AggregateMinOutput,
+  AggregateMinOutputOptions,
+} from './aggregateMinOutput';
+export {
+  computeAggregateMinOutput,
+  assertAggregateMinOutput,
+} from './aggregateMinOutput';
