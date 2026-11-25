@@ -55,6 +55,53 @@ fn test_rounding_dust_stays_in_contract_reward_pool() {
 }
 
 #[test]
+fn test_fractional_fee_shares_round_down_to_lp_residual() {
+    let (_, token_addr, token_client, stellar_asset, contract_id, client) = setup();
+    let fee_source = Address::generate(&client.env);
+    stellar_asset.mint(&fee_source, &1);
+    token_client.approve(&fee_source, &contract_id, &1, &(client.env.ledger().sequence() + 100));
+
+    let record = client.distribute(&token_addr, &fee_source, &1);
+    assert_eq!(record.treasury_share, 0);
+    assert_eq!(record.ai_agent_share, 0);
+    assert_eq!(record.lp_share, 1);
+}
+
+#[test]
+fn test_fee_share_handles_zero_and_maximum_amounts() {
+    assert_eq!(FeeDistributionContract::fee_share(0, 10_000), Some(0));
+    assert_eq!(FeeDistributionContract::fee_share(i128::MAX, 10_000), Some(i128::MAX));
+    assert_eq!(FeeDistributionContract::fee_share(i128::MAX, 0), Some(0));
+}
+
+#[test]
+fn test_basis_points_just_over_maximum_are_rejected_without_overflow() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = env.register_contract(None, FeeDistributionContract);
+    let client = FeeDistributionContractClient::new(&env, &contract_id);
+
+    assert!(client
+        .try_initialize(&admin, &admin, &admin, &admin, &10_001, &0)
+        .is_err());
+    assert!(client
+        .try_initialize(&admin, &admin, &admin, &admin, &u32::MAX, &u32::MAX)
+        .is_err());
+
+    env.mock_all_auths();
+    client.initialize(&admin, &admin, &admin, &admin, &0, &0);
+    let invalid_config = Config {
+        admin: admin.clone(),
+        treasury: admin.clone(),
+        ai_agent_pool: admin.clone(),
+        lp_pool: admin,
+        treasury_bps: 10_001,
+        ai_agent_bps: 0,
+    };
+    assert!(client.try_update_config(&invalid_config).is_err());
+}
+
+#[test]
 #[should_panic(expected = "amount must be positive")]
 fn test_non_positive_distribution_rejected() {
     let env = Env::default();

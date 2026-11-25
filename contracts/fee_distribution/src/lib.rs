@@ -24,6 +24,10 @@
 //!   retained in the contract's reward-pool balance. Dust is never minted or
 //!   destroyed and never paid out twice — it deterministically stays in the
 //!   pool as the protocol's defensive residual.
+//! * **Fee-share rounding is deterministic.** Treasury and AI-agent shares are
+//!   each floored; every fractional remainder is retained in the LP residual.
+//!   Quotient/remainder arithmetic avoids overflowing `amount * bps`, and the
+//!   configured basis-point total is bounded by 10,000.
 //!
 //! Property tests in `test_property` compare every operation against a
 //! high-precision rational reference model.
@@ -34,6 +38,7 @@ use contract_failure::{fail, FailureReason};
 
 /// Fixed-point precision for the cumulative reward index (Q12).
 pub const REWARD_PRECISION: i128 = 1_000_000_000_000;
+const MAX_BPS: u32 = 10_000;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -187,7 +192,7 @@ impl FeeDistributionContract {
         if env.storage().instance().has(&DataKey::Config) {
             fail(&env, FailureReason::AlreadyInitialized);
         }
-        if treasury_bps + ai_agent_bps > 10_000 {
+        if !Self::valid_basis_points(treasury_bps, ai_agent_bps) {
             fail(&env, FailureReason::InvalidBasisPoints);
         }
         env.storage().instance().set(&DataKey::Config, &Config { admin: admin.clone(), treasury: treasury.clone(), ai_agent_pool: ai_agent_pool.clone(), lp_pool: lp_pool.clone(), treasury_bps, ai_agent_bps });
@@ -216,7 +221,7 @@ impl FeeDistributionContract {
             .get(&DataKey::Config)
             .unwrap_or_else(|| fail(&env, FailureReason::NotInitialized));
         current_config.admin.require_auth();
-        if config.treasury_bps + config.ai_agent_bps > 10_000 {
+        if !Self::valid_basis_points(config.treasury_bps, config.ai_agent_bps) {
             fail(&env, FailureReason::InvalidBasisPoints);
         }
         env.storage().instance().set(&DataKey::Config, &config);
@@ -259,6 +264,21 @@ impl FeeDistributionContract {
 
     fn store_user(env: &Env, token: &Address, user: &Address, u: &UserRewards) {
         env.storage().instance().set(&DataKey::User(token.clone(), user.clone()), u);
+    }
+
+    fn valid_basis_points(treasury_bps: u32, ai_agent_bps: u32) -> bool {
+        treasury_bps <= MAX_BPS && ai_agent_bps <= MAX_BPS - treasury_bps
+    }
+
+    /// Floor a non-negative fee share without multiplying the full amount by
+    /// bps. Each named share rounds down; the residual is assigned to LPs.
+    fn fee_share(amount: i128, bps: u32) -> Option<i128> {
+        let bps = i128::from(bps);
+        let whole = (amount / i128::from(MAX_BPS)).checked_mul(bps)?;
+        let fractional = (amount % i128::from(MAX_BPS))
+            .checked_mul(bps)?
+            .checked_div(i128::from(MAX_BPS))?;
+        whole.checked_add(fractional)
     }
 
     /// Rewards accrued by `user` between their recorded index and the current
@@ -442,13 +462,9 @@ impl FeeDistributionContract {
             .instance()
             .get(&DataKey::Config)
             .unwrap_or_else(|| fail(&env, FailureReason::NotInitialized));
-        let treasury_share = amount
-            .checked_mul(config.treasury_bps as i128)
-            .and_then(|n| n.checked_div(10_000))
+        let treasury_share = Self::fee_share(amount, config.treasury_bps)
             .unwrap_or_else(|| fail(&env, FailureReason::ArithmeticError));
-        let ai_agent_share = amount
-            .checked_mul(config.ai_agent_bps as i128)
-            .and_then(|n| n.checked_div(10_000))
+        let ai_agent_share = Self::fee_share(amount, config.ai_agent_bps)
             .unwrap_or_else(|| fail(&env, FailureReason::ArithmeticError));
         let lp_share = amount
             .checked_sub(treasury_share)
@@ -487,8 +503,11 @@ impl FeeDistributionContract {
         }
 
         let nonce = env.storage().instance().get::<DataKey, u32>(&DataKey::DistributionNonce).unwrap_or(0);
-        let record = DistributionRecord { nonce: nonce + 1, token: token_addr.clone(), from: from.clone(), amount, treasury_share, ai_agent_share, lp_share };
-        env.storage().instance().set(&DataKey::DistributionNonce, &(nonce + 1));
+        let next_nonce = nonce
+            .checked_add(1)
+            .unwrap_or_else(|| fail(&env, FailureReason::ArithmeticError));
+        let record = DistributionRecord { nonce: next_nonce, token: token_addr.clone(), from: from.clone(), amount, treasury_share, ai_agent_share, lp_share };
+        env.storage().instance().set(&DataKey::DistributionNonce, &next_nonce);
         env.storage().instance().set(&DataKey::LastDistribution, &record);
         env.events().publish(
             (symbol_short!("fees"), symbol_short!("split")),

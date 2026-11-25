@@ -5,7 +5,7 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::Address as _,
+    testutils::{Address as _, Ledger, LedgerInfo},
     token::StellarAssetClient,
     Address, BytesN, Env,
 };
@@ -139,4 +139,75 @@ fn user_entry_points_still_require_the_user() {
     must_reject(|| {
         client.withdrawal(&user, &10);
     });
+}
+
+#[test]
+fn upgrade_mode_mutation_matrix() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, token, client) = setup(&env);
+    let user = Address::generate(&env);
+    StellarAssetClient::new(&env, &token).mint(&user, &1_000);
+    client.deposit(&user, &500);
+
+    client.set_backend_status(&false);
+    client.force_exit_request(&user);
+    client.set_backend_status(&true);
+    client.propose_upgrade(&dummy_hash(&env));
+    assert!(client.is_upgrade_mode());
+
+    assert!(client.try_deposit(&user, &10).is_err());
+    assert!(client.try_set_backend_status(&false).is_err());
+    assert!(client.try_transfer_admin(&Address::generate(&env)).is_err());
+    assert!(client.try_set_unified_auth(&Address::generate(&env)).is_err());
+    assert!(client.try_propose_upgrade(&dummy_hash(&env)).is_err());
+
+    client.withdrawal(&user, &100);
+    client.recovery(&user);
+    client.pause();
+    client.unpause();
+    client.cancel_upgrade();
+    assert!(!client.is_upgrade_mode());
+    assert_eq!(client.get_deposit(&user), Some(400));
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, token, client) = setup(&env);
+    let user = Address::generate(&env);
+    StellarAssetClient::new(&env, &token).mint(&user, &100);
+    client.deposit(&user, &100);
+    client.set_backend_status(&false);
+    client.force_exit_request(&user);
+    client.propose_upgrade(&dummy_hash(&env));
+    env.ledger().set(LedgerInfo {
+        timestamp: env.ledger().timestamp() + FORCE_EXIT_DELAY + 1,
+        ..env.ledger().get()
+    });
+    client.force_exit_complete(&user);
+    assert_eq!(client.get_deposit(&user), None);
+}
+
+#[test]
+fn missing_unified_auth_fails_closed_except_for_admin_bootstrap() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let vault_token = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    let contract_id = env.register_contract(None, CoreVaultContract);
+    let client = CoreVaultContractClient::new(&env, &contract_id);
+    client.init_without_unified_auth(&admin, &vault_token);
+
+    assert!(client.try_pause().is_err());
+    assert!(client.try_unpause().is_err());
+    assert!(client.try_set_backend_status(&false).is_err());
+    assert!(client.try_recovery(&Address::generate(&env)).is_err());
+    assert!(client.try_transfer_admin(&Address::generate(&env)).is_err());
+    assert!(client.try_propose_upgrade(&dummy_hash(&env)).is_err());
+    assert!(client.try_cancel_upgrade().is_err());
+    assert!(client.try_apply_upgrade().is_err());
+    assert!(client.try_set_unified_auth(&Address::generate(&env)).is_err());
+
+    env.mock_all_auths();
+    client.set_unified_auth(&Address::generate(&env));
+    client.pause();
+    client.unpause();
 }

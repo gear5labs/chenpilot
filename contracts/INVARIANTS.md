@@ -394,6 +394,20 @@ These invariants preserve single-writer safety for durable operations and financ
 
 ## Core Vault Invariants
 
+### CV5: Upgrade-Mode Mutation Policy
+**Invariant**: Upgrade mode blocks new deposits and administrator/backend configuration changes, while preserving exits and emergency controls.
+
+**Formal**: `upgrade_mode ⇒ ¬deposit ∧ ¬set_backend_status ∧ ¬transfer_admin ∧ ¬set_unified_auth ∧ ¬propose_upgrade`; withdrawals, force-exit request/completion, recovery, pause/unpause, cancel, and apply remain available.
+
+**Enforcement**: Public mutation matrix tests cover rejected and permitted calls while an upgrade is pending. Only cancel/apply clear upgrade mode.
+
+### CV6: UnifiedAuth Bootstrap Fails Closed
+**Invariant**: Missing UnifiedAuth configuration blocks privileged operations except the legacy-admin bootstrap setter.
+
+**Formal**: `¬configured ⇒ privileged_call_rejected`, except `set_unified_auth ⇒ legacy_admin_authenticated`.
+
+**Enforcement**: `init_without_unified_auth` leaves the address unset; privileged authorization helpers and `apply_upgrade` reject until `set_unified_auth` succeeds.
+
 ### CV1: Withdrawal Authorization
 **Invariant**: Withdrawals require proper authorization.
 
@@ -425,6 +439,13 @@ These invariants preserve single-writer safety for durable operations and financ
 ---
 
 ## Fee Distribution Invariants
+
+### FD4: Checked Fee Arithmetic and Rounding
+**Invariant**: Fee splits cannot overflow, each named recipient share rounds down, and the LP residual receives all fractional remainder.
+
+**Formal**: `treasury_share = floor(amount * treasury_bps / 10_000)`; `ai_agent_share = floor(amount * ai_agent_bps / 10_000)`; `lp_share = amount - treasury_share - ai_agent_share`.
+
+**Enforcement**: Basis points are range-checked without overflowing, fee-share calculation uses checked quotient/remainder arithmetic, and boundary tests cover zero, maximum amounts, fractional amounts, and invalid basis points.
 
 ### FD1: Distribution Authorization
 **Invariant**: Fee distribution requires admin authorization.
