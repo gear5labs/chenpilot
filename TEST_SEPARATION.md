@@ -18,6 +18,7 @@ This project separates unit tests from service-backed integration tests with exp
 - **Prerequisites**: 
   - PostgreSQL 15 (required)
   - Redis 7 (required)
+- **Error Trapping**: Unhandled promise rejections and uncaught exceptions are trapped by `AsyncErrorDetector` (`tests/integration/async-error-detector.ts`) to ensure asynchronous listener failures fail tests explicitly.
 - **Config**: `jest.integration.config.js`
 - **Run**: `npm run test:integration`
 - **CI**: `test-separation.yml` job: `integration-tests`
