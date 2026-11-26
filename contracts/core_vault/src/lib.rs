@@ -205,18 +205,33 @@ impl CoreVaultContract {
     /// Initialize the contract with an admin, vault token, and unified auth address.
     /// Emits `init` event on success.
     pub fn init(env: Env, admin: Address, vault_token: Address, unified_auth: Address) {
+        Self::initialize(&env, admin, vault_token, Some(unified_auth));
+    }
+
+    /// Initialize before UnifiedAuth is deployed. Only the legacy admin may
+    /// bootstrap UnifiedAuth with `set_unified_auth`; other privileged calls
+    /// fail closed until it is configured.
+    pub fn init_without_unified_auth(env: Env, admin: Address, vault_token: Address) {
+        Self::initialize(&env, admin, vault_token, None);
+    }
+
+    fn initialize(env: &Env, admin: Address, vault_token: Address, unified_auth: Option<Address>) {
         if env.storage().instance().has(&DataKey::Admin) {
             fail(&env, FailureReason::AlreadyInitialized);
         }
         // Reject hallucinated or non-contract addresses.
         assert!(vault_token.as_contract().is_some(), "unresolved asset");
-        assert!(unified_auth.as_contract().is_some(), "unresolved authority");
+        if let Some(address) = &unified_auth {
+            assert!(address.as_contract().is_some(), "unresolved authority");
+        }
         // Verify the vault token is a valid token contract.
         let token_client = token::Client::new(&env, &vault_token);
         let _ = token_client.decimals();
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::VaultToken, &vault_token);
-        env.storage().instance().set(&DataKey::UnifiedAuth, &unified_auth);
+        if let Some(address) = unified_auth {
+            env.storage().instance().set(&DataKey::UnifiedAuth, &address);
+        }
         env.storage().instance().set(&DataKey::BackendOnline, &true);
         env.storage().instance().set(&DataKey::UpgradeMode, &false);
         env.events().publish(
@@ -315,6 +330,7 @@ impl CoreVaultContract {
     /// Emits `deposit` event on success.
     pub fn deposit(env: Env, user: Address, amount: i128) {
         user.require_auth();
+        Self::require_not_upgrade_mode(&env);
         pause_state::require_not_paused(&env);
         if !Self::is_backend_online(env.clone()) {
             fail(&env, FailureReason::BackendOffline);
@@ -508,6 +524,7 @@ impl CoreVaultContract {
         if Self::is_emergency_active(&env) {
             fail(&env, FailureReason::EmergencyMode);
         }
+        Self::require_not_upgrade_mode(&env);
 
         let unlock_ledger = env.ledger().sequence() + TIMELOCK_LEDGERS;
         let pending = PendingUpgrade { new_wasm_hash: new_wasm_hash.clone(), unlock_ledger };
@@ -548,6 +565,7 @@ impl CoreVaultContract {
     /// Exits upgrade mode after successful upgrade.
     /// Emits `upg_done` event on success.
     pub fn apply_upgrade(env: Env) {
+        Self::get_unified_auth_internal(&env);
         let pending: PendingUpgrade = env
             .storage()
             .instance()
@@ -576,6 +594,8 @@ impl CoreVaultContract {
     /// Trust boundary: CURRENT ADMIN ONLY (legacy) - use UnifiedAuth for role management.
     /// Emits `adm_xfer` event on success.
     pub fn transfer_admin(env: Env, new_admin: Address) {
+        Self::get_unified_auth_internal(&env);
+        Self::require_not_upgrade_mode(&env);
         let args: Vec<Val> = (new_admin.clone(),).into_val(&env);
         let admin = Self::require_legacy_admin(
             &env,
@@ -595,6 +615,8 @@ impl CoreVaultContract {
     /// Set the UnifiedAuth contract address.
     /// Trust boundary: CURRENT ADMIN ONLY.
     pub fn set_unified_auth(env: Env, unified_auth: Address) {
+        Self::require_not_upgrade_mode(&env);
+        assert!(unified_auth.as_contract().is_some(), "unresolved authority");
         let args: Vec<Val> = (unified_auth.clone(),).into_val(&env);
         Self::require_legacy_admin(
             &env,
@@ -667,6 +689,12 @@ impl CoreVaultContract {
     
     fn is_upgrade_mode_internal(env: &Env) -> bool {
         env.storage().instance().get(&DataKey::UpgradeMode).unwrap_or(false)
+    }
+
+    fn require_not_upgrade_mode(env: &Env) {
+        if Self::is_upgrade_mode_internal(env) {
+            fail(env, FailureReason::UpgradeMode);
+        }
     }
 
     pub fn upgrade_unlock_ledger(env: Env) -> u32 {

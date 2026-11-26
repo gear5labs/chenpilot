@@ -33,7 +33,13 @@ What these mean for operators:
   `require_upgrade_admin`, which today checks the legacy `Admin` address set by
   `init` or `transfer_admin`. Granting the `UpgradeAdmin` role in
   `unified_auth` does **not** allow upgrades yet. `apply_upgrade` has no
-  authorization: anyone can call it once the delay has passed.
+  caller authorization: anyone can call it once the delay has passed, but it
+  requires UnifiedAuth to be configured.
+- **UnifiedAuth bootstrap.** Deployments that are initialized before UnifiedAuth
+  is available must use `init_without_unified_auth`. While unconfigured, all
+  privileged operations fail closed except `set_unified_auth`, which still
+  requires the legacy admin's authorization. Configure a valid UnifiedAuth
+  contract before using other privileged operations.
 - **Emergency.** `propose_upgrade` fails while an emergency is active. Resolve
   the emergency first, or ship the fix as a new deployment.
 - **Network names differ.** The backend uses `STELLAR_NETWORK=testnet|public`.
@@ -109,8 +115,12 @@ for real keys.
 | U10 | Rotate the deployment manifest                                                | `npm run contracts:manifest -- rotate --network <net> --contract core_vault --contract-id <C> --wasm-hash <hash> --interface-version <semver> --notes "<reason>"` | The new rotation entry                                      |
 | U11 | Confirm the backend accepts the new identity                                  | D7                                                                                                                                                                | `show` output; startup log without a manifest error         |
 
-While an upgrade is pending, `is_upgrade_mode` returns `true` and
-`set_backend_status` is refused. Deposits and withdrawals keep working.
+While an upgrade is pending, `is_upgrade_mode` returns `true`. New deposits,
+backend status changes, admin transfers, and UnifiedAuth changes are refused.
+Withdrawals, force-exit requests/completions, recovery, and pause/unpause remain
+available; `cancel_upgrade` and `apply_upgrade` are the only operations that
+exit upgrade mode. A second upgrade proposal is rejected until the pending one
+is cancelled or applied.
 
 ## Rollback boundaries
 
