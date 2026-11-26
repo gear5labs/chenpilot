@@ -40,6 +40,13 @@ Options: `--env-file <path>` (repeatable) reads other files instead of `.env.loc
 - If you change dependencies, run `pnpm install` (without `--frozen-lockfile`) and commit the updated `pnpm-lock.yaml` with the `package.json` change.
 - `pnpm run smoke:clean-checkout` runs `node scripts/repo/verify-clean-install.mjs`, which runs the supported install and fails if it changed the lockfile or any tracked file, and then runs the workspace smoke test. The `clean-checkout-smoke` job in `.github/workflows/release-gates.yml` runs it on a fresh checkout.
 
+### Package-Level Contribution Guides
+
+Because `packages/bot` and `packages/sdk` have distinct build, testing, and architecture requirements, refer to their dedicated guides when working within individual packages:
+
+- [Bot Contribution Guide](packages/bot/CONTRIBUTING.md) — Unified Telegram & Discord bot architecture, boundaries, and commands.
+- [SDK Core Contribution Guide](packages/sdk/CONTRIBUTING.md) — Core SDK commands, build pipeline, conformance testing, and safety model.
+
 ## 🛠️ How to Contribute
 
 ### 1. Find an Issue
