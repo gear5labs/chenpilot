@@ -12,19 +12,23 @@ import { TrustRegistry } from '../trust/TrustRegistry';
 import { AssetValidator } from '../compatibility/AssetValidator';
 import { NetworkCompatibility } from '../compatibility/NetworkCompatibility';
 import { VersionCompatibility } from '../compatibility/VersionCompatibility';
-import { 
-  Asset, 
-  AssetData, 
+import {
+  Asset,
+  AssetData,
+  AssetLookupOptions,
   PriceResult,
-  TrustScore, 
-  CompatibilityResult, 
+  TrustScore,
+  CompatibilityResult,
   CompatibilityContext,
   AssetIntelligenceConfig,
   AssetEvent,
   AssetIntelligenceError,
-  ErrorCode,
   MetadataRevision,
 } from './types';
+import { combineSignals, isAbortError, throwIfAborted } from '../../abort';
+
+/** Default per-provider request deadline when none is configured by the caller. */
+const DEFAULT_PROVIDER_TIMEOUT_MS = 5_000;
 
 export class AssetIntelligence {
   private cache: AssetCache;
@@ -44,13 +48,13 @@ export class AssetIntelligence {
     // Initialize metadata revision store (kept separate from the cache so
     // invalidation and TTL expiry never remove historical revisions)
     this.metadataRevisions = new MetadataRevisionStore();
-    
+
     // Initialize cache
     this.cache = new AssetCache(config.cache);
-    
+
     // Initialize invalidator
     this.invalidator = new CacheInvalidator(this.cache, config.invalidation);
-    
+
     // Initialize trust components
     this.trustRegistry = new TrustRegistry();
     this.trustSignals = new TrustSignals();
@@ -66,7 +70,7 @@ export class AssetIntelligence {
         },
       }
     );
-    
+
     // Initialize compatibility components
     this.assetValidator = new AssetValidator({
       strictMode: config.compatibility.strictMode,
@@ -75,35 +79,57 @@ export class AssetIntelligence {
       requireAuth: true,
       requireTOML: false,
     });
-    
+
     this.networkCompatibility = new NetworkCompatibility();
     this.versionCompatibility = new VersionCompatibility();
   }
 
   /**
-   * Get comprehensive asset information
+   * Get comprehensive asset information.
+   *
+   * @param asset - The asset to look up.
+   * @param options - Optional cancellation signal and per-provider deadlines.
+   *   When the signal fires (or any deadline fires) before all providers have
+   *   responded, the returned promise rejects with an AbortError and the cache
+   *   is NOT populated with partial data.
    */
-  async getAssetInfo(asset: Asset): Promise<AssetData | null> {
+  async getAssetInfo(asset: Asset, options: AssetLookupOptions = {}): Promise<AssetData | null> {
+    throwIfAborted(options.signal);
+
     try {
-      // Check cache first
+      // Check cache first — a cache hit never touches external providers so no
+      // deadline is needed here.
       const cached = await this.cache.get(asset, 'general');
       if (cached) {
         return cached;
       }
 
-      // Fetch metadata
-      const metadata = await this.fetchMetadata(asset);
+      // ── Metadata ──────────────────────────────────────────────────────────
+      const metadata = await this.fetchMetadata(asset, options);
+
+      // ── Abort check before any further work ───────────────────────────────
+      // If the caller cancelled while the metadata fetch was in flight, stop
+      // here — do NOT record a revision or call downstream providers.
+      throwIfAborted(options.signal);
 
       // Record the metadata revision so historical records can refer to it
       const revision = this.metadataRevisions.record(asset, metadata);
-      
-      // Fetch trust score
-      const trust = await this.trustScorer.calculateTrustScore(asset);
-      
-      // Check compatibility
-      const compatibility = await this.checkCompatibility(asset, {
-        network: asset.network,
-      });
+
+      // ── Trust score ───────────────────────────────────────────────────────
+      const trustSignal = this.buildProviderSignal(options, options.deadlines?.trustMs);
+      let trust: TrustScore;
+      try {
+        trust = await this.trustScorer.calculateTrustScore(asset, trustSignal.signal);
+      } finally {
+        trustSignal.cleanup();
+      }
+
+      throwIfAborted(options.signal);
+
+      // ── Compatibility ─────────────────────────────────────────────────────
+      const compatibility = await this.checkCompatibility(asset, { network: asset.network }, options);
+
+      throwIfAborted(options.signal);
 
       const assetData: AssetData = {
         metadata,
@@ -115,11 +141,15 @@ export class AssetIntelligence {
         lastUpdated: Date.now(),
       };
 
-      // Cache the result
+      // Only write to the cache once ALL providers have responded successfully
+      // and the operation has not been cancelled.
       await this.cache.set(asset, 'general', assetData);
 
       return assetData;
     } catch (error) {
+      // Re-throw abort errors with their original identity so callers can
+      // distinguish cancellation from ordinary provider failures.
+      if (isAbortError(error)) throw error;
       throw new AssetIntelligenceError(
         'PROVIDER_ERROR',
         `Failed to get asset info: ${error instanceof Error ? error.message : String(error)}`,
@@ -129,9 +159,14 @@ export class AssetIntelligence {
   }
 
   /**
-   * Get asset price information
+   * Get asset price information.
+   *
+   * @param asset - The asset to price.
+   * @param options - Optional cancellation signal and per-provider deadlines.
    */
-  async getAssetPrice(asset: Asset): Promise<PriceResult> {
+  async getAssetPrice(asset: Asset, options: AssetLookupOptions = {}): Promise<PriceResult> {
+    throwIfAborted(options.signal);
+
     try {
       // Check cache first
       const cached = await this.cache.get(asset, 'price');
@@ -145,6 +180,7 @@ export class AssetIntelligence {
         reason: hasConfiguredSource ? 'provider_unavailable' : 'no_configured_source',
       };
     } catch (error) {
+      if (isAbortError(error)) throw error;
       throw new AssetIntelligenceError(
         'PRICE_UNAVAILABLE',
         `Failed to get asset price: ${error instanceof Error ? error.message : String(error)}`,
@@ -154,9 +190,15 @@ export class AssetIntelligence {
   }
 
   /**
-   * Get trust score for asset
+   * Get trust score for an asset.
+   *
+   * @param asset - The asset to score.
+   * @param options - Optional cancellation signal and per-provider deadlines.
+   *   When aborted, the cache is not populated with partial data.
    */
-  async getTrustScore(asset: Asset): Promise<TrustScore> {
+  async getTrustScore(asset: Asset, options: AssetLookupOptions = {}): Promise<TrustScore> {
+    throwIfAborted(options.signal);
+
     try {
       // Check cache first
       const cached = await this.cache.get(asset, 'trust');
@@ -164,10 +206,18 @@ export class AssetIntelligence {
         return cached.trust;
       }
 
-      // Calculate trust score
-      const trustScore = await this.trustScorer.calculateTrustScore(asset);
+      // Merge the caller's external signal with the trust-specific deadline.
+      const trustSignal = this.buildProviderSignal(options, options.deadlines?.trustMs);
+      let trustScore: TrustScore;
+      try {
+        trustScore = await this.trustScorer.calculateTrustScore(asset, trustSignal.signal);
+      } finally {
+        trustSignal.cleanup();
+      }
 
-      // Cache the result
+      // Guard: do not cache if the caller's signal fired during the fetch.
+      throwIfAborted(options.signal);
+
       const assetData: AssetData = {
         trust: trustScore,
         lastUpdated: Date.now(),
@@ -176,6 +226,7 @@ export class AssetIntelligence {
 
       return trustScore;
     } catch (error) {
+      if (isAbortError(error)) throw error;
       throw new AssetIntelligenceError(
         'TRUST_CHECK_FAILED',
         `Failed to get trust score: ${error instanceof Error ? error.message : String(error)}`,
@@ -185,9 +236,20 @@ export class AssetIntelligence {
   }
 
   /**
-   * Check asset compatibility
+   * Check asset compatibility against a network/operation context.
+   *
+   * @param asset - The asset to check.
+   * @param context - The network / operation context.
+   * @param options - Optional cancellation signal and per-provider deadlines.
+   *   When aborted, the cache is not populated with partial data.
    */
-  async checkCompatibility(asset: Asset, context: CompatibilityContext): Promise<CompatibilityResult> {
+  async checkCompatibility(
+    asset: Asset,
+    context: CompatibilityContext,
+    options: AssetLookupOptions = {},
+  ): Promise<CompatibilityResult> {
+    throwIfAborted(options.signal);
+
     try {
       // Check cache first
       const cacheKey = `${context.network}:${context.operation || 'any'}:${context.version || 'any'}`;
@@ -196,11 +258,29 @@ export class AssetIntelligence {
         return cached.compatibility[cacheKey];
       }
 
-      // Check network compatibility
-      const networkResult = await this.networkCompatibility.checkCompatibility(asset, context);
+      // Build a per-compatibility deadline signal.
+      const compatSignal = this.buildProviderSignal(options, options.deadlines?.compatibilityMs);
+      let networkResult: CompatibilityResult;
+      let validationResult: Awaited<ReturnType<AssetValidator['validateMetadata']>>;
+      try {
+        // Both calls share the same combined signal — if either the external
+        // signal or the compatibility deadline fires, both stop.
+        networkResult = await this.networkCompatibility.checkCompatibility(
+          asset,
+          context,
+          compatSignal.signal,
+        );
+        validationResult = await this.assetValidator.validateMetadata(
+          asset,
+          {},
+          compatSignal.signal,
+        );
+      } finally {
+        compatSignal.cleanup();
+      }
 
-      // Check asset validation
-      const validationResult = await this.assetValidator.validateMetadata(asset, {});
+      // Guard: do not cache if the caller's signal fired.
+      throwIfAborted(options.signal);
 
       const reasons = [...networkResult.reasons, ...validationResult.reasons];
       const warnings = [...networkResult.warnings, ...validationResult.reasons];
@@ -213,7 +293,6 @@ export class AssetIntelligence {
         lastChecked: Date.now(),
       };
 
-      // Cache the result
       const assetData: AssetData = {
         compatibility: {
           ...cached?.compatibility,
@@ -225,6 +304,7 @@ export class AssetIntelligence {
 
       return result;
     } catch (error) {
+      if (isAbortError(error)) throw error;
       throw new AssetIntelligenceError(
         'COMPATIBILITY_CHECK_FAILED',
         `Failed to check compatibility: ${error instanceof Error ? error.message : String(error)}`,
@@ -260,7 +340,7 @@ export class AssetIntelligence {
    */
   async refreshAsset(asset: Asset): Promise<void> {
     await this.invalidateAsset(asset);
-    await this.getAssetInfo(asset); // This will re-fetch and cache
+    await this.getAssetInfo(asset);
   }
 
   /**
@@ -284,8 +364,35 @@ export class AssetIntelligence {
     await this.cache.clear();
   }
 
-  /** Fetch metadata only from the configured Horizon and Stellar TOML providers. */
-  private async fetchMetadata(asset: Asset) {
+  // ─── Private helpers ──────────────────────────────────────────────────────
+
+  /**
+   * Builds a `CombinedSignal` for a single provider call by merging the
+   * caller's external signal with an optional per-provider deadline.
+   *
+   * When no deadline is provided for the provider category, the SDK-wide
+   * default (DEFAULT_PROVIDER_TIMEOUT_MS) is used so every outbound request
+   * has a bounded lifetime even without explicit caller configuration.
+   *
+   * Always call `.cleanup()` in a `finally` block to release the timeout and
+   * remove the abort listener from the external signal.
+   */
+  private buildProviderSignal(
+    options: AssetLookupOptions,
+    providerDeadlineMs: number | undefined,
+  ) {
+    const timeoutMs = providerDeadlineMs ?? DEFAULT_PROVIDER_TIMEOUT_MS;
+    return combineSignals(timeoutMs, options.signal);
+  }
+
+  /**
+   * Fetch metadata from the configured Horizon and Stellar TOML providers.
+   *
+   * Uses the caller-supplied `options.signal` merged with the metadata-specific
+   * deadline (`options.deadlines?.metadataMs`), falling back to
+   * DEFAULT_PROVIDER_TIMEOUT_MS when neither is set.
+   */
+  private async fetchMetadata(asset: Asset, options: AssetLookupOptions = {}) {
     const horizonUrl = this.config.providers.metadata.horizonUrl.replace(/\/$/, '');
     if (!horizonUrl) {
       throw new AssetIntelligenceError('METADATA_UNAVAILABLE', 'No Horizon metadata provider is configured', asset);
@@ -295,7 +402,11 @@ export class AssetIntelligence {
     assetUrl.searchParams.set('asset_code', asset.code);
     if (asset.issuer) assetUrl.searchParams.set('asset_issuer', asset.issuer);
 
-    const assetResponse = await this.fetchProvider(assetUrl.toString());
+    const assetResponse = await this.fetchProvider(
+      assetUrl.toString(),
+      options,
+      options.deadlines?.metadataMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
+    );
     if (!assetResponse.ok) {
       throw new AssetIntelligenceError('METADATA_UNAVAILABLE', `Horizon returned HTTP ${assetResponse.status}`, asset);
     }
@@ -318,7 +429,14 @@ export class AssetIntelligence {
     const metadata: NonNullable<AssetData['metadata']> = { homeDomain, tomlUrl, provenance };
 
     if (tomlUrl) {
-      const tomlResponse = await this.fetchProvider(tomlUrl);
+      // Re-check cancellation before the second network hop.
+      throwIfAborted(options.signal);
+
+      const tomlResponse = await this.fetchProvider(
+        tomlUrl,
+        options,
+        options.deadlines?.metadataMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
+      );
       if (!tomlResponse.ok) {
         throw new AssetIntelligenceError('METADATA_UNAVAILABLE', `Stellar TOML returned HTTP ${tomlResponse.status}`, asset);
       }
@@ -334,18 +452,36 @@ export class AssetIntelligence {
     return metadata;
   }
 
-  private async fetchProvider(url: string): Promise<Response> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
+  /**
+   * Execute a single HTTP request to an external provider.
+   *
+   * Merges the caller's external cancellation signal with the appropriate
+   * per-provider deadline (via `combineSignals`) so whichever fires first
+   * aborts the fetch.  The timeout is always cleared in the `finally` block
+   * to prevent leaks on both success and failure paths.
+   *
+   * @param url - The URL to fetch.
+   * @param options - Caller-supplied lookup options (signal + deadlines).
+   * @param provider - Which provider category is making this call, used to
+   *   select the correct per-provider deadline.
+   */
+  private async fetchProvider(
+    url: string,
+    options: AssetLookupOptions = {},
+    deadlineMs: number = DEFAULT_PROVIDER_TIMEOUT_MS,
+  ): Promise<Response> {
+    const { signal, cleanup } = combineSignals(deadlineMs, options.signal);
     try {
-      return await fetch(url, { signal: controller.signal });
+      return await fetch(url, { signal: signal as AbortSignal | undefined });
     } catch (error) {
+      // Preserve abort identity — do NOT wrap it in AssetIntelligenceError.
+      if (isAbortError(error)) throw error;
       throw new AssetIntelligenceError(
         'METADATA_UNAVAILABLE',
         `Metadata provider request failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     } finally {
-      clearTimeout(timeout);
+      cleanup();
     }
   }
 

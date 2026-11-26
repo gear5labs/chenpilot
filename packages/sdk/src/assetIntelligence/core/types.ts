@@ -2,7 +2,48 @@
  * Core type definitions for Asset Intelligence Layer
  */
 
+import type { AbortSignalLike } from '../../types';
+
 export type Network = 'public' | 'testnet' | 'futurenet' | 'standalone';
+
+// ─── Per-call options ─────────────────────────────────────────────────────────
+
+/**
+ * Per-provider deadline configuration.
+ *
+ * Each field caps how long (in milliseconds) a single outbound request to that
+ * provider category may take before the operation is aborted with a timeout.
+ * When omitted the orchestrator falls back to the default 5 000 ms built-in
+ * deadline that was previously applied globally.
+ */
+export interface ProviderDeadlines {
+  /** Maximum time (ms) for the Horizon + Stellar TOML metadata fetch. */
+  metadataMs?: number;
+  /** Maximum time (ms) for trust-signal provider calls. */
+  trustMs?: number;
+  /** Maximum time (ms) for compatibility provider calls. */
+  compatibilityMs?: number;
+}
+
+/**
+ * Options accepted by every public `AssetIntelligence` lookup method.
+ *
+ * Callers can supply either an external cancellation signal, provider-specific
+ * deadlines, or both. The orchestrator merges them into a single per-request
+ * AbortController so that whichever limit fires first wins.
+ */
+export interface AssetLookupOptions {
+  /**
+   * External signal used to cancel the entire lookup.  Passing an already-aborted
+   * signal causes the method to reject immediately without touching the cache.
+   */
+  signal?: AbortSignalLike;
+  /**
+   * Fine-grained per-provider timeouts.  These are combined with `signal` so
+   * that whichever limit fires first terminates the affected request.
+   */
+  deadlines?: ProviderDeadlines;
+}
 
 export interface Asset {
   code: string;
