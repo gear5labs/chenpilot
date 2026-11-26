@@ -87,3 +87,33 @@ export interface ToolRegistryEntry {
   lastUsed?: Date;
   governanceMetadata?: Record<string, unknown>;
 }
+
+export enum ToolDiscoveryFailureType {
+  NO_TOOLS_FOUND = "NO_TOOLS_FOUND",
+  INVALID_METADATA = "INVALID_METADATA",
+  PROVIDER_FAILURE = "PROVIDER_FAILURE",
+  MISSING_REQUIRED_TOOL = "MISSING_REQUIRED_TOOL",
+}
+
+export interface ToolDiscoveryError {
+  type: ToolDiscoveryFailureType;
+  message: string;
+  toolName?: string;
+  cause?: unknown;
+}
+
+export interface ToolDegradationRecord {
+  toolName: string;
+  reason: string;
+  timestamp: Date;
+}
+
+export interface ToolDiscoveryResult {
+  success: boolean;
+  status: "success" | "partial" | "failed";
+  discoveredCount: number;
+  fingerprint: string;
+  tools: ToolDefinition[];
+  errors: ToolDiscoveryError[];
+  degradations: ToolDegradationRecord[];
+}
