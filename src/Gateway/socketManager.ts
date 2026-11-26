@@ -372,17 +372,15 @@ export class SocketManager {
               `Unauthenticated client ${socket.id} attempted to subscribe to transactions`,
               { requestId: getExecutionContext()?.requestId }
             );
-            return;
-          }
-          const abuseDecision = await evaluateRealtimeAbusePolicy(
-            "subscribe:transactions",
-            {
-              userId: client.userId,
-              sessionId: socket.id,
-              ipAddress: socket.handshake.address,
-            },
-            { transactionId }
-          );
+            await evaluateRealtimeAbusePolicy(
+              "subscribe:transactions",
+              {
+                userId: "anonymous",
+                sessionId: socket.id,
+                ipAddress: socket.handshake.address,
+              },
+              { transactionId }
+            );
           // Audit log denial
           await auditLogService.log({
             userId: 'anonymous',
@@ -563,6 +561,7 @@ export class SocketManager {
             `Client ${socket.id} subscribed to transaction ${transactionId}`,
             { requestId: getExecutionContext()?.requestId }
           );
+        }
         });
       });
 

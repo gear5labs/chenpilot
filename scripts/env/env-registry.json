@@ -1182,24 +1182,6 @@
       "description": "Family: futurenet overrides, same suffixes as `TESTNET_*`."
     },
     {
-      "name": "STRATEGY_REGISTRY_QUORUM",
-      "service": "backend",
-      "owner": "Agents (`src/Agents/tools/strategyRegistry.ts`)",
-      "required": false,
-      "default": "3",
-      "secret": false,
-      "description": "Votes required to register a strategy."
-    },
-    {
-      "name": "STRATEGY_REGISTRY_EPOCH_MS",
-      "service": "backend",
-      "owner": "Agents (`src/Agents/tools/strategyRegistry.ts`)",
-      "required": false,
-      "default": "86400000",
-      "secret": false,
-      "description": "Voting epoch length."
-    },
-    {
       "name": "MANIFEST_DIR",
       "service": "backend",
       "owner": "Contracts (`src/ContractIdentity`)",

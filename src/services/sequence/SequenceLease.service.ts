@@ -3,6 +3,7 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 import AppDataSource from "../../config/Datasource";
 import logger from "../../config/logger";
 import { SequenceLease } from "./SequenceLease.entity";
+import { Clock, systemClock } from "../../Payments/paymentTypes";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -91,6 +92,8 @@ export interface ReconciliationResult {
  * 3. `consumeLease` is atomic: only one caller can consume a given lease.
  */
 export class SequenceLeaseService {
+  constructor(private readonly clock: Clock = systemClock) {}
+
   private get repo(): Repository<SequenceLease> {
     return AppDataSource.getRepository(SequenceLease);
   }
@@ -163,7 +166,7 @@ export class SequenceLeaseService {
     ttlMs: number,
     horizonServer?: StellarSdk.Horizon.Server
   ): Promise<LeaseAcquisitionResult> {
-    const now = new Date();
+    const now = this.clock.now();
     const expiresAt = new Date(now.getTime() + ttlMs);
 
     // Use a transaction to ensure atomic allocation
@@ -283,7 +286,7 @@ export class SequenceLeaseService {
         );
       }
 
-      if (new Date() > lease.expiresAt) {
+      if (this.clock.now() > lease.expiresAt) {
         // Mark as expired within the same transaction
         lease.status = "expired";
         await manager.save(lease);
@@ -327,7 +330,7 @@ export class SequenceLeaseService {
 
       // All checks passed — consume the lease atomically
       lease.status = "consumed";
-      lease.consumedAt = new Date();
+      lease.consumedAt = this.clock.now();
       lease.txHash = txHash;
       const saved = await manager.save(lease);
 
@@ -379,7 +382,7 @@ export class SequenceLeaseService {
       );
     }
 
-    if (new Date() > lease.expiresAt) {
+    if (this.clock.now() > lease.expiresAt) {
       throw new LeaseValidationError(
         `Lease ${leaseId} has expired`,
         leaseId,
@@ -428,7 +431,7 @@ export class SequenceLeaseService {
    * @returns Array of reclaimed leases
    */
   async expireAndReclaim(batchSize: number = 100): Promise<SequenceLease[]> {
-    const now = new Date();
+    const now = this.clock.now();
 
     const staleLeases = await this.repo
       .createQueryBuilder("sl")

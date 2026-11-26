@@ -89,6 +89,12 @@ export interface NetworkFeeInfo {
    * Number of pending transactions in the network
    */
   pendingTxCount?: number;
+
+  /**
+   * True when the fee could not be refreshed and this is the last known
+   * (or a conservative default) value rather than a live quote.
+   */
+  stale?: boolean;
 }
 
 /**
@@ -407,10 +413,15 @@ export class DelayedTransactionService {
     } catch (error) {
       logger.error("Error fetching fee stats:", error);
 
-      // Return default fee if unable to fetch
+      // Fall back to the last observed fee rather than fabricating a fresh
+      // quote; mark it stale so callers can distinguish it from live data.
+      if (this.lastFeeInfo) {
+        return { ...this.lastFeeInfo, stale: true };
+      }
       return {
         fee: 100,
-        lastUpdated: Date.now(),
+        lastUpdated: 0,
+        stale: true,
       };
     }
   }

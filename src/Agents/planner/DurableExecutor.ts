@@ -27,6 +27,7 @@ import {
   isStepInputResolutionError,
   resolveAndFreezeStepInputs,
 } from "./stepInputResolution";
+import { Clock, systemClock } from "../../Payments/paymentTypes";
 
 export interface DurableExecutionResult {
   executionId: string;
@@ -51,6 +52,8 @@ class ExecutionCancelledError extends Error {
 export class DurableExecutor {
   private executionRepo = AppDataSource.getRepository(DurableExecution);
   private stepRepo = AppDataSource.getRepository(DurableStep);
+
+  constructor(private readonly clock: Clock = systemClock) {}
 
   // ---------------------------------------------------------------------------
   // Internal safe-point guard
@@ -163,7 +166,7 @@ export class DurableExecutor {
     if (execution.requiresApproval) {
       execution.status = ExecutionStatus.AWAITING_APPROVAL;
       const ttlMinutes = plan.approvalTimeoutMinutes || 60; // Default 60 minutes
-      const now = new Date();
+      const now = this.clock.now();
       execution.expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
       await this.executionRepo.save(execution);
       this.emitUpdate(RealtimeEventType.AGENT_APPROVAL_REQUIRED, execution);
@@ -246,7 +249,7 @@ export class DurableExecutor {
     }
 
     if (execution.status === ExecutionStatus.AWAITING_APPROVAL) {
-      execution.approvedAt = new Date();
+      execution.approvedAt = this.clock.now();
       execution.approvedBy = approvedBy;
       execution.status = ExecutionStatus.RUNNING;
       await this.executionRepo.save(execution);
@@ -256,7 +259,7 @@ export class DurableExecutor {
       (s) => s.stepNumber === execution.currentStepNumber
     );
     if (currentStep && currentStep.status === StepStatus.AWAITING_APPROVAL) {
-      currentStep.approvedAt = new Date();
+      currentStep.approvedAt = this.clock.now();
       currentStep.approvedBy = approvedBy;
       currentStep.status = StepStatus.PENDING;
       await this.stepRepo.save(currentStep);
@@ -350,7 +353,7 @@ export class DurableExecutor {
     }
 
     // Cancel all steps that have not yet started a side effect.
-    const now = new Date();
+    const now = this.clock.now();
     const stoppableSteps = execution.steps.filter(
       (s) =>
         s.status === StepStatus.PENDING ||
@@ -431,7 +434,7 @@ export class DurableExecutor {
         if (step.requiresApproval && !step.approvedAt) {
           step.status = StepStatus.AWAITING_APPROVAL;
           const ttlMinutes = 60; // Default 60 minutes for step approval
-          const now = new Date();
+          const now = this.clock.now();
           step.expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
           await this.stepRepo.save(step);
 
@@ -572,7 +575,7 @@ export class DurableExecutor {
       });
 
       step.status = StepStatus.RUNNING;
-      step.startedAt = new Date();
+      step.startedAt = this.clock.now();
       await this.stepRepo.save(step);
 
       try {
@@ -585,7 +588,7 @@ export class DurableExecutor {
         if (result.status === "success") {
           step.status = StepStatus.COMPLETED;
           step.result = result;
-          step.completedAt = new Date();
+          step.completedAt = this.clock.now();
           await this.stepRepo.save(step);
           return true;
         }
@@ -671,7 +674,7 @@ export class DurableExecutor {
         totalSteps: execution.steps.length,
         result,
         error: execution.errorMessage,
-        timestamp: new Date(),
+        timestamp: this.clock.now(),
       });
     } catch (error) {
       logger.warn("Failed to emit socket update", { error });
@@ -724,7 +727,7 @@ export class DurableExecutor {
 
     step.status = StepStatus.COMPLETED;
     step.result = resultOverride || { skipped: true, manualIntervention: true };
-    step.completedAt = new Date();
+    step.completedAt = this.clock.now();
     await this.stepRepo.save(step);
 
     return this.resumeExecution(executionId);

@@ -92,6 +92,8 @@ export interface StepInputResolutionContext {
    */
   stepResults: Map<number, unknown>;
   /** The parent execution's `context` column. */
+  context: Record<string, unknown>;
+}
 
 /**
  * Structural view of the persistence fields this module reads and writes.
@@ -596,10 +598,4 @@ export function clearResolvedStepInputs(
   step.resolvedInputsHash = null;
   step.resolvedAt = null;
   return superseded;
-}
-
-
-
-
-  context: Record<string, unknown>;
 }

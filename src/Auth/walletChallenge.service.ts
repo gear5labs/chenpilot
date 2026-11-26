@@ -24,6 +24,7 @@ import { WalletChallenge, WalletNetwork } from "./walletChallenge.entity";
 import { auditLogService } from "../AuditLog/auditLog.service";
 import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
 import logger from "../config/logger";
+import { Clock, systemClock } from "../Payments/paymentTypes";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -252,7 +253,7 @@ export function verifyBitcoinSignature(
 export class WalletChallengeService {
   private repo: Repository<WalletChallenge>;
 
-  constructor() {
+  constructor(private readonly clock: Clock = systemClock) {
     this.repo = AppDataSource.getRepository(WalletChallenge);
   }
 
@@ -270,7 +271,7 @@ export class WalletChallengeService {
     const { userId, walletAddress, network, platform, platformUserId } = params;
 
     const nonce = crypto.randomBytes(32).toString("hex"); // 64 hex chars
-    const issuedAt = new Date();
+    const issuedAt = this.clock.now();
     const expiresAt = new Date(issuedAt.getTime() + CHALLENGE_TTL_SECONDS * 1000);
     const domain = DOMAIN_TAG;
 
@@ -345,7 +346,7 @@ export class WalletChallengeService {
     }
 
     // ── Expiry ───────────────────────────────────────────────────────────────
-    if (new Date() > challenge.expiresAt) {
+    if (this.clock.now() > challenge.expiresAt) {
       throw new WalletChallengeError("CHALLENGE_EXPIRED", "Challenge has expired");
     }
 
@@ -413,7 +414,7 @@ export class WalletChallengeService {
     // ── Atomic consume ────────────────────────────────────────────────────────
     // Use an UPDATE with a WHERE usedAt IS NULL to prevent a race condition
     // where two concurrent requests both pass the in-memory NULL check.
-    const now = new Date();
+    const now = this.clock.now();
     const result = await this.repo
       .createQueryBuilder()
       .update(WalletChallenge)

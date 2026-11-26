@@ -203,6 +203,10 @@ describe("preflight: services", () => {
         return arg === PASSWORD
           ? "+OK"
           : "-WRONGPASS invalid username-password pair";
+      if (cmd === "INFO") {
+        const payload = "redis_version:7.2.0\r\n";
+        return `$${Buffer.byteLength(payload)}\r\n${payload}`;
+      }
       return "+PONG";
     });
     port = server.address().port;

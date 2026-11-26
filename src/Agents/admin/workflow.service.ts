@@ -21,6 +21,7 @@ import {
 import { toolRegistry } from "../registry/ToolRegistry";
 import { promptRolloutService } from "../registry/PromptRolloutService";
 import logger from "../../config/logger";
+import { Clock, systemClock } from "../../Payments/paymentTypes";
 
 const POLICY_REPOSITORY = () =>
   AppDataSource.getRepository(AdminWorkflowPolicy);
@@ -198,6 +199,8 @@ const DEFAULT_POLICIES: Omit<
 export class AdminWorkflowService {
   private initialized = false;
 
+  constructor(private readonly clock: Clock = systemClock) {}
+
   async initializeDefaultPolicies(): Promise<void> {
     if (this.initialized) return;
 
@@ -299,7 +302,7 @@ export class AdminWorkflowService {
     }
 
     const ttlMinutes = params.ttlMinutes || policy.approvalTimeoutMinutes;
-    const now = new Date();
+    const now = this.clock.now();
     const expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
 
     const instance = INSTANCE_REPOSITORY().create({
@@ -362,7 +365,7 @@ export class AdminWorkflowService {
       .createQueryBuilder("instance")
       .where("instance.id IN (:...ids)", { ids: instanceIds })
       .andWhere("instance.status = :status", { status: WorkflowStatus.PENDING })
-      .andWhere("instance.expiresAt > NOW()")
+      .andWhere("instance.expiresAt > :now", { now: this.clock.now() })
       .orderBy("instance.createdAt", "DESC")
       .getMany();
 
@@ -388,7 +391,7 @@ export class AdminWorkflowService {
       );
     }
 
-    if (instance.expiresAt < new Date()) {
+    if (instance.expiresAt < this.clock.now()) {
       instance.status = WorkflowStatus.EXPIRED;
       await INSTANCE_REPOSITORY().save(instance);
       throw new Error("Workflow has expired");
@@ -413,7 +416,7 @@ export class AdminWorkflowService {
         approverId,
         decision: ApprovalDecision.APPROVED,
         comment,
-        decidedAt: new Date(),
+        decidedAt: this.clock.now(),
       });
 
     if (!existing) {
@@ -421,7 +424,7 @@ export class AdminWorkflowService {
     } else {
       approval.decision = ApprovalDecision.APPROVED;
       approval.comment = comment;
-      approval.decidedAt = new Date();
+      approval.decidedAt = this.clock.now();
       await APPROVAL_REPOSITORY().save(approval);
     }
 
@@ -516,7 +519,7 @@ export class AdminWorkflowService {
         approverId,
         decision: ApprovalDecision.REJECTED,
         comment,
-        decidedAt: new Date(),
+        decidedAt: this.clock.now(),
       });
 
     if (!existing) {
@@ -524,7 +527,7 @@ export class AdminWorkflowService {
     } else {
       approval.decision = ApprovalDecision.REJECTED;
       approval.comment = comment;
-      approval.decidedAt = new Date();
+      approval.decidedAt = this.clock.now();
       await APPROVAL_REPOSITORY().save(approval);
     }
 
@@ -573,7 +576,7 @@ export class AdminWorkflowService {
     }
 
     instance.status = WorkflowStatus.COMPLETED;
-    instance.completedAt = new Date();
+    instance.completedAt = this.clock.now();
     await INSTANCE_REPOSITORY().save(instance);
 
     await auditLogService.logEvent({
@@ -760,7 +763,7 @@ export class AdminWorkflowService {
       .update(AdminWorkflowInstance)
       .set({ status: WorkflowStatus.EXPIRED })
       .where("status = :status", { status: WorkflowStatus.PENDING })
-      .andWhere("expiresAt <= NOW()")
+      .andWhere("expiresAt <= :now", { now: this.clock.now() })
       .execute();
 
     const count = result.affected ?? 0;
@@ -771,7 +774,7 @@ export class AdminWorkflowService {
       const expiredInstances = await INSTANCE_REPOSITORY()
         .createQueryBuilder("instance")
         .where("instance.status = :status", { status: WorkflowStatus.EXPIRED })
-        .andWhere("instance.expiresAt <= NOW()")
+        .andWhere("instance.expiresAt <= :now", { now: this.clock.now() })
         .orderBy("instance.expiresAt", "DESC")
         .take(count)
         .getMany();
@@ -804,7 +807,9 @@ export class AdminWorkflowService {
   async scheduleExpiryCleanup(
     scheduleMinutes: number = 5
   ): Promise<void> {
-    const scheduledAt = new Date(Date.now() + scheduleMinutes * 60 * 1000);
+    const scheduledAt = new Date(
+      this.clock.now().getTime() + scheduleMinutes * 60 * 1000
+    );
     
     // Lazy import to avoid circular dependency
     const { jobQueueService } = await import("../../jobs/jobQueue.service");

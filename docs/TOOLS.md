@@ -322,7 +322,7 @@ Fetch statistics for a Stellar AMM liquidity pool by pool ID, including reserves
 
 ### strategy_registry
 
-Interact with the Yield‑Aggregator Strategy Registry to vote on Stellar DEX pools, revoke votes, or retrieve the verified strategy.
+Interact with the Yield‑Aggregator Strategy Registry. Currently supports off-chain policy previews only; contract actions are not implemented.
 
 **Version:** 1.0.0
 
@@ -330,17 +330,14 @@ Interact with the Yield‑Aggregator Strategy Registry to vote on Stellar DEX po
 
 | Parameter | Type | Required | Description | Options |
 | --- | --- | --- | --- | --- |
-| action | string | Yes | Action to perform:  | `vote`, `revoke_vote`, `get_strategy`, `is_verified` |
+| action | string | Yes | Action to perform:  | `vote`, `revoke_vote`, `get_strategy`, `is_verified`, `policy_preview`, `` |
 | poolId | string | No | 64‑character hexadecimal Stellar AMM liquidity pool ID | - |
 | aiAgent | string | No | The public key of the AI agent casting the vote (required for  | - |
 | revokeVote | boolean | No | If true, the existing vote will be revoked instead of added | - |
 
 #### Examples
 
-- vote pool 0123... with agent GAB...
-- revoke_vote pool 0123... with agent GAB...
-- get_strategy
-- is_verified pool 0123...
+- policy_preview pool 0123... with agent GAB...
 
 ---
 

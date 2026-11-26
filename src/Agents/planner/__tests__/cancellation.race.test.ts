@@ -57,16 +57,19 @@ jest.mock("../../../config/Datasource", () => {
   const executionRepo = makeRepo();
   const stepRepo = makeRepo();
 
+  const appDataSource = {
+    getRepository: jest.fn((entity: { name?: string }) => {
+      // Route to the right repo based on entity class name.
+      const name = typeof entity === "function" ? entity.name : "";
+      if (name === "DurableStep") return stepRepo;
+      return executionRepo;
+    }),
+  };
+
   return {
     __esModule: true,
-    AppDataSource: {
-      getRepository: jest.fn((entity: { name?: string }) => {
-        // Route to the right repo based on entity class name.
-        const name = typeof entity === "function" ? entity.name : "";
-        if (name === "DurableStep") return stepRepo;
-        return executionRepo;
-      }),
-    },
+    AppDataSource: appDataSource,
+    default: appDataSource,
   };
 });
 

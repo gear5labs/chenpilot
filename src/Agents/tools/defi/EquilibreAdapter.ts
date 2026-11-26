@@ -83,31 +83,12 @@ export class EquilibreAdapter extends DeFiAdapter implements SwapCapability, Liq
       };
     }
 
-    try {
-      const routerAddress = this.getContractAddress("router");
-      if (!routerAddress) {
-        throw new Error("Router contract not configured");
-      }
-
-      return {
-        success: true,
-        data: {
-          to: routerAddress,
-          data: JSON.stringify({
-            function: "swap",
-            args: { fromToken, toToken, amount, minReceived: minReceived || "0" },
-          }),
-          value: amount,
-        },
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to execute swap",
-        timestamp: new Date().toISOString(),
-      };
-    }
+    return {
+      success: false,
+      error:
+        "Equilibre swap transaction construction is not implemented; no executable transaction request can be produced",
+      timestamp: new Date().toISOString(),
+    };
   }
 
   async getLiquidityPositions(

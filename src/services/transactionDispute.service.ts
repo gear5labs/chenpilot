@@ -1,3 +1,5 @@
+import { recordTransactionCorrection } from "./transactionCorrections";
+
 export type DisputeStatus = "open" | "investigating" | "resolved" | "rejected";
 
 export interface DisputeEvidence {
@@ -95,9 +97,29 @@ export class TransactionDisputeService {
   ): DisputeCase {
     this.assertInvestigator(actor);
     const dispute = this.requireDispute(disputeId);
+    const previousStatus = dispute.status;
     dispute.outcome = outcome;
     this.transition(dispute, status, actor.id, outcome);
-    return this.save(dispute);
+    const resolved = this.save(dispute);
+
+    // Preserve the resolution and its evidence in the append-only
+    // corrections trail. Best-effort: audit persistence must not break
+    // the resolution itself.
+    void recordTransactionCorrection({
+      entityId: dispute.transactionId,
+      correctionType: "dispute_resolution",
+      previousState: { status: previousStatus },
+      newState: { status, outcome },
+      sourceEvidence: {
+        disputeId: dispute.id,
+        workflowId: dispute.workflowId,
+        evidence: dispute.evidence,
+      },
+      correctedBy: actor.id,
+      reason: outcome,
+    });
+
+    return resolved;
   }
 
   getVisibleProgress(disputeId: string, actor: { id: string; roles: string[] }): Pick<DisputeCase, "id" | "status" | "transactionId" | "workflowId" | "outcome" | "transitions"> {

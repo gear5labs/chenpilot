@@ -58,6 +58,20 @@ export class KycService {
 }
 
 const kycProviderFactory = new KycProviderFactory(config.kyc.defaultProvider);
-kycProviderFactory.register(new MockKycProvider());
+
+// The mock provider fabricates verification results and must never serve
+// production traffic silently. Register it only outside production, or when
+// KYC_PROVIDER=mock is set explicitly as an opt-in. In production without an
+// explicit opt-in the factory has no providers and getProvider() throws.
+const mockProviderAllowed =
+  process.env.NODE_ENV !== "production" ||
+  process.env.KYC_PROVIDER === "mock";
+if (mockProviderAllowed) {
+  kycProviderFactory.register(new MockKycProvider());
+} else {
+  logger.warn(
+    "MockKycProvider is disabled in production; set KYC_PROVIDER to a real provider"
+  );
+}
 
 export const kycService = new KycService(kycProviderFactory);

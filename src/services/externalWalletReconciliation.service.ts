@@ -6,6 +6,7 @@ import {
   ReconciliationCase,
   ReconciliationWorkspaceService,
 } from "./reconciliationWorkspace.service";
+import { recordTransactionCorrection } from "./transactionCorrections";
 
 /**
  * Supported external wallet activity ingestion sources.
@@ -1243,6 +1244,10 @@ export class ExternalWalletReconciliationService {
       throw new Error(`Activity '${chainIdentity}' is not currently in quarantined status`);
     }
 
+    // Preserve the pre-resolution state as source evidence before mutating.
+    const previousState = this.cloneActivity(activity);
+    const resolvedBy = actor?.id ?? "operator";
+
     if (resolution === "link") {
       if (!targetInternalRecordId) {
         throw new Error("Target internal record ID required to link quarantined activity");
@@ -1266,7 +1271,7 @@ export class ExternalWalletReconciliationService {
       activity.linkStatus = "unmatched";
       activity.quarantineReason = undefined;
       activity.quarantineDetails = {
-        resolvedBy: actor?.id ?? "operator",
+        resolvedBy,
         resolvedAt: new Date().toISOString(),
         action: "marked_unmatched",
       };
@@ -1274,6 +1279,34 @@ export class ExternalWalletReconciliationService {
 
     activity.lastReconciledAt = new Date();
     this.activities.set(chainIdentity, activity);
+
+    // Append-only correction record preserving the pre-resolution evidence.
+    const action =
+      (activity.quarantineDetails?.action as string | undefined) ?? resolution;
+    void recordTransactionCorrection({
+      entityId: chainIdentity,
+      txHash: activity.txHash,
+      correctionType: "quarantine_resolution",
+      previousState,
+      newState: this.cloneActivity(activity),
+      sourceEvidence: {
+        quarantineReason: previousState.quarantineReason ?? null,
+        quarantineDetails: previousState.quarantineDetails ?? null,
+        provenance: previousState.provenance ?? null,
+        txHash: previousState.txHash ?? null,
+      },
+      correctedBy: resolvedBy,
+      reason: `Quarantined activity resolved as '${action}'`,
+    }).then((correction) => {
+      if (correction?.id) {
+        activity.quarantineDetails = {
+          ...(activity.quarantineDetails ?? {}),
+          correctionId: correction.id,
+        };
+        this.activities.set(chainIdentity, activity);
+      }
+    });
+
     return this.cloneActivity(activity);
   }
 

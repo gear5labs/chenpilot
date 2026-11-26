@@ -22,6 +22,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseDotenv, readRegistry } from "./env-registry.mjs";
 
 export const MIN_NODE_MAJOR = 18;
+// Documented service minimums (README.md): PostgreSQL 14+, Redis 6+.
+// CI runs newer (postgres:15, redis:7), which always satisfies these.
+export const MIN_POSTGRES_MAJOR = 14;
+export const MIN_REDIS_MAJOR = 6;
 const DEFAULT_TIMEOUT_MS = 3000;
 
 const ok = (name, message) => ({ name, status: "ok", message });
@@ -334,9 +338,18 @@ export async function checkPostgres(
   try {
     await client.connect();
     const { rows } = await client.query("SHOW server_version");
+    const serverVersion = rows[0]?.server_version ?? "unknown";
+    const major = Number.parseInt(serverVersion, 10);
+    if (Number.isFinite(major) && major < MIN_POSTGRES_MAJOR) {
+      return fail(
+        name,
+        `${target}: server ${serverVersion} is below the documented minimum PostgreSQL ${MIN_POSTGRES_MAJOR}`,
+        `Upgrade to PostgreSQL ${MIN_POSTGRES_MAJOR} or newer (CI uses 15), for example \`${PG_START}\`.`
+      );
+    }
     return ok(
       name,
-      `connected to ${target}, database ${env.get("DB_NAME")} (server ${rows[0]?.server_version ?? "unknown"})`
+      `connected to ${target}, database ${env.get("DB_NAME")} (server ${serverVersion})`
     );
   } catch (err) {
     const [what, fix] = PG_ERRORS[err.code] ?? [
@@ -392,6 +405,60 @@ function redisExchange(host, port, commands, timeoutMs) {
   });
 }
 
+/**
+ * Run `INFO server` (optionally after AUTH) and return the bulk payload.
+ * Separate from redisExchange because INFO replies are multi-line bulk
+ * strings, not single reply lines.
+ */
+function redisInfo(host, port, password, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host, port });
+    let buffer = "";
+    socket.setTimeout(timeoutMs, () => {
+      socket.destroy();
+      reject(Object.assign(new Error("timed out"), { code: "ETIMEDOUT" }));
+    });
+    const send = (args) =>
+      socket.write(
+        `*${args.length}\r\n${args.map((a) => `$${Buffer.byteLength(a)}\r\n${a}\r\n`).join("")}`
+      );
+    socket.once("connect", () => {
+      if (password) send(["AUTH", password]);
+      send(["INFO", "server"]);
+    });
+    const finish = () => {
+      let rest = buffer;
+      if (rest.startsWith("+OK\r\n")) rest = rest.slice(4);
+      if (rest.startsWith("-")) {
+        socket.destroy();
+        reject(new Error(rest.slice(1).split("\r\n")[0]));
+        return;
+      }
+      const m = rest.match(/^\$(\d+)\r\n/);
+      if (!m) return;
+      const len = Number(m[1]);
+      const start = m[0].length;
+      if (rest.length < start + len + 2) return;
+      socket.end();
+      resolve(rest.slice(start, start + len));
+    };
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      finish();
+    });
+    socket.once("error", (err) => {
+      socket.destroy();
+      reject(err);
+    });
+  });
+}
+
+/** Extract the major version from an `INFO server` payload, or null. */
+export function parseRedisVersion(info) {
+  const m = /^redis_version:(\d+)/m.exec(info ?? "");
+  return m ? Number.parseInt(m[1], 10) : null;
+}
+
 export async function checkRedis(env, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const name = "Redis";
   const host = (env.get("REDIS_HOST") || "localhost").trim();
@@ -431,7 +498,26 @@ export async function checkRedis(env, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
       "Check that REDIS_HOST/REDIS_PORT point at a Redis server."
     );
   }
-  return ok(name, `PING answered by ${target}`);
+  let version = null;
+  try {
+    version = parseRedisVersion(
+      await redisInfo(host, port, password, timeoutMs)
+    );
+  } catch {
+    // PING already proved connectivity; a missing INFO reply only means the
+    // version cannot be reported, not that Redis is unusable.
+  }
+  if (version !== null && version < MIN_REDIS_MAJOR) {
+    return fail(
+      name,
+      `${target} runs Redis ${version}.x, below the documented minimum ${MIN_REDIS_MAJOR}`,
+      `Upgrade to Redis ${MIN_REDIS_MAJOR} or newer (CI uses 7), for example \`${REDIS_START}\`.`
+    );
+  }
+  return ok(
+    name,
+    `PING answered by ${target}${version !== null ? ` (server ${version}.x)` : ""}`
+  );
 }
 
 // ── Runner ──────────────────────────────────────────────────────────────────

@@ -39,6 +39,10 @@ export interface DriftItem {
   description: string;
   repairAction?: string;
   detectedAt: string;
+  /** Source evidence captured when the drift item was produced. */
+  evidence?: unknown;
+  /** transaction_corrections.id when a manual correction resolved this item. */
+  correctionId?: string;
 }
 
 export interface InvariantSummary {
@@ -128,8 +132,7 @@ export class ReconciliationService {
       if (scope.balances && scope.walletAddress) {
         const balDrift = await this.reconcileBalances(
           userId,
-          scope.walletAddress,
-          scope
+          scope.walletAddress
         );
         driftItems.push(...balDrift);
       }
@@ -274,8 +277,7 @@ export class ReconciliationService {
    */
   private async reconcileBalances(
     userId: string,
-    walletAddress: string,
-    _scope: ReconciliationScope
+    walletAddress: string
   ): Promise<DriftItem[]> {
     const driftItems: DriftItem[] = [];
 
@@ -643,8 +645,9 @@ export class ReconciliationService {
 
       await db.query(
         `INSERT INTO reconciliation_reports
-          (id, user_id, scope, started_at, completed_at, drift_items, summary, status, error_message)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          (id, user_id, scope, started_at, completed_at, drift_items, summary, status, error_message,
+           invariant_results, invariant_summary)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
           report.id,
           report.userId,
@@ -655,6 +658,12 @@ export class ReconciliationService {
           JSON.stringify(report.summary),
           report.status,
           report.errorMessage ?? null,
+          report.invariantResults
+            ? JSON.stringify(report.invariantResults)
+            : null,
+          report.invariantSummary
+            ? JSON.stringify(report.invariantSummary)
+            : null,
         ]
       );
     } catch (err) {
@@ -676,13 +685,18 @@ export class ReconciliationService {
       const rows = await db.query(
         `SELECT id, user_id as "userId", scope, started_at as "startedAt",
                 completed_at as "completedAt", drift_items as "driftItems",
-                summary, status, error_message as "errorMessage"
+                summary, status, error_message as "errorMessage",
+                invariant_results as "invariantResults",
+                invariant_summary as "invariantSummary"
          FROM reconciliation_reports
          WHERE user_id = $1
          ORDER BY started_at DESC
          LIMIT $2`,
         [userId, limit]
       );
+
+      const parseJson = <T>(v: unknown): T | undefined =>
+        v == null ? undefined : typeof v === "string" ? JSON.parse(v) : (v as T);
 
       return rows.map(
         (r: {
@@ -695,15 +709,17 @@ export class ReconciliationService {
           summary: ReconciliationReport["summary"];
           status: ReconciliationReport["status"];
           errorMessage?: string;
+          invariantResults?: InvariantResult[] | string | null;
+          invariantSummary?: InvariantSummary | string | null;
         }) => ({
           ...r,
-          scope: typeof r.scope === "string" ? JSON.parse(r.scope) : r.scope,
-          driftItems:
-            typeof r.driftItems === "string"
-              ? JSON.parse(r.driftItems)
-              : r.driftItems,
+          scope: parseJson<ReconciliationScope>(r.scope) ?? r.scope,
+          driftItems: parseJson<DriftItem[]>(r.driftItems) ?? [],
           summary:
-            typeof r.summary === "string" ? JSON.parse(r.summary) : r.summary,
+            parseJson<ReconciliationReport["summary"]>(r.summary) ??
+            ({} as ReconciliationReport["summary"]),
+          invariantResults: parseJson<InvariantResult[]>(r.invariantResults),
+          invariantSummary: parseJson<InvariantSummary>(r.invariantSummary),
         })
       );
     } catch (err) {

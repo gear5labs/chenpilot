@@ -181,8 +181,6 @@ at the end of the table so reviewers can see them.
 | `STELLAR_NETWORK_PASSPHRASE` | Stellar (`src/config/config.ts`) | No | `derived from STELLAR_NETWORK` | No | Network passphrase override. |
 | `STELLAR_WEBHOOK_SECRET` | Gateway (`src/Gateway/webhook.service.ts`) | No | — | Yes | Verifies Stellar webhook signatures. |
 | `STRATEGY_REGISTRY_CONTRACT_ID` | Contracts (`src/services/contracts/contractMetadataRegistry.ts`) | No | — | No | Strategy registry contract address. |
-| `STRATEGY_REGISTRY_EPOCH_MS` | Agents (`src/Agents/tools/strategyRegistry.ts`) | No | `86400000` | No | Voting epoch length. |
-| `STRATEGY_REGISTRY_QUORUM` | Agents (`src/Agents/tools/strategyRegistry.ts`) | No | `3` | No | Votes required to register a strategy. |
 | `TELEGRAM_BOT_TOKEN` | Gateway (`src/Gateway/platformWebhook.service.ts`) | No | — | Yes | Telegram bot token; also used by the bot service. |
 | `TESTNET_*` | Contracts (`src/services/contracts/contractMetadataRegistry.ts`) | No | — | No | Family: testnet-scoped overrides such as `TESTNET_CORE_VAULT_CONTRACT_ID`, `TESTNET_SOROBAN_RPC_URL`, `TESTNET_NETWORK_PASSPHRASE`. |
 | `WEBAUTHN_ORIGIN` | Auth (`src/webauthn.js`) | No | `http://localhost:3000` | No | Expected WebAuthn origin. |

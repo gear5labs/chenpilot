@@ -188,28 +188,12 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
       };
     }
 
-    try {
-      const lendingPoolAddress = this.getContractAddress("lendingPool");
-      if (!lendingPoolAddress) {
-        throw new Error("Lending pool contract not configured");
-      }
-
-      return {
-        success: true,
-        data: {
-          to: lendingPoolAddress,
-          data: JSON.stringify({ function: "supply", args: { asset, amount } }),
-          value: amount,
-        },
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to create supply transaction",
-        timestamp: new Date().toISOString(),
-      };
-    }
+    return {
+      success: false,
+      error:
+        "YieldBlox supply transaction construction is not implemented; no executable transaction request can be produced",
+      timestamp: new Date().toISOString(),
+    };
   }
 
   async borrow(
@@ -224,82 +208,36 @@ export class YieldBloxAdapter extends DeFiAdapter implements LendingCapability, 
       };
     }
 
-    try {
-      const lendingPoolAddress = this.getContractAddress("lendingPool");
-      if (!lendingPoolAddress) {
-        throw new Error("Lending pool contract not configured");
-      }
-
-      return {
-        success: true,
-        data: {
-          to: lendingPoolAddress,
-          data: JSON.stringify({ function: "borrow", args: { asset, amount } }),
-        },
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to create borrow transaction",
-        timestamp: new Date().toISOString(),
-      };
-    }
+    return {
+      success: false,
+      error:
+        "YieldBlox borrow transaction construction is not implemented; no executable transaction request can be produced",
+      timestamp: new Date().toISOString(),
+    };
   }
 
   async repay(
     asset: string,
     amount: string
   ): Promise<AdapterResult<TransactionRequest>> {
-    try {
-      const lendingPoolAddress = this.getContractAddress("lendingPool");
-      if (!lendingPoolAddress) {
-        throw new Error("Lending pool contract not configured");
-      }
-
-      return {
-        success: true,
-        data: {
-          to: lendingPoolAddress,
-          data: JSON.stringify({ function: "repay", args: { asset, amount } }),
-          value: amount,
-        },
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to create repay transaction",
-        timestamp: new Date().toISOString(),
-      };
-    }
+    return {
+      success: false,
+      error:
+        "YieldBlox repay transaction construction is not implemented; no executable transaction request can be produced",
+      timestamp: new Date().toISOString(),
+    };
   }
 
   async withdraw(
     asset: string,
     amount: string
   ): Promise<AdapterResult<TransactionRequest>> {
-    try {
-      const lendingPoolAddress = this.getContractAddress("lendingPool");
-      if (!lendingPoolAddress) {
-        throw new Error("Lending pool contract not configured");
-      }
-
-      return {
-        success: true,
-        data: {
-          to: lendingPoolAddress,
-          data: JSON.stringify({ function: "withdraw", args: { asset, amount } }),
-        },
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to create withdraw transaction",
-        timestamp: new Date().toISOString(),
-      };
-    }
+    return {
+      success: false,
+      error:
+        "YieldBlox withdraw transaction construction is not implemented; no executable transaction request can be produced",
+      timestamp: new Date().toISOString(),
+    };
   }
 }
 
