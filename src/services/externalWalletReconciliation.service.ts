@@ -117,6 +117,9 @@ interface RegisteredWorkflowBroadcast {
 
 /**
  * Audit provenance record capturing origin metadata and cryptographic payload checksum.
+ * Supported behavior: preserves data origin, importer identity, checksums, and observation timestamp.
+ * Failure cases: missing or malformed provenance payloads are rejected or quarantined.
+ * Compatibility requirements: backward compatible with existing ingest options lacking optional observation fields.
  */
 export interface ImportProvenance {
   importId: string;
@@ -125,6 +128,8 @@ export interface ImportProvenance {
   importedBy: string;
   network: NetworkType;
   rawPayloadChecksum: string;
+  observedAt?: Date;
+  provenanceSource?: string;
   metadata?: Record<string, unknown>;
 }
 
