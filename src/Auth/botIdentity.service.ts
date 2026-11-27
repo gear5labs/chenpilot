@@ -6,7 +6,24 @@ import { User } from "./user.entity";
 import AppDataSource from "../config/Datasource";
 import { auditLogService } from "../AuditLog/auditLog.service";
 import { AuditAction, AuditSeverity } from "../AuditLog/auditLog.entity";
+import { BotSessionService } from "../Bot/botSession.service";
+import { refreshTokenFamilyService } from "./refreshTokenFamily.service";
 import logger from "../config/logger";
+
+/** Options for {@link BotIdentityService.revokeAllBotLinkedSessions}. */
+export interface RevokeBotSessionsOptions {
+  /**
+   * When `true`, also revoke all JWT refresh-token sessions for the user
+   * (full logout across every device). Default `false` — only bot
+   * conversational sessions are invalidated.
+   */
+  revokeJwtSessions?: boolean;
+  /**
+   * When provided, only deactivate bot conversational sessions for this
+   * platform. When omitted, sessions for every platform are deactivated.
+   */
+  platform?: BotPlatform;
+}
 
 export interface LinkBotIdentityPayload {
   userId: string;
@@ -31,10 +48,12 @@ export interface VerifyLinkTokenPayload {
 export class BotIdentityService {
   private botIdentityRepository: Repository<BotIdentity>;
   private userRepository: Repository<User>;
+  private botSessionService: BotSessionService;
 
   constructor() {
     this.botIdentityRepository = AppDataSource.getRepository(BotIdentity);
     this.userRepository = AppDataSource.getRepository(User);
+    this.botSessionService = new BotSessionService();
   }
 
   /**
@@ -238,7 +257,13 @@ export class BotIdentityService {
   }
 
   /**
-   * Unlink a bot identity
+   * Unlink a bot identity.
+   *
+   * After removing the platform-to-user link, all active bot conversational
+   * sessions for this user are deactivated so that any in-progress bot
+   * flows are immediately terminated. JWT sessions are left intact by
+   * default — the user is still logged in via the API and can re-link if
+   * desired.
    */
   async unlinkBotIdentity(
     userId: string,
@@ -254,6 +279,10 @@ export class BotIdentityService {
 
     await this.botIdentityRepository.remove(identity);
 
+    // Cascade: deactivate all bot conversational sessions for this user
+    // on this platform so stale wizard/flow state cannot be used.
+    await this.revokeAllBotLinkedSessions(userId, { platform });
+
     await auditLogService.log({
       userId,
       action: AuditAction.BOT_IDENTITY_UNLINKED,
@@ -262,6 +291,68 @@ export class BotIdentityService {
     });
 
     logger.info("Bot identity unlinked", { userId, platform });
+  }
+
+  /**
+   * Revoke every bot-linked session for a user.
+   *
+   * Deactivates all active bot conversational sessions (`BotSession`) for the
+   * user and, when `revokeJwtSessions` is set, revokes all JWT refresh-token
+   * sessions so the user is fully logged out from every device.
+   *
+   * This is the "kill switch" a user calls when they lose access to their bot
+   * device, suspect compromise, or no longer need bot-linked access. It is
+   * also called automatically by `unlinkBotIdentity` so that unlinking a
+   * platform identity immediately invalidates the sessions it enabled.
+   *
+   * @returns A summary of what was revoked.
+   */
+  async revokeAllBotLinkedSessions(
+    userId: string,
+    options: RevokeBotSessionsOptions = {}
+  ): Promise<{
+    botSessionsDeactivated: number;
+    jwtSessionsRevoked: number;
+  }> {
+    const { revokeJwtSessions = false, platform } = options;
+
+    // 1. Deactivate all active bot conversational sessions.
+    const botSessionsDeactivated = await this.botSessionService.deactivateUserSessions(
+      userId,
+      platform
+    );
+
+    // 2. Optionally revoke all JWT refresh-token sessions.
+    let jwtSessionsRevoked = 0;
+    if (revokeJwtSessions) {
+      jwtSessionsRevoked = await refreshTokenFamilyService.revokeAllSessions(
+        userId,
+        "Bot-linked session revocation"
+      );
+    }
+
+    // 3. Audit the combined action.
+    await auditLogService.log({
+      userId,
+      action: AuditAction.BOT_SESSIONS_REVOKED,
+      severity: AuditSeverity.WARNING,
+      metadata: {
+        botSessionsDeactivated,
+        jwtSessionsRevoked,
+        platform: platform ?? "all",
+        revokeJwtSessions,
+      },
+    });
+
+    logger.warn("Bot-linked sessions revoked", {
+      userId,
+      botSessionsDeactivated,
+      jwtSessionsRevoked,
+      platform: platform ?? "all",
+      revokeJwtSessions,
+    });
+
+    return { botSessionsDeactivated, jwtSessionsRevoked };
   }
 
   /**

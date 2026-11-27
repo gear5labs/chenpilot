@@ -167,9 +167,46 @@ Unlink a bot identity from a user account.
 ```json
 {
   "success": true,
-  "message": "Identity unlinked successfully"
+  "message": "Identity unlinked and bot sessions deactivated successfully"
 }
 ```
+
+**Side effect:** All active bot conversational sessions (`BotSession`) for the
+user on the specified platform are deactivated. JWT sessions are left intact
+so the user can re-link if desired.
+
+### POST /api/bot-identity/revoke-sessions
+Revoke all bot-linked sessions for the authenticated user. This is the "kill
+switch" for bot-linked access — use it when access is lost, suspected
+compromised, or no longer needed.
+
+**Authentication:** Required (JWT)
+
+**Request Body (all optional):**
+```json
+{
+  "platform": "telegram" | "discord",
+  "revokeJwtSessions": false
+}
+```
+
+- `platform` — when provided, only deactivate bot conversational sessions for
+  this platform. When omitted, sessions for every platform are deactivated.
+- `revokeJwtSessions` — when `true`, also revoke all JWT refresh-token sessions
+  (full logout from every device). Default `false`.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "3 bot session(s) deactivated, 2 JWT session(s) revoked",
+  "botSessionsDeactivated": 3,
+  "jwtSessionsRevoked": 2
+}
+```
+
+**Audit:** A `BOT_SESSIONS_REVOKED` audit event is logged with severity
+`warning`, recording the counts and scope.
 
 ## Bot Commands
 
@@ -196,7 +233,8 @@ For security, never share your link token with others.
 ```
 
 ### /unlink
-Remove the link between your bot account and Chen Pilot.
+Remove the link between your bot account and Chen Pilot. All active bot
+conversational sessions are immediately deactivated.
 
 **Usage:**
 - Telegram: `/unlink`
@@ -271,9 +309,18 @@ router.get('/api/flexible-endpoint', authenticateTokenOrBotIdentity, handler);
    - Platform-specific user IDs are unique
    - Prevents identity hijacking
 
-3. **Audit Logging**
+3. **Session Revocation (Kill Switch)**
+   - `POST /api/bot-identity/revoke-sessions` lets a user directly invalidate
+     every bot-linked session in one call.
+   - `revokeJwtSessions: true` also revokes all JWT refresh-token sessions
+     (full logout from every device).
+   - Unlinking a bot identity automatically deactivates all bot conversational
+     sessions for that platform — no stale wizard/flow state survives unlink.
+   - All revocation actions are audit-logged as `BOT_SESSIONS_REVOKED`.
+
+4. **Audit Logging**
    - All identity operations are logged
-   - Tracks linking, unlinking, and authentication events
+   - Tracks linking, unlinking, authentication events, and session revocation
    - Supports security monitoring and compliance
 
 4. **Rate Limiting**
