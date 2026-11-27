@@ -5,6 +5,10 @@ import {
   ToolPayload,
   ToolResult,
 } from "./ToolMetadata";
+import {
+  ResponseSizeValidator,
+  DEFAULT_RESPONSE_LIMITS,
+} from "./ResponseSizeValidator";
 import { withTimeout } from "../../utils/timeout";
 import config from "../../config/config";
 import logger from "../../config/logger";
@@ -272,6 +276,65 @@ export class ToolRegistry {
       });
 
       entry.lastUsed = new Date();
+
+      // Validate and handle response size
+      // Large responses are truncated or rejected based on tool risk level and config
+      if (result.status === "success" && result.data) {
+        const riskLevel = tool.metadata.riskLevel;
+        const limit = DEFAULT_RESPONSE_LIMITS[riskLevel];
+        const validator = new ResponseSizeValidator({
+          maxCharacters: limit,
+          mode: config.agent.responseSize?.mode ?? "truncate",
+          includeTruncationIndicator: true,
+        });
+
+        const sizeValidation = validator.validate(
+          result.data,
+          actualToolName,
+          userId
+        );
+
+        if (!sizeValidation.valid) {
+          // Response rejected due to size
+          logger.warn("Tool response rejected: exceeded size limit", {
+            toolName: actualToolName,
+            userId,
+            originalSize: sizeValidation.originalLength,
+            limit: limit,
+            mode: "reject",
+          });
+          return {
+            action: result.action,
+            status: "error",
+            error: sizeValidation.rejectionReason,
+            errorCategory: "EXECUTION",
+            errorCode: "RESPONSE_SIZE_EXCEEDED",
+            responseSizeMetadata: {
+              originalLength: sizeValidation.originalLength,
+              wasProcessed: true,
+              handled: "rejected",
+            },
+          };
+        }
+
+        if (sizeValidation.handled) {
+          // Response was truncated
+          logger.info("Tool response truncated to size limit", {
+            toolName: actualToolName,
+            userId,
+            originalSize: sizeValidation.originalLength,
+            limit: limit,
+            finalSize: JSON.stringify(sizeValidation.processedData).length,
+          });
+          result.data = sizeValidation.processedData || result.data;
+          result.responseSizeMetadata = {
+            originalLength: sizeValidation.originalLength,
+            wasProcessed: true,
+            handled: "truncated",
+          };
+        }
+      }
+
       return result;
     } catch (error) {
       const toolError = new ToolExecutionError(

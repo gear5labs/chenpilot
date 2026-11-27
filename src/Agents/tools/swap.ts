@@ -1,4 +1,5 @@
 import { BaseTool } from "./base/BaseTool";
+import { BaseTool } from "./base/BaseTool";
 import { ToolMetadata, ToolResult } from "../registry/ToolMetadata";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import config from "../../config/config";
@@ -8,12 +9,23 @@ import logger from "../../config/logger";
 import stellarPriceService from "../../services/stellarPrice.service";
 import { flashSwapRiskAnalyzer } from "../../services/flashSwapRiskAnalyzer";
 import { RedisLockService } from "../../services/lock";
+import { sequenceLeaseService } from "../../services/sequence";
 import { transactionLifecycleService } from "../../transactions/TransactionLifecycle.service";
 import { assetRevocationService } from "../../Security";
 import {
   assertTrustlinesForTransfer,
   TrustlineUnauthorizedError,
 } from "../../../packages/sdk/src/trustline";
+import {
+  formatAmount,
+  formatPercentage,
+  formatTransactionHash,
+} from "../../utils/SecuritySensitiveFormatter";
+import {
+  QuoteCommitmentPayload,
+  generateQuoteDigest,
+  validateQuoteCommitment,
+} from "../../domain/quotes";
 
 interface SwapPayload extends Record<string, unknown> {
   from: string;
@@ -245,6 +257,17 @@ export class SwapTool extends BaseTool<SwapPayload> {
     if (heartbeat) {
       clearInterval(heartbeat);
     }
+  }
+
+  /**
+   * Convert Stroops (1/10,000,000 XLM) to XLM as a decimal string
+   * @param stroops - Amount in stroops
+   * @returns Amount in XLM as a string with up to 7 decimals
+   */
+  private stroopsToXlm(stroops: number | string): number {
+    const STROOPS_PER_XLM = 10_000_000;
+    const stroopsNum = typeof stroops === "string" ? parseInt(stroops, 10) : stroops;
+    return stroopsNum / STROOPS_PER_XLM;
   }
 
   /**
@@ -491,13 +514,21 @@ export class SwapTool extends BaseTool<SwapPayload> {
         amount: formatAmount(payload.amount, { currencyCode: payload.from, maxDecimals: 7 }),
         estimatedOutput: formatAmount(priceQuote.estimatedOutput, { currencyCode: payload.to, maxDecimals: 7 }),
         price: formatAmount(priceQuote.price, { maxDecimals: 7 }),
+        quoteLifetime: {
+          deadline: quoteDeadline,
+          expiresAt: new Date(quoteDeadline * 1000).toISOString(),
+          secondsRemaining: Math.max(0, quoteDeadline - Math.floor(Date.now() / 1000)),
+        },
+        materialFees: {
+          network: formatAmount(this.stroopsToXlm(StellarSdk.BASE_FEE), { currencyCode: "XLM", maxDecimals: 7 }),
+          total: formatAmount(this.stroopsToXlm(StellarSdk.BASE_FEE), { currencyCode: "XLM", maxDecimals: 7 }),
+        },
         txHash: formatTransactionHash(result.hash),
         timestamp: new Date().toISOString(),
         ledger: result.ledger,
         successful: result.successful,
         lifecycleId: lifecycleId,
         quoteDigest: liveDigest,
-        deadline: quoteDeadline,
         riskAnalysis: {
           level: riskAnalysis.riskLevel,
           sandwichAttackRisk: formatPercentage(riskAnalysis.sandwichAttackRisk),

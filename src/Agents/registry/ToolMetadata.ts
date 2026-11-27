@@ -68,6 +68,39 @@ export interface ToolResult {
   errorCategory?: string;
   /** Machine-readable error code for the specific failure */
   errorCode?: string;
+  /**
+   * Response size metadata when response was processed (truncated/rejected).
+   *
+   * Present only when the tool's response exceeded size limits and was automatically
+   * handled by the ResponseSizeValidator. Indicates how the oversized response was processed.
+   *
+   * @example
+   * ```
+   * // Truncated response
+   * {
+   *   originalLength: 102400,
+   *   wasProcessed: true,
+   *   handled: "truncated"
+   * }
+   *
+   * // Rejected response
+   * {
+   *   originalLength: 512000,
+   *   wasProcessed: true,
+   *   handled: "rejected"
+   * }
+   * ```
+   *
+   * @see RESPONSE_SIZE_HANDLING.md for configuration and behavior details
+   */
+  responseSizeMetadata?: {
+    /** Original response size in characters before processing */
+    originalLength: number;
+    /** Whether response exceeded limit and was processed */
+    wasProcessed: boolean;
+    /** How the response was handled: "truncated" (partial result), "rejected" (error), or null (within limit) */
+    handled: "truncated" | "rejected" | null;
+  };
 }
 
 export interface ToolExecutionError extends Error {

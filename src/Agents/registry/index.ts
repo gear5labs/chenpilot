@@ -8,6 +8,18 @@
 // Core registry
 export { ToolRegistry, toolRegistry } from "./ToolRegistry";
 
+// Response size validation
+export {
+  ResponseSizeValidator,
+  DEFAULT_RESPONSE_LIMITS,
+  GLOBAL_DEFAULT_LIMIT,
+} from "./ResponseSizeValidator";
+export type {
+  ResponseSizeConfig,
+  ResponseSizeMode,
+  ResponseSizeValidation,
+} from "./ResponseSizeValidator";
+
 // Tool builder for custom tools
 export { CustomToolBuilder } from "./CustomToolBuilder";
 
