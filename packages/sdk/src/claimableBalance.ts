@@ -77,7 +77,11 @@ export interface ClaimBalanceOptions {
 export interface ClaimBalanceResult {
   /** Whether the claim was successful */
   success: boolean;
-  /** Transaction hash if successful */
+  /**
+   * Hash of the signed claim transaction. Always set on success, and also
+   * set when submission was cancelled/timed out after the envelope had been
+   * handed to the network, so callers can reconcile its final state by hash.
+   */
   transactionHash?: string;
   /** Error message if failed */
   error?: string;
@@ -113,6 +117,21 @@ export interface ClaimEligibilityOptions {
   ledgerTime?: number;
   /** Optional external signal to cancel the operation. */
   signal?: AbortSignalLike;
+}
+
+/**
+ * Normalize the hash of a signed transaction to a stable hex string.
+ * Depending on the stellar-sdk version `Transaction.hash()` returns either a
+ * hex string or a Buffer; callers need one identifier they can look up in
+ * Horizon after an ambiguous timeout.
+ */
+function toTransactionHashString(hash: unknown): string | undefined {
+  if (typeof hash === "string") return hash;
+  if (!hash || typeof hash !== "object") return undefined;
+  const value = (hash as { toString(encoding?: string): string }).toString(
+    "hex"
+  );
+  return /^[0-9a-f]{64}$/i.test(value) ? value : undefined;
 }
 
 /** Convert an ISO timestamp to unix seconds; undefined when unparseable. */
@@ -234,6 +253,7 @@ export async function claimBalance(
 
   let balance: ClaimableBalance | undefined;
   let eligibility: ClaimEligibility | undefined;
+  let signedTransactionHash: string | undefined;
 
   try {
     // Load the claimant keypair
@@ -328,19 +348,22 @@ export async function claimBalance(
     // Sign the transaction
     transaction.sign(claimantKeypair);
 
+    // The hash is determined by the signed envelope, so capture it *before*
+    // submitting. A client timeout after submission must not discard the
+    // identifier needed to look up the transaction's final state.
+    signedTransactionHash = toTransactionHashString(transaction.hash());
+
     // Submit the transaction. If the caller cancels (or the request times
     // out) while Horizon is processing, the claim may still have been
     // recorded — surface that ambiguity instead of a plain failure.
-    let ambiguous = false;
     const result = await abortableWait(
       server.submitTransaction(transaction),
-      options.signal,
-      { onAbort: () => (ambiguous = true) }
+      options.signal
     );
 
     return {
       success: true,
-      transactionHash: result.hash,
+      transactionHash: result.hash ?? signedTransactionHash,
       balance,
       ...(eligibility ? { eligibility } : {}),
     };
@@ -354,6 +377,9 @@ export async function claimBalance(
 
     if (isAbortError(error) || isAmbiguousSubmissionError(error)) {
       outcome.ambiguous = true;
+      if (signedTransactionHash) {
+        outcome.transactionHash = signedTransactionHash;
+      }
     }
 
     return outcome;

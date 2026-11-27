@@ -32,6 +32,12 @@ export class ExecutionAgent {
       stepCount: plan.workflow.length,
     });
 
+    // Results are accumulated in a shared array so a client timeout can
+    // still return hashes of transactions that were already submitted. Those
+    // hashes are the only way to reconcile the final state of a submission
+    // whose acknowledgement never arrived before the deadline.
+    const completedResults: ToolResult[] = [];
+
     try {
       return await withTimeout(
         this.executeWorkflow(
@@ -40,7 +46,8 @@ export class ExecutionAgent {
           input,
           startTime,
           timeout,
-          actualTraceId
+          actualTraceId,
+          completedResults
         ),
         {
           timeoutMs: timeout,
@@ -57,9 +64,17 @@ export class ExecutionAgent {
     } catch (error) {
       if (error instanceof TimeoutError) {
         logger.error("Agent execution timed out", { userId, timeout });
+        const transactionHashes = completedResults
+          .map((result) => result.data?.txHash ?? result.data?.transactionHash)
+          .filter(
+            (hash): hash is string =>
+              typeof hash === "string" && hash.length > 0
+          );
         return {
           success: false,
           error: `Agent execution timed out after ${timeout}ms`,
+          results: [...completedResults],
+          transactionHashes,
         };
       }
       throw error;
@@ -72,9 +87,9 @@ export class ExecutionAgent {
     input: string,
     startTime: number,
     totalTimeout: number,
-    traceId: string
+    traceId: string,
+    results: ToolResult[]
   ) {
-    const results: ToolResult[] = [];
 
     for (const step of plan.workflow) {
       const elapsed = Date.now() - startTime;

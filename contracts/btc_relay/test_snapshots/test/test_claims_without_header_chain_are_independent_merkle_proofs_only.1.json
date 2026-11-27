@@ -62,6 +62,275 @@
             "key": {
               "vec": [
                 {
+                  "symbol": "ClaimReceipt"
+                },
+                {
+                  "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "ClaimReceipt"
+                    },
+                    {
+                      "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "ledger"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "proof"
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "amount_sat"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 1
+                              }
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "block_header"
+                            },
+                            "val": {
+                              "bytes": "00000000000000000000000000000000000000000000000000000000000000000000000066b425a6e12a0878a639b9cc7f182f67f871be14964f2e95a259a9a75bee034100000000ffff7f2000000000"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "merkle_proof"
+                            },
+                            "val": {
+                              "vec": [
+                                {
+                                  "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+                                },
+                                {
+                                  "bytes": "e2f61c3f71d1defd3fa999dfa36953755c690689799962b48bebd836974e8cf9"
+                                },
+                                {
+                                  "bytes": "7d24db2bfa41474bfb2f877d688fac5faa5e10a2808cf9de307370b93352e548"
+                                },
+                                {
+                                  "bytes": "94857d3e08918f70395d9206410fbfa942f1a889aa5ab8188ec33c2f6e207dc7"
+                                },
+                                {
+                                  "bytes": "19bf1203d3bf48393c69cc25598914bb9e0d302f363d9825dba0b9fb959ca33b"
+                                },
+                                {
+                                  "bytes": "ad83a7857080ddaac962e156e92e3f07d488bc7f06ca9c070ec0daeb7370ee88"
+                                },
+                                {
+                                  "bytes": "f74f537c27f0891ffe896bf116f704c338cef196e7c57217f76bbb0dd711f7cd"
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "recipient"
+                            },
+                            "val": {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "tx_id"
+                            },
+                            "val": {
+                              "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "tx_index"
+                            },
+                            "val": {
+                              "u32": 0
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "ClaimReceipt"
+                },
+                {
+                  "bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "ClaimReceipt"
+                    },
+                    {
+                      "bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "ledger"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "proof"
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "amount_sat"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 1
+                              }
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "block_header"
+                            },
+                            "val": {
+                              "bytes": "00000000000000000000000000000000000000000000000000000000000000000000000095de80b113303010ede06683b3ebf614ab00bae4dcc8cb00d691163586aeded600000000ffff7f2000000000"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "merkle_proof"
+                            },
+                            "val": {
+                              "vec": [
+                                {
+                                  "bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+                                },
+                                {
+                                  "bytes": "106e428ef2fb4c05896e208aba80ab08e9cd97d2bf16acf11da90c7a31753f11"
+                                },
+                                {
+                                  "bytes": "11d51d1680b1cf4f9c88de1bbfc7eea8cea99e53cb4bccd2299ce139ad617f6f"
+                                },
+                                {
+                                  "bytes": "83697361ee67c44acc538ee27a55222bc0f54e7bd5e036534f92bad5668a6294"
+                                },
+                                {
+                                  "bytes": "22e97976130a9133bc8b42cf1f5afd82e50e3d5a5c3c3895b8f58fe92e2da776"
+                                },
+                                {
+                                  "bytes": "781eedf02938c38dea5ff294406f4acdac36fc06880eab4a7f542486eeda879a"
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "recipient"
+                            },
+                            "val": {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "tx_id"
+                            },
+                            "val": {
+                              "bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "tx_index"
+                            },
+                            "val": {
+                              "u32": 0
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+            "key": {
+              "vec": [
+                {
                   "symbol": "Claimed"
                 },
                 {

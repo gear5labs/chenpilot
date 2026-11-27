@@ -1,7 +1,10 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, Bytes, BytesN, Env, Vec};
+use soroban_sdk::{
+    testutils::{storage::Persistent as _, Address as _},
+    Bytes, BytesN, Env, Vec,
+};
 
 use btc_relay_crypto::BtcCryptoContract;
 
@@ -162,14 +165,51 @@ fn test_valid_spv_proof_accepted() {
 }
 
 #[test]
-#[should_panic]
-fn test_replay_attack_blocked() {
+fn test_duplicate_proof_is_idempotent() {
     let env = Env::default();
     env.mock_all_auths();
     let (_admin, _token, client) = setup(&env);
 
     let recipient = Address::generate(&env);
     let tx_id = BytesN::from_array(&env, &[0xbbu8; 32]);
+    let (root, proof) = single_leaf_proof(&env, &tx_id);
+    let header = make_header(&env, &root);
+    let claim = SpvProof {
+        block_header: header,
+        tx_id: tx_id.clone(),
+        merkle_proof: proof,
+        tx_index: 0,
+        amount_sat: 50_000_000,
+        recipient: recipient.clone(),
+    };
+
+    let first = client.verify_and_claim(&claim);
+    assert_eq!(first, (recipient.clone(), 50_000_000));
+    assert!(client.is_claimed(&tx_id));
+    let entries_after_first = env.as_contract(&client.address, || {
+        env.storage().persistent().all().len()
+    });
+
+    // Re-delivering the identical proof succeeds with the same outcome and
+    // does not write any claim state a second time.
+    let second = client.verify_and_claim(&claim);
+    assert_eq!(second, first);
+    assert!(client.is_claimed(&tx_id));
+    let entries_after_second = env.as_contract(&client.address, || {
+        env.storage().persistent().all().len()
+    });
+    assert_eq!(entries_after_second, entries_after_first);
+}
+
+#[test]
+#[should_panic]
+fn test_conflicting_proof_for_claimed_tx_is_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, _token, client) = setup(&env);
+
+    let recipient = Address::generate(&env);
+    let tx_id = BytesN::from_array(&env, &[0xbcu8; 32]);
     let (root, proof) = single_leaf_proof(&env, &tx_id);
     let header = make_header(&env, &root);
 
@@ -181,15 +221,16 @@ fn test_replay_attack_blocked() {
         amount_sat: 50_000_000,
         recipient: recipient.clone(),
     });
-    assert!(client.is_claimed(&tx_id));
 
+    // Same tx_id, different recipient: must not be mistaken for an
+    // idempotent re-delivery.
     client.verify_and_claim(&SpvProof {
         block_header: header,
         tx_id,
         merkle_proof: proof,
         tx_index: 0,
         amount_sat: 50_000_000,
-        recipient,
+        recipient: Address::generate(&env),
     });
 }
 
@@ -259,6 +300,82 @@ fn test_insufficient_confirmations() {
         amount_sat: 1,
         recipient,
     });
+}
+
+#[test]
+#[should_panic]
+fn test_confirmation_requirement_is_bounded_at_initialize() {
+    let env = Env::default();
+    env.mock_all_auths();
+    setup_with_confirmations(&env, MAX_MERKLE_PROOF_DEPTH + 1);
+}
+
+#[test]
+#[should_panic]
+fn test_merkle_proof_depth_is_bounded_at_entrypoint() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, _token, client) = setup(&env);
+
+    let tx_id = BytesN::from_array(&env, &[0x11u8; 32]);
+    let (_, proof) = proof_at_depth(&env, &tx_id, MAX_MERKLE_PROOF_DEPTH + 1);
+    let header = make_header(&env, &BytesN::from_array(&env, &[0u8; 32]));
+
+    // Any deeper proof fails before the PoW / Merkle checks, so even a
+    // header that does not match the proof cannot mask the resource bound.
+    client.verify_and_claim(&SpvProof {
+        block_header: header,
+        tx_id,
+        merkle_proof: proof,
+        tx_index: 0,
+        amount_sat: 1,
+        recipient: Address::generate(&env),
+    });
+}
+
+#[test]
+#[should_panic]
+fn test_tx_index_outside_proof_is_bounded_at_entrypoint() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, _token, client) = setup(&env);
+
+    let tx_id = BytesN::from_array(&env, &[0x12u8; 32]);
+    let (_, proof) = single_leaf_proof(&env, &tx_id);
+    let header = make_header(&env, &BytesN::from_array(&env, &[0u8; 32]));
+
+    client.verify_and_claim(&SpvProof {
+        block_header: header,
+        tx_id,
+        merkle_proof: proof,
+        tx_index: 2, // one sibling can only address indexes 0 and 1
+        amount_sat: 1,
+        recipient: Address::generate(&env),
+    });
+}
+
+#[test]
+fn test_maximum_allowed_merkle_depth_is_accepted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, _token, client) = setup(&env);
+
+    let recipient = Address::generate(&env);
+    let tx_id = BytesN::from_array(&env, &[0x13u8; 32]);
+    let (root, proof) = proof_at_depth(&env, &tx_id, MAX_MERKLE_PROOF_DEPTH);
+    assert_eq!(proof.len(), MAX_MERKLE_PROOF_DEPTH);
+    let header = make_header(&env, &root);
+
+    let outcome = client.verify_and_claim(&SpvProof {
+        block_header: header,
+        tx_id: tx_id.clone(),
+        merkle_proof: proof,
+        tx_index: 0,
+        amount_sat: 1,
+        recipient: recipient.clone(),
+    });
+    assert_eq!(outcome, (recipient, 1));
+    assert!(client.is_claimed(&tx_id));
 }
 
 #[test]
@@ -539,21 +656,21 @@ fn test_reorg_orphans_original_claim_block_and_blocks_further_claims_on_it() {
     // its own explicit design — out of scope here, see this PR's caveats).
     assert!(client.is_claimed(&tx_id));
 
-    // A repeat verify_and_claim attempt against the same (now-orphaned)
-    // block also fails — though replay protection (tx already claimed)
-    // would independently fail this too, so this alone doesn't isolate
-    // ProofReferencesOrphanedBlock. See
-    // test_verify_and_claim_rejects_unclaimed_tx_on_orphaned_block below
-    // for the isolated case (an unclaimed tx on an orphaned block).
+    // A re-delivery of the same proof stays idempotent even after the
+    // block was orphaned: it must not re-apply the claim or change the
+    // recorded outcome. Replay protection short-circuits the orphan check
+    // here, so test_verify_and_claim_rejects_unclaimed_tx_on_orphaned_block
+    // below is the one that isolates ProofReferencesOrphanedBlock.
     let result = client.try_verify_and_claim(&SpvProof {
         block_header: a1_header,
-        tx_id,
+        tx_id: tx_id.clone(),
         merkle_proof: proof,
         tx_index: 0,
         amount_sat: 1,
-        recipient,
+        recipient: recipient.clone(),
     });
-    assert!(result.is_err());
+    assert!(result.is_ok());
+    assert!(client.is_claimed(&tx_id));
 }
 
 #[test]

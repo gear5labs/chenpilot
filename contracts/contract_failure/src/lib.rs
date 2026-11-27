@@ -1,8 +1,14 @@
 #![no_std]
 
-use soroban_sdk::{contracterror, Env};
+use soroban_sdk::{Env, Error};
 
-#[contracterror]
+/// Shared contract failure codes.
+///
+/// This deliberately is *not* `#[contracterror]`: Soroban limits a contract
+/// error spec to 50 cases and this crate already defines more than that. The
+/// numeric codes are unchanged — each variant converts straight into a
+/// contract error via `From` below, so `panic_with_error` and `fail` behave
+/// exactly as they did with the generated impl.
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(u32)]
 pub enum FailureReason {
@@ -94,6 +100,12 @@ pub enum FailureReason {
     InvalidQuorumConfig = 216,
     NoValidSources = 217,
     TooManySources = 218,
+}
+
+impl From<FailureReason> for Error {
+    fn from(reason: FailureReason) -> Self {
+        Error::from_contract_error(reason as u32)
+    }
 }
 
 pub fn fail(env: &Env, reason: FailureReason) -> ! {

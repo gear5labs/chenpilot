@@ -25,6 +25,29 @@ is recorded. The relay also validates the block-header length,
 proof-derived Merkle root, proof-of-work target, and replay status of the
 transaction ID.
 
+#### Entry-point resource bounds
+
+`verify_and_claim` is permissionless, so all caller-controlled proof bytes
+are bounded before any hashing happens:
+
+- The block header must be exactly `MAX_BLOCK_HEADER_BYTES` (80) bytes
+  (`FailureReason::InvalidBlockHeaderLength`).
+- `min_confirmations` must be in `[1, MAX_MERKLE_PROOF_DEPTH]` at both
+  `initialize` and `update_config`
+  (`RelayError::InvalidConfirmationRequirement`).
+- The Merkle path may contain at most `MAX_MERKLE_PROOF_DEPTH` (32) siblings
+  (`RelayError::MerkleProofTooDeep`). A proof at exactly the maximum is
+  accepted; deeper proofs fail predictably instead of driving unbounded
+  cross-contract hashing.
+- The combined size of the header plus `32 * merkle_proof.len()` may not
+  exceed `MAX_PROOF_PAYLOAD_BYTES` (1104 bytes,
+  `RelayError::ProofPayloadTooLarge`).
+- `tx_index` must fit the width implied by the proof length
+  (`RelayError::InvalidTxIndex`).
+
+`btc_relay_crypto` enforces the same header-size and depth limits on its
+own entrypoints, so calling that sub-contract directly cannot bypass them.
+
 This check runs on every `verify_and_claim` call, unconditionally, whether
 or not the header-chain feature (below) is in use. As already noted before
 this update: Merkle-proof depth is a property of *one transaction's
@@ -98,6 +121,25 @@ Soroban invocations are atomic — nothing persists from that call, not even
 the `EvtReorgRejected` event that's published immediately before the panic.
 A caller/indexer observes this only as the transaction failing.
 
+### Duplicate proof delivery (idempotent re-delivery)
+
+`verify_and_claim` is idempotent for an **identical** re-delivery of a proof
+that has already been accepted. Alongside the existing `Claimed(tx_id)`
+marker, the relay stores a `ClaimReceipt` containing the accepted proof and
+the ledger it was first accepted at. On a later call:
+
+- If the submitted proof equals the stored receipt, the call succeeds with
+  the **original** `(recipient, amount_sat)`, publishes an informational
+  `EvtRelayDuplicate` event, and writes no claim state again. The exact same
+  input therefore always has the same documented result.
+- If the tx_id was claimed with a **different** proof (for example a different
+  recipient), the call fails with `RelayError::ConflictingProof` and, because
+  Soroban calls are atomic, leaves all state untouched.
+
+This matters in practice because relayers retry submissions after network
+timeouts. A retry of the same proof must not revert as an ambiguous "already
+claimed" failure, and must never apply the claim twice.
+
 ### What still does *not* happen: retroactive claim reversal
 
 After a proof is accepted via `verify_and_claim`, the transaction ID is
@@ -108,11 +150,13 @@ based on is later orphaned by an accepted reorg:
 1. The already-completed claim is **not** reverted, and the corresponding
    wrapped-asset mint/release is **not** clawed back. `is_claimed(tx_id)`
    continues to return `true`.
-2. Any *further* claim attempt whose proof references that now-orphaned
-   block **is** rejected, with `RelayError::ProofReferencesOrphanedBlock`
+2. Any *new* claim attempt whose proof references that now-orphaned block
+   **is** rejected, with `RelayError::ProofReferencesOrphanedBlock`
    — this is new in #576, and is the concrete mechanism for "a downstream
    consumer's proof reference becomes stale" that #576 was scoped to
-   deliver.
+   deliver. An exact re-delivery of the already-accepted proof remains an
+   idempotent no-op (see above), since replay protection short-circuits the
+   orphan check.
 3. Reverting an *already-completed* claim is explicitly out of scope for
    #576: it would mean clawing back funds already released to a recipient
    (and potentially already moved on again downstream), which needs its
@@ -135,8 +179,16 @@ based on is later orphaned by an accepted reorg:
   headers become non-canonical.
 - `test_reorg_orphans_original_claim_block_and_blocks_further_claims_on_it` —
   a claim made against a block that a later reorg orphans stays claimed
-  (point 1 above), but a further claim attempt against that same block is
-  rejected (point 2 above).
+  (point 1 above); re-delivering the identical proof is a no-op, while a new
+  claim against that same block is rejected (point 2 above).
+- `test_duplicate_proof_is_idempotent` / `test_conflicting_proof_for_claimed_tx_is_rejected`
+  — an identical re-delivery returns the original outcome without writing
+  state; a different proof for the same tx_id is rejected.
+- `test_merkle_proof_depth_is_bounded_at_entrypoint` /
+  `test_maximum_allowed_merkle_depth_is_accepted` /
+  `test_tx_index_outside_proof_is_bounded_at_entrypoint` — the entrypoint
+  bounds above reject oversized or out-of-range proofs and accept the
+  largest valid proof.
 - `test_verify_and_claim_rejects_unclaimed_tx_on_orphaned_block` — isolates
   the orphaned-block rejection from replay protection, using a tx that was
   never claimed in the first place.

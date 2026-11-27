@@ -4,7 +4,15 @@ import { WorkflowPlan } from "../../src/Agents/types";
 
 jest.mock("../../src/Agents/registry/ToolRegistry");
 jest.mock("../../src/Agents/agents/responseagent");
+jest.mock("../../src/Agents/policy/PolicyEnforcer", () => ({
+  policyEnforcer: {
+    enforce: jest.fn().mockResolvedValue({ allowed: true }),
+  },
+}));
 jest.mock("../../src/config/logger");
+jest.mock("../../src/Agents/agentMetrics.service", () => ({
+  agentMetricsService: { recordExecution: jest.fn() },
+}));
 
 describe("Execution Agent Timeout", () => {
   beforeEach(() => {
@@ -68,6 +76,44 @@ describe("Execution Agent Timeout", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("timed out");
+    });
+
+    it("preserves submitted transaction hashes when execution times out", async () => {
+      const mockExecuteTool = jest
+        .fn()
+        .mockResolvedValueOnce({
+          action: "swap_tool",
+          status: "success",
+          data: { txHash: "abc123submitted" },
+        })
+        .mockImplementation(
+          () => new Promise((resolve) => setTimeout(resolve, 5000))
+        );
+
+      (toolRegistry.executeTool as jest.Mock) = mockExecuteTool;
+
+      const plan: WorkflowPlan = {
+        workflow: [
+          { action: "swap_tool", payload: {} },
+          { action: "slow_action", payload: {} },
+        ],
+      };
+
+      const result = await executionAgent.run(
+        plan,
+        "user123",
+        "test input",
+        100
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.transactionHashes).toEqual(["abc123submitted"]);
+      expect(result.results).toEqual([
+        expect.objectContaining({
+          action: "swap_tool",
+          data: { txHash: "abc123submitted" },
+        }),
+      ]);
     });
 
     it("should pass remaining time to tool execution", async () => {

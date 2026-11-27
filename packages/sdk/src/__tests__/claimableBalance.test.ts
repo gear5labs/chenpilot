@@ -275,6 +275,68 @@ describe("claimable balance eligibility", () => {
       expect(result.error).toContain("network unreachable");
     });
 
+    it("keeps the signed transaction hash when the client times out after submission", async () => {
+      stubBalance(balanceRecord({ predicate: {} }));
+      server.ledgers.mockReturnValue(ledgerResponse({ close_time: NOW }));
+      server.loadAccount.mockResolvedValue(
+        new StellarSdk.Account(claimant.publicKey(), "0")
+      );
+      const controller = new AbortController();
+      server.submitTransaction.mockImplementation(() => {
+        controller.abort();
+        return new Promise(() => undefined);
+      });
+
+      const result = await claimBalance({
+        balanceId: BALANCE_ID,
+        claimantSecret: claimant.secret(),
+        signal: controller.signal,
+      });
+
+      const submitted = server.submitTransaction.mock.calls[0][0];
+      expect(result.success).toBe(false);
+      expect(result.ambiguous).toBe(true);
+      expect(result.transactionHash).toBe(submitted.hash().toString("hex"));
+      expect(result.eligibility?.eligible).toBe(true);
+    });
+
+    it("keeps the signed transaction hash on a gateway timeout response", async () => {
+      stubBalance(balanceRecord({ predicate: {} }));
+      server.ledgers.mockReturnValue(ledgerResponse({ close_time: NOW }));
+      server.loadAccount.mockResolvedValue(
+        new StellarSdk.Account(claimant.publicKey(), "0")
+      );
+      const gatewayTimeout = new Error("gateway timed out") as Error & {
+        response: { status: number };
+      };
+      gatewayTimeout.response = { status: 504 };
+      server.submitTransaction.mockRejectedValue(gatewayTimeout);
+
+      const result = await claimBalance({
+        balanceId: BALANCE_ID,
+        claimantSecret: claimant.secret(),
+      });
+
+      const submitted = server.submitTransaction.mock.calls[0][0];
+      expect(result.success).toBe(false);
+      expect(result.ambiguous).toBe(true);
+      expect(result.transactionHash).toBe(submitted.hash().toString("hex"));
+    });
+
+    it("does not invent a hash when the failure happened before signing", async () => {
+      stubBalance(balanceRecord({ predicate: {} }));
+      server.ledgers.mockReturnValue(ledgerResponse({ close_time: NOW }));
+
+      const result = await claimBalance({
+        balanceId: BALANCE_ID,
+        claimantSecret: claimant.secret(),
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.transactionHash).toBeUndefined();
+      expect(server.submitTransaction).not.toHaveBeenCalled();
+    });
+
     it("keeps the eligibility verdict when submission itself fails", async () => {
       stubBalance(balanceRecord({ predicate: {} }));
       server.ledgers.mockReturnValue(ledgerResponse({ close_time: NOW }));

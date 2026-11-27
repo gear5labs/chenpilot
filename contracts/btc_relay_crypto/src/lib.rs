@@ -2,6 +2,13 @@
 
 use soroban_sdk::{contract, contractimpl, Bytes, BytesN, Env, Vec};
 
+/// Bitcoin header size, and the maximum number of siblings in a Bitcoin
+/// Merkle path (a u32 tx index cannot address more than 2^32 leaves).
+/// These bound the work any caller can force this permissionless contract to
+/// perform, including when it is called directly rather than via btc_relay.
+const MAX_BLOCK_HEADER_BYTES: u32 = 80;
+const MAX_MERKLE_PROOF_DEPTH: u32 = 32;
+
 /// Sub-contract: Bitcoin cryptographic helpers extracted from btc_relay to
 /// keep the main relay contract within Soroban's Wasm bytecode size limit.
 ///
@@ -21,7 +28,7 @@ impl BtcCryptoContract {
     /// Extract the 32-byte Merkle root from a Bitcoin block header.
     /// Bytes 36–67 (0-indexed) of the 80-byte header.
     pub fn extract_merkle_root(env: Env, header: Bytes) -> BytesN<32> {
-        if header.len() != 80 {
+        if header.len() != MAX_BLOCK_HEADER_BYTES {
             panic!("invalid block header length");
         }
 
@@ -41,6 +48,10 @@ impl BtcCryptoContract {
     /// Used by the header-chain / reorg-detection logic in `btc_relay` to
     /// link a submitted header to its parent.
     pub fn extract_prev_block_hash(env: Env, header: Bytes) -> BytesN<32> {
+        if header.len() != MAX_BLOCK_HEADER_BYTES {
+            panic!("invalid block header length");
+        }
+
         let mut arr = [0u8; 32];
         for i in 0..32usize {
             arr[i] = header.get(4 + i as u32).unwrap();
@@ -52,7 +63,7 @@ impl BtcCryptoContract {
     /// nBits is at bytes 72–75 (little-endian).
     /// Returns a 32-byte big-endian target value.
     pub fn extract_target(env: Env, header: Bytes) -> BytesN<32> {
-        if header.len() != 80 {
+        if header.len() != MAX_BLOCK_HEADER_BYTES {
             panic!("invalid block header length");
         }
 
@@ -121,9 +132,9 @@ impl BtcCryptoContract {
         proof: Vec<BytesN<32>>,
         tx_index: u32,
     ) -> BytesN<32> {
-        // A Bitcoin Merkle path cannot contain more than 32 levels for a
-        // u32 transaction index. This also bounds attacker-controlled work.
-        if proof.len() > 32 {
+        // Bound attacker-controlled work even when this sub-contract is
+        // invoked directly instead of through btc_relay's entrypoint.
+        if proof.len() > MAX_MERKLE_PROOF_DEPTH {
             panic!("merkle proof too deep");
         }
 
@@ -152,5 +163,30 @@ impl BtcCryptoContract {
         }
 
         current
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    #[should_panic]
+    fn test_compute_merkle_root_rejects_oversized_proof() {
+        let env = Env::default();
+        let mut proof = Vec::new(&env);
+        for _ in 0..MAX_MERKLE_PROOF_DEPTH + 1 {
+            proof.push_back(BytesN::from_array(&env, &[0u8; 32]));
+        }
+        let tx_id = BytesN::from_array(&env, &[1u8; 32]);
+        BtcCryptoContract::compute_merkle_root(env, tx_id, proof, 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_extract_prev_block_hash_rejects_oversized_header() {
+        let env = Env::default();
+        let header = Bytes::from_slice(&env, &[0u8; 81]);
+        BtcCryptoContract::extract_prev_block_hash(env, header);
     }
 }

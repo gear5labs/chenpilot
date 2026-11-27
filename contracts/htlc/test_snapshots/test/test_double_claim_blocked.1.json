@@ -120,7 +120,7 @@
               "function_name": "claim",
               "args": [
                 {
-                  "bytes": "acff602fda4ab4d7ce294e2519dd9c2cfd0422cc5ff009940c6ebbb71cb8cd49"
+                  "bytes": "4ec5521e451ba7dd7ec1e15ecad4c3b821d18aa4db8ab18dc4ff1a5084ebcb21"
                 },
                 {
                   "bytes": "6d795f736563726574"
@@ -317,7 +317,7 @@
                   "symbol": "Swap"
                 },
                 {
-                  "bytes": "acff602fda4ab4d7ce294e2519dd9c2cfd0422cc5ff009940c6ebbb71cb8cd49"
+                  "bytes": "4ec5521e451ba7dd7ec1e15ecad4c3b821d18aa4db8ab18dc4ff1a5084ebcb21"
                 }
               ]
             },
@@ -337,7 +337,7 @@
                       "symbol": "Swap"
                     },
                     {
-                      "bytes": "acff602fda4ab4d7ce294e2519dd9c2cfd0422cc5ff009940c6ebbb71cb8cd49"
+                      "bytes": "4ec5521e451ba7dd7ec1e15ecad4c3b821d18aa4db8ab18dc4ff1a5084ebcb21"
                     }
                   ]
                 },

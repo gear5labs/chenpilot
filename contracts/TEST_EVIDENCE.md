@@ -487,6 +487,20 @@ fn test_borrow_sufficient() {
 - `test_claim_uniqueness`: Tests single claim only
 - `test_refund_uniqueness`: Tests single refund only
 
+#### Exact-expiration-ledger boundary tests
+- `test_claim_succeeds_at_exact_expiry_ledger`: claim still wins at
+  `sequence == expiry_ledger`
+- `test_refund_blocked_at_exact_expiry_ledger`: refund fails with
+  `SwapNotYetExpired` at the same ledger
+- `test_claim_blocked_one_ledger_after_expiry` /
+  `test_refund_succeeds_one_ledger_after_expiry`: the cutover at
+  `expiry_ledger + 1`
+- `test_claim_at_exact_expiry_blocks_later_refund`: only one outcome wins at
+  the boundary
+- `test_init_at_exact_current_ledger_expiry_rejected` /
+  `test_init_one_ledger_before_expiry_accepted`: expiry must be strictly in
+  the future at initialization
+
 ### Coverage
 - **Lines**: 85%
 - **Branches**: 80%
@@ -494,7 +508,6 @@ fn test_borrow_sufficient() {
 
 ### Gaps
 - Integration tests with actual hash preimages
-- Tests with time lock edge cases
 - Tests with cross-chain scenarios
 
 ---
