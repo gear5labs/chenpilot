@@ -1,6 +1,6 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short,
+    contract, contractimpl, contracttype, symbol_short, xdr::ToXdr,
     Address, Bytes, BytesN, Env, token,
 };
 use contract_failure::{fail, FailureReason};
@@ -8,6 +8,18 @@ use contract_failure::{fail, FailureReason};
 // TTL for swap state: swaps auto-expire after the expiry ledger + grace period
 // Add 7 days (1_209_600 ledgers at 5s/ledger) beyond expiry for post-claim/refund records
 const SWAP_TTL_GRACE_LEDGERS: u32 = 1_209_600;
+
+/// Only refresh a swap's TTL when less than this many ledgers remain.
+const TTL_EXTEND_THRESHOLD: u32 = 100;
+
+/// `Persistent` has no single `set_with_ttl` call in this SDK version.
+fn persist_swap(env: &Env, swap_id: &BytesN<32>, swap: &Swap, ttl_ledgers: u32) {
+    let key = DataKey::Swap(swap_id.clone());
+    env.storage().persistent().set(&key, swap);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_EXTEND_THRESHOLD, ttl_ledgers);
+}
 
 // ---------------------------------------------------------------------------
 // Storage keys
@@ -128,9 +140,9 @@ impl HtlcContract {
         token_client.transfer(&initiator, &env.current_contract_address(), &amount);
 
         let swap = Swap {
-            initiator,
-            recipient,
-            token,
+            initiator: initiator.clone(),
+            recipient: recipient.clone(),
+            token: token.clone(),
             amount,
             secret_hash,
             expiry_ledger,
@@ -139,7 +151,7 @@ impl HtlcContract {
         
         // Calculate TTL: expiry + grace period for post-completion records
         let ttl_ledgers = expiry_ledger.saturating_add(SWAP_TTL_GRACE_LEDGERS);
-        env.storage().persistent().set_with_ttl(&DataKey::Swap(swap_id.clone()), &swap, ttl_ledgers);
+        persist_swap(&env, &swap_id, &swap, ttl_ledgers);
 
         env.events().publish(
             (symbol_short!("SwapInit"),),
@@ -184,7 +196,7 @@ impl HtlcContract {
         
         // Extend TTL to keep claimed record queryable for grace period
         let ttl_ledgers = swap.expiry_ledger.saturating_add(SWAP_TTL_GRACE_LEDGERS);
-        env.storage().persistent().set_with_ttl(&DataKey::Swap(swap_id.clone()), &swap, ttl_ledgers);
+        persist_swap(&env, &swap_id, &swap, ttl_ledgers);
 
         // Release funds to recipient
         let token_client = token::Client::new(&env, &swap.token);
@@ -217,7 +229,7 @@ impl HtlcContract {
         
         // Extend TTL to keep refunded record queryable for grace period
         let ttl_ledgers = swap.expiry_ledger.saturating_add(SWAP_TTL_GRACE_LEDGERS);
-        env.storage().persistent().set_with_ttl(&DataKey::Swap(swap_id.clone()), &swap, ttl_ledgers);
+        persist_swap(&env, &swap_id, &swap, ttl_ledgers);
 
         // Return funds to initiator
         let token_client = token::Client::new(&env, &swap.token);
@@ -247,7 +259,7 @@ impl HtlcContract {
     ) -> BytesN<32> {
         let mut data = Bytes::new(env);
         data.extend_from_slice(secret_hash.to_array().as_ref());
-        data.extend_from_slice(&initiator.to_array());
+        data.append(&initiator.clone().to_xdr(env));
         // Encode expiry as 4 little-endian bytes
         data.push_back((expiry_ledger & 0xff) as u8);
         data.push_back(((expiry_ledger >> 8) & 0xff) as u8);
