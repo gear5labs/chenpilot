@@ -162,3 +162,57 @@ describe("FeeBumpingEngine", () => {
     });
   });
 });
+
+// ─── Fee-estimate provenance on FeeBumpResult ──────────────────────────────────
+
+describe("FeeBumpResult provenance", () => {
+  it("populates estimatedAt and feeSource='resource_calculation' on success", async () => {
+    const engine = new FeeBumpingEngine();
+    const mockTx = jest.fn().mockResolvedValue({ hash: "tx123" });
+
+    const result = await engine.bumpAndRetry(mockTx);
+
+    expect(result.success).toBe(true);
+    expect(result.estimatedAt).toBeGreaterThan(0);
+    expect(typeof result.estimatedAt).toBe("number");
+    expect(result.feeSource).toBe("resource_calculation");
+  });
+
+  it("populates estimatedAt and feeSource='resource_calculation' on non-resource error", async () => {
+    const engine = new FeeBumpingEngine();
+    const mockTx = jest.fn().mockRejectedValue(new Error("Network error"));
+
+    const result = await engine.bumpAndRetry(mockTx);
+
+    expect(result.success).toBe(false);
+    expect(result.estimatedAt).toBeGreaterThan(0);
+    expect(result.feeSource).toBe("resource_calculation");
+  });
+
+  it("populates estimatedAt and feeSource='resource_calculation' on max-attempts exhaustion", async () => {
+    const engine = new FeeBumpingEngine({ maxAttempts: 2 });
+    const mockTx = jest
+      .fn()
+      .mockRejectedValue(
+        new Error("cpu instructions exceeded 150000000 limit 100000000")
+      );
+
+    const result = await engine.bumpAndRetry(mockTx);
+
+    expect(result.success).toBe(false);
+    expect(result.estimatedAt).toBeGreaterThan(0);
+    expect(result.feeSource).toBe("resource_calculation");
+  });
+
+  it("estimatedAt is close to Date.now() (within a few seconds)", async () => {
+    const engine = new FeeBumpingEngine();
+    const mockTx = jest.fn().mockResolvedValue({ hash: "tx" });
+    const before = Date.now();
+
+    const result = await engine.bumpAndRetry(mockTx);
+
+    const after = Date.now();
+    expect(result.estimatedAt).toBeGreaterThanOrEqual(before);
+    expect(result.estimatedAt).toBeLessThanOrEqual(after);
+  });
+});

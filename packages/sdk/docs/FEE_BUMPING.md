@@ -128,6 +128,8 @@ async bumpAndRetry<T>(
 - `finalLimits`: Final resource limits used
 - `attempts`: History of all attempts
 - `estimatedFee`: Estimated fee in stroops
+- `estimatedAt`: Unix epoch ms when the fee estimate was computed. Consumers that cache the result should compare this against the current time to decide whether to re-simulate before submitting.
+- `feeSource`: How the fee was derived — `"resource_calculation"` (from final resource limits) or `"fallback"` (approximation from last known limits, used only in the unreachable tail of the retry loop).
 
 **Example:**
 
@@ -325,7 +327,24 @@ if (!result.success) {
 - **Moderate**: Default choice for most applications
 - **Aggressive**: Use for complex or unpredictable contracts
 
-### 2. Set Appropriate Max Attempts
+### 2. Check Fee Estimate Freshness Before Submitting
+
+Network congestion can change between fee estimation and transaction
+submission. Every `FeeBumpResult` carries `estimatedAt` (Unix ms) and
+`feeSource` so consumers can decide whether the estimate is still usable:
+
+```typescript
+const result = await engine.bumpAndRetry(txExecutor);
+
+// Reject estimates older than 60 seconds
+const FEE_TTL_MS = 60_000;
+if (Date.now() - result.estimatedAt >= FEE_TTL_MS) {
+  // Re-simulate before submitting
+  throw new Error("Fee estimate is stale — re-simulate before submitting");
+}
+```
+
+### 3. Set Appropriate Max Attempts
 
 ```typescript
 // For simple operations
@@ -335,7 +354,7 @@ const engine = new FeeBumpingEngine({ maxAttempts: 2 });
 const engine = new FeeBumpingEngine({ maxAttempts: 5 });
 ```
 
-### 3. Monitor Fee Bumps
+### 4. Monitor Fee Bumps
 
 Use the `onBump` callback to track resource adjustments:
 
@@ -354,7 +373,7 @@ const engine = new FeeBumpingEngine({
 });
 ```
 
-### 4. Use Custom Initial Limits
+### 5. Use Custom Initial Limits
 
 Optimize costs by starting with appropriate limits:
 
@@ -374,7 +393,7 @@ const writeLimits = {
 };
 ```
 
-### 5. Handle Non-Resource Errors
+### 6. Handle Non-Resource Errors
 
 The engine only retries resource errors. Handle other errors separately:
 
@@ -392,7 +411,7 @@ if (!result.success) {
 }
 ```
 
-### 6. Estimate Fees Before Execution
+### 7. Estimate Fees Before Execution
 
 ```typescript
 const engine = new FeeBumpingEngine();
