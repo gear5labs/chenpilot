@@ -76,8 +76,8 @@ function extractImports(
 
           const content = fs.readFileSync(fullPath, "utf-8");
 
-          // Match import/require statements
-          const importRegex = /(?:import|require)\s*\(?["']([^"']+)["']/g;
+          // Match import/require statements (ensure require is not a method call like obj.require())
+          const importRegex = /(?:^|[^.\w$])(?:import|require)\s*\(?["']([^"']+)["']/g;
           let match;
           while ((match = importRegex.exec(content)) !== null) {
             const moduleName = match[1];

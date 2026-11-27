@@ -7,6 +7,7 @@ import { HashedPlan, planHashService } from "./planHash";
 import {
   toolAuthorizationService,
   ToolAuthority,
+  HIGH_RISK_ACTIONS,
 } from "../policy/ToolAuthorizationService";
 import { TrustLevel, ContextProvenance } from "../context/TrustZone";
 import { AgentContextBuilder } from "../context/AgentContextBuilder";
@@ -18,6 +19,39 @@ import logger from "../../config/logger";
 import { RiskLevel } from "../../Auth/userPreferences.entity";
 import { issuerResolutionService } from "./issuerResolution";
 import { assessNetworkClarification } from "../../services/networkConfig";
+
+export interface PlannerRecoveryPolicy {
+  /** Maximum number of retry attempts for recovering from invalid responses (default: 2, bounded max: 5) */
+  maxRetries?: number;
+  /** Backoff delay between retry attempts in ms (default: 0) */
+  retryDelayMs?: number;
+  /** Terminal behavior when retries are exhausted: 'throw' | 'safe_terminal_plan' (default: 'throw') */
+  terminalResultMode?: "throw" | "safe_terminal_plan";
+}
+
+export class PlannerRecoveryError extends Error {
+  public readonly isTerminal = true;
+  public readonly attempts: number;
+  public readonly maxRetries: number;
+  public readonly lastError: string;
+  public readonly safeTerminalPlan: HashedPlan;
+
+  constructor(
+    message: string,
+    attempts: number,
+    maxRetries: number,
+    lastError: string,
+    safeTerminalPlan: HashedPlan
+  ) {
+    super(message);
+    this.name = "PlannerRecoveryError";
+    this.attempts = attempts;
+    this.maxRetries = maxRetries;
+    this.lastError = lastError;
+    this.safeTerminalPlan = safeTerminalPlan;
+    Object.setPrototypeOf(this, PlannerRecoveryError.prototype);
+  }
+}
 
 export interface PlannerContext {
   userId: string;
@@ -38,6 +72,8 @@ export interface PlannerContext {
   explicitIssuers?: Record<string, string>;
   /** Whether to prompt for issuer selection on ambiguity */
   promptOnAmbiguity?: boolean;
+  /** Finite retry and recovery policy for invalid planner responses */
+  recoveryPolicy?: PlannerRecoveryPolicy;
 }
 
 export interface PlannerConstraints {
@@ -46,6 +82,8 @@ export interface PlannerConstraints {
   minSlippage?: number;
   maxSlippage?: number;
   timeout?: number;
+  /** Optional override for planner recovery retries */
+  maxRetries?: number;
 }
 
 export interface PlanStep extends WorkflowStep {
@@ -81,6 +119,10 @@ export interface ExecutionPlan {
   summary: string;
   /** Attenuated capability grant for the plan */
   capabilityGrant?: import("../capability/types").CapabilityGrant | string;
+  /** Indicates whether this is a deterministic safe terminal plan */
+  isTerminal?: boolean;
+  /** Terminal reason if plan was terminated prematurely */
+  terminalReason?: string;
 }
 
 export interface PlanValidation {
@@ -92,6 +134,55 @@ export interface PlanValidation {
 export class AgentPlanner {
   private readonly MAX_STEPS = 10;
   private readonly HIGH_RISK_THRESHOLD = 5;
+  private readonly DEFAULT_MAX_RETRIES = 2;
+  private readonly MAX_RECOVERY_RETRIES_LIMIT = 5;
+
+  private resolveRecoveryPolicy(
+    context: PlannerContext
+  ): Required<PlannerRecoveryPolicy> {
+    const rawMaxRetries =
+      context.recoveryPolicy?.maxRetries ??
+      context.constraints?.maxRetries ??
+      this.DEFAULT_MAX_RETRIES;
+    const boundedMaxRetries = Math.min(
+      Math.max(
+        0,
+        typeof rawMaxRetries === "number" && !isNaN(rawMaxRetries)
+          ? Math.floor(rawMaxRetries)
+          : this.DEFAULT_MAX_RETRIES
+      ),
+      this.MAX_RECOVERY_RETRIES_LIMIT
+    );
+    const retryDelayMs = Math.max(0, context.recoveryPolicy?.retryDelayMs ?? 0);
+    const terminalResultMode =
+      context.recoveryPolicy?.terminalResultMode ?? "throw";
+
+    return {
+      maxRetries: boundedMaxRetries,
+      retryDelayMs,
+      terminalResultMode,
+    };
+  }
+
+  createSafeTerminalPlan(
+    context: PlannerContext,
+    reason: string,
+    attempts: number = 0
+  ): HashedPlan {
+    const planId = `plan_terminal_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const plan: ExecutionPlan = {
+      planId,
+      steps: [],
+      totalSteps: 0,
+      estimatedDuration: 0,
+      riskLevel: "low",
+      requiresApproval: false,
+      summary: `Deterministic safe terminal plan: recovery exhausted after ${attempts} attempt${attempts === 1 ? "" : "s"}. Reason: ${reason}`,
+      isTerminal: true,
+      terminalReason: reason,
+    };
+    return this.createHashedPlan(plan);
+  }
 
   async createPlan(context: PlannerContext): Promise<HashedPlan> {
     logger.info("Creating execution plan", {
@@ -116,8 +207,12 @@ export class AgentPlanner {
         });
       }
 
-// Check for contradictory financial constraints
-      if (context.constraints && context.constraints.minSlippage !== undefined && context.constraints.maxSlippage !== undefined) {
+      // Check for contradictory financial constraints
+      if (
+        context.constraints &&
+        context.constraints.minSlippage !== undefined &&
+        context.constraints.maxSlippage !== undefined
+      ) {
         if (context.constraints.minSlippage > context.constraints.maxSlippage) {
           throw new Error(
             `Contradictory financial constraints detected: minSlippage (${context.constraints.minSlippage}) cannot be greater than maxSlippage (${context.constraints.maxSlippage}).`
@@ -160,46 +255,138 @@ export class AgentPlanner {
         explicitAllowedTools: context.constraints?.allowedTools,
       });
 
-      const workflowPlan = await this.analyzeWithLLM(context, toolAuthority);
+      const policy = this.resolveRecoveryPolicy(context);
+      let lastError: Error | null = null;
+      let totalAttemptsMade = 0;
 
-      // Post-model authorization gate: verify all steps against computed tool authority
-      const authResult = toolAuthorizationService.authorizePlan(
-        workflowPlan,
-        toolAuthority
+      for (let attempt = 0; attempt <= policy.maxRetries; attempt++) {
+        totalAttemptsMade++;
+        try {
+          if (attempt > 0 && policy.retryDelayMs > 0) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, policy.retryDelayMs)
+            );
+          }
+
+          const workflowPlan = await this.analyzeWithLLM(
+            context,
+            toolAuthority,
+            attempt > 0 ? (lastError ?? undefined) : undefined
+          );
+
+          // Post-model authorization gate: verify all steps against computed tool authority
+          const authResult = toolAuthorizationService.authorizePlan(
+            workflowPlan,
+            toolAuthority
+          );
+          if (!authResult.authorized) {
+            securityAuditor.logSecurityEvent({
+              eventType: SecurityEventType.UNAUTHORIZED_TOOL_REJECTED,
+              provenance: context.provenance ?? ContextProvenance.USER_INPUT,
+              trustLevel:
+                context.contextTrustLevel ?? TrustLevel.AUTHENTICATED_USER,
+              rawPayload: JSON.stringify(workflowPlan),
+              threatCategory: "UNAUTHORIZED_TOOL_SELECTION",
+              userId: context.userId,
+              action: authResult.unauthorizedSteps
+                .map((s) => s.action)
+                .join(", "),
+            });
+            throw new Error(
+              `Plan authorization failed: ${authResult.errors.join(", ")}`
+            );
+          }
+
+          const executionPlan = this.convertToExecutionPlan(
+            workflowPlan,
+            context
+          );
+          const validation = this.validatePlan(executionPlan, context);
+
+          if (!validation.valid) {
+            throw new Error(`Invalid plan: ${validation.errors.join(", ")}`);
+          }
+
+          const hashedPlan = this.createHashedPlan(executionPlan);
+
+          if (attempt > 0) {
+            logger.info("Planner response recovered successfully", {
+              planId: hashedPlan.planId,
+              attempt,
+              userId: context.userId,
+            });
+          } else {
+            logger.info("Execution plan created successfully", {
+              planId: hashedPlan.planId,
+              totalSteps: hashedPlan.totalSteps,
+              riskLevel: hashedPlan.riskLevel,
+              planHash: hashedPlan.planHash,
+            });
+          }
+
+          return hashedPlan;
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+          logger.warn("Invalid planner response encountered", {
+            userId: context.userId,
+            attempt,
+            maxRetries: policy.maxRetries,
+            error: lastError.message,
+          });
+
+          if (attempt < policy.maxRetries) {
+            continue;
+          }
+        }
+      }
+
+      // Exhausted all recovery attempts: produce deterministic safe terminal result
+      const safeTerminalPlan = this.createSafeTerminalPlan(
+        context,
+        lastError?.message ?? "Repeated malformed planner responses",
+        totalAttemptsMade
       );
-      if (!authResult.authorized) {
-        securityAuditor.logSecurityEvent({
-          eventType: SecurityEventType.UNAUTHORIZED_TOOL_REJECTED,
-          provenance: context.provenance ?? ContextProvenance.USER_INPUT,
-          trustLevel:
-            context.contextTrustLevel ?? TrustLevel.AUTHENTICATED_USER,
-          rawPayload: JSON.stringify(workflowPlan),
-          threatCategory: "UNAUTHORIZED_TOOL_SELECTION",
-          userId: context.userId,
-          action: authResult.unauthorizedSteps.map((s) => s.action).join(", "),
-        });
-        throw new Error(
-          `Plan authorization failed: ${authResult.errors.join(", ")}`
-        );
-      }
 
-      const executionPlan = this.convertToExecutionPlan(workflowPlan, context);
-      const validation = this.validatePlan(executionPlan, context);
-
-      if (!validation.valid) {
-        throw new Error(`Invalid plan: ${validation.errors.join(", ")}`);
-      }
-
-      const hashedPlan = this.createHashedPlan(executionPlan);
-
-      logger.info("Execution plan created successfully", {
-        planId: hashedPlan.planId,
-        totalSteps: hashedPlan.totalSteps,
-        riskLevel: hashedPlan.riskLevel,
-        planHash: hashedPlan.planHash,
+      securityAuditor.logSecurityEvent({
+        eventType: SecurityEventType.UNAUTHORIZED_TOOL_REJECTED,
+        provenance: context.provenance ?? ContextProvenance.USER_INPUT,
+        trustLevel: context.contextTrustLevel ?? TrustLevel.AUTHENTICATED_USER,
+        rawPayload: JSON.stringify({
+          attempts: totalAttemptsMade,
+          maxRetries: policy.maxRetries,
+          lastError: lastError?.message,
+        }),
+        threatCategory: "PLANNER_RECOVERY_EXHAUSTED",
+        userId: context.userId,
+        action: "planner_bounded_recovery",
       });
 
-      return hashedPlan;
+      logger.error(
+        "Planner response recovery exhausted, producing safe terminal result",
+        {
+          userId: context.userId,
+          totalAttempts: totalAttemptsMade,
+          maxRetries: policy.maxRetries,
+          terminalResultMode: policy.terminalResultMode,
+          reason: lastError?.message,
+        }
+      );
+
+      if (policy.terminalResultMode === "safe_terminal_plan") {
+        return safeTerminalPlan;
+      }
+
+      const errorMsg = lastError
+        ? `${lastError.message}: recovery retries exhausted after ${policy.maxRetries} retries (${totalAttemptsMade} total attempts)`
+        : `Planner recovery exhausted after ${totalAttemptsMade} attempts`;
+
+      throw new PlannerRecoveryError(
+        errorMsg,
+        totalAttemptsMade,
+        policy.maxRetries,
+        lastError?.message ?? "Unknown error",
+        safeTerminalPlan
+      );
     } catch (error) {
       logger.error("Failed to create execution plan", {
         error,
@@ -211,7 +398,8 @@ export class AgentPlanner {
 
   private async analyzeWithLLM(
     context: PlannerContext,
-    toolAuthority?: ToolAuthority
+    toolAuthority?: ToolAuthority,
+    recoveryError?: Error
   ): Promise<WorkflowPlan> {
     const allTools = toolRegistry.getToolMetadata();
     const authorizedTools = toolAuthority
@@ -221,32 +409,61 @@ export class AgentPlanner {
         )
       : allTools;
 
-    const prompt = this.buildPlannerPrompt(
+    let prompt = this.buildPlannerPrompt(
       authorizedTools,
       context.userPreferences
     );
 
+    if (recoveryError) {
+      prompt += `\n\nIMPORTANT RECOVERY INSTRUCTION: The previous response was invalid (${recoveryError.message}). You MUST return valid JSON adhering strictly to: { "workflow": [{ "action": string, "payload": object }] }. Only use available tools.`;
+    }
+
     let response: unknown;
     if (context.contextBuilder) {
+      if (recoveryError) {
+        context.contextBuilder.addSystemInstruction(
+          `RECOVERY INSTRUCTION: Previous plan was invalid (${recoveryError.message}). Respond with strictly valid JSON matching { "workflow": [...] }.`
+        );
+      }
       response = await agentLLM.callLLMWithContext(
         context.userId,
         context.contextBuilder,
         { asJson: true }
       );
     } else {
+      const userInput = recoveryError
+        ? `${context.userInput}\n[Recovery notice: please return valid JSON with a "workflow" array: ${recoveryError.message}]`
+        : context.userInput;
       response = await agentLLM.callLLM(
         context.userId,
         prompt,
-        context.userInput,
+        userInput,
         true
       );
     }
 
     if (
-      !(response as Record<string, unknown>)?.workflow ||
+      !response ||
+      typeof response !== "object" ||
+      !("workflow" in response) ||
       !Array.isArray((response as Record<string, unknown>).workflow)
     ) {
       throw new Error("Invalid LLM response: missing workflow array");
+    }
+
+    const workflow = (response as Record<string, unknown>)
+      .workflow as unknown[];
+    for (let i = 0; i < workflow.length; i++) {
+      const step = workflow[i];
+      if (!step || typeof step !== "object") {
+        throw new Error(`Invalid LLM response: step ${i + 1} is not an object`);
+      }
+      const s = step as Record<string, unknown>;
+      if (typeof s.action !== "string" || !s.action.trim()) {
+        throw new Error(
+          `Invalid LLM response: step ${i + 1} has missing or invalid action`
+        );
+      }
     }
 
     return response as WorkflowPlan;

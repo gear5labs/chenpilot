@@ -12,7 +12,12 @@ import { readRepoConfig } from "../../scripts/repo/config.mjs";
 import { REPO_ROOT } from "../docs/helpers.mjs";
 
 const require = createRequire(import.meta.url);
-const ts = require("typescript");
+let ts = null;
+try {
+  ts = require("typescript");
+} catch {
+  // typescript is not installed in environments running without dependencies (e.g. repository-checks.yml)
+}
 const config = readRepoConfig(REPO_ROOT).tsCompat;
 
 describe("minimum TypeScript compatibility", () => {
@@ -40,7 +45,7 @@ describe("minimum TypeScript compatibility", () => {
     assert.equal(peerRangeSatisfies(">=4.5.0", "4.4.0"), false);
   });
 
-  it("parses valid declaration files without diagnostics", () => {
+  it("parses valid declaration files without diagnostics", { skip: !ts }, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ts-compat-parse-"));
     try {
       fs.writeFileSync(
@@ -53,7 +58,7 @@ describe("minimum TypeScript compatibility", () => {
     }
   });
 
-  it("reports declarations that do not parse (failure case)", () => {
+  it("reports declarations that do not parse (failure case)", { skip: !ts }, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ts-compat-parse-"));
     try {
       fs.writeFileSync(path.join(dir, "broken.d.ts"), "export declare const x: = 1;\n");

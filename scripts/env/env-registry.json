@@ -1507,6 +1507,15 @@
       "default": "30000",
       "secret": false,
       "description": "Delay between digest retries."
+    },
+    {
+      "name": "JOB_SHUTDOWN_DEADLINE_MS",
+      "service": "backend",
+      "owner": "Reliability (`src/jobs/jobWorker.ts`)",
+      "required": false,
+      "default": "25000",
+      "secret": false,
+      "description": "Maximum duration in milliseconds to wait for active jobs to complete or be released during worker graceful shutdown."
     }
   ],
   "exemptions": [

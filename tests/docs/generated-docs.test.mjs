@@ -13,11 +13,11 @@ test("generated docs check", async (t) => {
     const docsPath = join(projectRoot, "docs/TOOLS.md");
     
     // Generate once
-    execSync("pnpm run gen:docs", { cwd: projectRoot, stdio: "pipe" });
+    execSync("node scripts/generateToolDocs.mjs", { cwd: projectRoot, stdio: "pipe" });
     const firstGeneration = readFileSync(docsPath, "utf-8");
     
     // Generate again
-    execSync("pnpm run gen:docs", { cwd: projectRoot, stdio: "pipe" });
+    execSync("node scripts/generateToolDocs.mjs", { cwd: projectRoot, stdio: "pipe" });
     const secondGeneration = readFileSync(docsPath, "utf-8");
     
     deepStrictEqual(

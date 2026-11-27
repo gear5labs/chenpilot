@@ -72,6 +72,7 @@ See detailed documentation:
 - [docs/BOT_IDENTITY_LINKING.md](docs/BOT_IDENTITY_LINKING.md) — Bot Identity Linking System
 - [docs/BRIDGE_ACCOUNTING_INTEGRATION_GUIDE.md](docs/BRIDGE_ACCOUNTING_INTEGRATION_GUIDE.md) — Bridge Accounting Integration Guide
 - [docs/CONTRACT_DEPLOYMENT_RUNBOOK.md](docs/CONTRACT_DEPLOYMENT_RUNBOOK.md) — Contract Deployment and Upgrade Runbook
+- [docs/CONTRACT_REPRODUCIBILITY.md](docs/CONTRACT_REPRODUCIBILITY.md) — Contract Artifact Reproducibility (issue #998)
 - [docs/CONTRACT_SECURITY_IMPLEMENTATION_SUMMARY.md](docs/CONTRACT_SECURITY_IMPLEMENTATION_SUMMARY.md) — Contract Security Implementation Summary
 - [docs/DATA_MIGRATIONS.md](docs/DATA_MIGRATIONS.md) — Data Migrations: Authoring and Rollback
 - [docs/DIFFERENTIAL_FUZZING.md](docs/DIFFERENTIAL_FUZZING.md) — Differential Fuzzing Between Soroban Contracts and Reference Models
@@ -102,10 +103,14 @@ See detailed documentation:
 - [docs/TRANSACTION_JOURNEY_SLO.md](docs/TRANSACTION_JOURNEY_SLO.md) — Transaction user-journey SLIs, SLOs, and runbook
 - [docs/TYPE_SAFETY_CLEANUP.md](docs/TYPE_SAFETY_CLEANUP.md) — Type Safety Cleanup Program
 - [docs/VAULT_ACCOUNTING_INVARIANTS.md](docs/VAULT_ACCOUNTING_INVARIANTS.md) — Vault Accounting Invariants: core_vault State Consistency
+- [docs/agent-state-boundaries.md](docs/agent-state-boundaries.md) — Agent state boundaries`n`nDurable planner state requires explicit schema compatibility handling, while client cancellation must propagate safely without misreporting already-submitted transactions.
 - [docs/archive/README.md](docs/archive/README.md) — Documentation Archive
 - [docs/archive/implementation-reports/858-in-transit-bridge-accounting/ISSUE_858_DELIVERY_SUMMARY.md](docs/archive/implementation-reports/858-in-transit-bridge-accounting/ISSUE_858_DELIVERY_SUMMARY.md) — Issue #858 - Delivery Summary
 - [docs/archive/implementation-reports/858-in-transit-bridge-accounting/ISSUE_858_IMPLEMENTATION.md](docs/archive/implementation-reports/858-in-transit-bridge-accounting/ISSUE_858_IMPLEMENTATION.md) — Issue #858 Implementation Summary
 - [docs/archive/implementation-reports/858-in-transit-bridge-accounting/ISSUE_858_README.md](docs/archive/implementation-reports/858-in-transit-bridge-accounting/ISSUE_858_README.md) — Issue #858 - In-Transit Bridge Accounting
+- [docs/observability-boundaries.md](docs/observability-boundaries.md) — Observability boundaries`n`nObservability requires bounded authentication alerts, provider measurements without sensitive labels, stable workflow correlation IDs, and structured Discord lifecycle events.
+- [docs/operations-safety-boundaries.md](docs/operations-safety-boundaries.md) — Operations safety boundaries`n`nOperations require bounded disk usage, read-only incident controls, explicit provider failover decisions, and visible rotation or cleanup failures.
+- [docs/recovery-reliability-boundaries.md](docs/recovery-reliability-boundaries.md) — Recovery reliability boundaries`n`nRecovery operations require authorized replay with idempotency guards, retention and legal-hold rules, restore-invariant verification, and destructive migration preflight review.
 - [docs/security/README.md](docs/security/README.md) — Agent Security Controls
 - [docs/security/SECRET_MANAGEMENT.md](docs/security/SECRET_MANAGEMENT.md) — Secret Management
 

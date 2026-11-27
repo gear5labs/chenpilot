@@ -8,7 +8,7 @@ Thank you for your interest in contributing to Chen Pilot! We're building the mo
 2.  **Environment Setup**:
     - Install Node.js (18+).
     - Install `pnpm` (`npm install -g pnpm`).
-    - Run `pnpm install`.
+    - Run `pnpm install --frozen-lockfile`.
     - Copy `.env.example` to `.env` and configure your keys. [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md) lists every variable, its owner, whether it is required, its default, and whether it is secret.
     - Run `npm run preflight` (see [Local environment preflight](#local-environment-preflight)).
 3.  **Run Locally**:

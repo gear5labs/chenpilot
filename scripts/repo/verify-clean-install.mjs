@@ -59,7 +59,17 @@ export function diffSnapshots(before, after) {
 export function verifyCleanInstall(root, { command, lockfiles }) {
   const before = snapshot(root, lockfiles);
   const [bin, ...args] = command;
-  const result = spawnSync(bin, args, { cwd: root, stdio: "inherit" });
+  const isCmd =
+    process.platform === "win32" &&
+    (bin.endsWith(".cmd") ||
+      bin.endsWith(".bat") ||
+      bin === "pnpm" ||
+      bin === "npm");
+  const result = spawnSync(bin, args, {
+    cwd: root,
+    stdio: "inherit",
+    shell: isCmd,
+  });
   if (result.error)
     return [
       `\`${command.join(" ")}\` could not start: ${result.error.message}`,

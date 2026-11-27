@@ -7,7 +7,11 @@ This guide shows how to integrate the AgentPlanner into your Express API routes.
 ### 1. Add Routes to `src/Gateway/routes.ts`
 
 ```typescript
-import { agentPlanner, planExecutor } from "../Agents/planner";
+import {
+  agentPlanner,
+  planExecutor,
+  PlannerRecoveryError,
+} from "../Agents/planner";
 import type { ExecutionPlan } from "../Agents/planner";
 
 // Store plans temporarily (in production, use Redis or database)
@@ -58,6 +62,20 @@ router.post("/agent/plan", async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
+    if (error instanceof PlannerRecoveryError) {
+      logger.error("Planner recovery exhausted", {
+        attempts: error.attempts,
+        maxRetries: error.maxRetries,
+        terminalPlanId: error.safeTerminalPlan.planId,
+      });
+      return res.status(422).json({
+        success: false,
+        isTerminal: true,
+        message: error.message,
+        safeTerminalPlan: error.safeTerminalPlan,
+      });
+    }
+
     logger.error("Plan creation failed", { error });
     return res.status(500).json({
       success: false,

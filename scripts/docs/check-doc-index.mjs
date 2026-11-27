@@ -55,7 +55,7 @@ export function renderDocsMap(root, files) {
 
 /** Return the index content with its generated block replaced (or appended). */
 export function applyDocsMap(content, docsMap, body) {
-  const lines = content.split("\n");
+  const lines = content.replace(/\r/g, "").split("\n");
   const block = findBlock(lines, docsMap);
   const generated = [docsMap.begin, "", body, "", docsMap.end];
   if (block === null) {
@@ -74,7 +74,9 @@ export function applyDocsMap(content, docsMap, body) {
  * must list. Returns problems as strings prefixed with `file:line`.
  */
 export function checkIndex(root, indexFile, docsMap, docsFiles) {
-  const content = fs.readFileSync(path.join(root, indexFile), "utf8");
+  const content = fs
+    .readFileSync(path.join(root, indexFile), "utf8")
+    .replace(/\r/g, "");
   const lines = content.split("\n");
   const problems = [];
 

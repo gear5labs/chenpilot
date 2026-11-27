@@ -1,7 +1,7 @@
 jest.unmock("@stellar/stellar-sdk");
 jest.unmock("stellar-sdk");
 
-import * as StellarSdk from "@stellar/stellar-sdk";
+import * as StellarSdk from "stellar-sdk";
 import { TransactionPreviewService } from "../services/TransactionPreviewService";
 import { ExecutionAction } from "../../../../src/AuditLog/auditEvent.types";
 
@@ -21,8 +21,11 @@ function buildXdr(ops: StellarSdk.xdr.Operation[]): string {
   return builder.build().toXDR();
 }
 
-const payment = (destination = recipient, amount = "10", asset = StellarSdk.Asset.native()) =>
-  StellarSdk.Operation.payment({ destination, asset, amount });
+const payment = (
+  destination = recipient,
+  amount = "10",
+  asset = StellarSdk.Asset.native()
+) => StellarSdk.Operation.payment({ destination, asset, amount });
 
 describe("TransactionPreviewService", () => {
   it("builds, evaluates, and renders safe preview locally", () => {
@@ -31,7 +34,12 @@ describe("TransactionPreviewService", () => {
     const result = service.buildAndEvaluate({
       xdr,
       networkPassphrase: TESTNET,
-      intent: { operationTypes: ["payment"], asset: "XLM", amount: "10", destination: recipient },
+      intent: {
+        operationTypes: ["payment"],
+        asset: "XLM",
+        amount: "10",
+        destination: recipient,
+      },
     });
 
     expect(result.preview.network).toBe("testnet");
@@ -74,7 +82,9 @@ describe("TransactionPreviewService", () => {
       },
     });
 
-    const service = new TransactionPreviewService({ previewFetcher: mockFetcher });
+    const service = new TransactionPreviewService({
+      previewFetcher: mockFetcher,
+    });
     const reply = await service.handlePreviewRequest({
       xdr: buildXdr([payment()]),
       networkPassphrase: TESTNET,

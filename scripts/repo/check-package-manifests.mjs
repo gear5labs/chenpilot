@@ -117,13 +117,16 @@ export function validateManifest(
 export function packArtifact(root, dir) {
   const dest = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-check-"));
   try {
+    const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
     const output = execFileSync(
-      "npm",
-      ["pack", "--json", "--ignore-scripts", "--pack-destination", dest],
+      npmBin,
+      ["--ignore-scripts", "pack", "--json", "--pack-destination", dest],
       {
         cwd: path.join(root, dir),
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
+        shell: process.platform === "win32",
+        env: { ...process.env, npm_config_ignore_scripts: "true" },
       }
     );
     const [result] = JSON.parse(output);

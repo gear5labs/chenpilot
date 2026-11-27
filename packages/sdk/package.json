@@ -28,7 +28,6 @@
     "test:examples": "node -r ts-node/register/transpile-only scripts/run-quick-start-examples.cjs",
     "clean": "rimraf dist",
     "docs": "typedoc --options typedoc.json",
-    "prepare": "husky",
     "benchmark": "node benchmarks/performance.js"
   },
   "lint-staged": {

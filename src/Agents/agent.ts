@@ -13,7 +13,7 @@ import {
 } from "./models/ModelFallbackOrchestrator";
 import { CapabilityRequirement, PlanVersion } from "./models/ModelCapability";
 import { modelRegistry, SelectionStrategy } from "./models/ModelRegistry";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import { AgentContextBuilder } from "./context/AgentContextBuilder";
 
 export interface LLMCallOptions {
@@ -162,7 +162,7 @@ export class AgentLLM {
     const hasRegisteredModels = modelRegistry.getAllModels().length > 0;
     if (config.models?.verifyEquivalence && hasRegisteredModels) {
       const callContext: LLMCallContext = {
-        callId: uuidv4(),
+        callId: randomUUID(),
         agentId,
         userId: options?.userId,
         userInput,

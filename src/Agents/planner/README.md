@@ -354,6 +354,35 @@ de-duplicated ids a plan references — the set the resolver is called with.
 (`GraphBuildOptions`), and `SchedulerOptions` gained the optional
 `resolveExternalOwner`. No existing signature, default, or wave schedule changed.
 
+## Bounded Recovery for Invalid Planner Responses
+
+When the underlying model returns an invalid, malformed, or unauthorized workflow response during plan creation, `AgentPlanner` provides bounded recovery via a finite retry policy and a deterministic safe terminal fallback:
+
+### Supported Behavior
+
+- **Automatic Retries**: If the model response is missing the `workflow` array, contains malformed steps (e.g., missing or invalid `action`), fails pre-execution authorization (unauthorized tool selected), or fails plan validation, the planner retries with targeted recovery instructions.
+- **Finite Retry Bounds**: Configured via `PlannerRecoveryPolicy.maxRetries` (or `PlannerConstraints.maxRetries`). Defaults to `2` retries (3 total attempts). Values are clamped between `0` and `5` (`MAX_RECOVERY_RETRIES_LIMIT`) to prevent infinite retry loops.
+- **Optional Backoff Delay**: Configured via `retryDelayMs`.
+- **Deterministic Safe Terminal Result**: When recovery attempts are exhausted, the planner creates a deterministic, zero-step safe terminal plan (`totalSteps: 0`, `steps: []`, `riskLevel: 'low'`, `requiresApproval: false`, `isTerminal: true`, `terminalReason`).
+- **Terminal Result Modes**:
+  - `'throw'` (default): Throws a `PlannerRecoveryError` containing `isTerminal: true`, `attempts`, `maxRetries`, `lastError`, and the attached `safeTerminalPlan`.
+  - `'safe_terminal_plan'`: Returns the safe terminal plan directly without throwing.
+- **Security Auditing**: When recovery attempts are exhausted, a security audit event is logged with event type `UNAUTHORIZED_TOOL_REJECTED` and threat category `PLANNER_RECOVERY_EXHAUSTED`.
+
+### Configuration Example
+
+```typescript
+const plan = await agentPlanner.createPlan({
+  userId: "user123",
+  userInput: "Swap 100 XLM to USDC",
+  recoveryPolicy: {
+    maxRetries: 3,
+    retryDelayMs: 100,
+    terminalResultMode: "throw", // or "safe_terminal_plan"
+  },
+});
+```
+
 ## Risk Assessment
 
 Plans are automatically assessed for risk:

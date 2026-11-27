@@ -4,7 +4,11 @@
  * Provides intelligent planning and execution for multi-step DeFi operations
  */
 
-export { AgentPlanner, agentPlanner } from "./AgentPlanner";
+export {
+  AgentPlanner,
+  agentPlanner,
+  PlannerRecoveryError,
+} from "./AgentPlanner";
 export { PlanExecutor, planExecutor } from "./PlanExecutor";
 export { parseSorobanIntent } from "./sorobanIntent";
 export { planHashService } from "./planHash";
@@ -13,8 +17,15 @@ export {
   DurableRecoveryService,
   durableRecoveryService,
 } from "./DurableRecoveryService";
-export { CompensationService, compensationService, buildCompensationPlan } from "./CompensationService";
-export { ProgressMonitorService, progressMonitorService } from "./ProgressMonitor.service";
+export {
+  CompensationService,
+  compensationService,
+  buildCompensationPlan,
+} from "./CompensationService";
+export {
+  ProgressMonitorService,
+  progressMonitorService,
+} from "./ProgressMonitor.service";
 export { ExecutionStatus } from "./DurableExecution.entity";
 export { StepStatus } from "./DurableStep.entity";
 export {
@@ -46,6 +57,7 @@ export type {
   PlanStep,
   ExecutionPlan,
   PlanValidation,
+  PlannerRecoveryPolicy,
 } from "./AgentPlanner";
 
 export type {
