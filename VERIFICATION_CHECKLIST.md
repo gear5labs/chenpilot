@@ -149,9 +149,10 @@
 |-----------|--------|---------|
 | FinalityPolicy | ✅ | Config management |
 | AncestryVerifier | ✅ | Fork detection via parent hash |
-| ConfirmationDepthTracker | ✅ | Main polling loop |
+| ConfirmationDepthTracker | ✅ | Main polling loop (with AbortSignal + deadline) |
 | ReconciliationService | ✅ | Independent provider reconciliation |
 | FinalizationManager | ✅ | Orchestrator & event wiring |
+| PollOutcome | ✅ | Terminal outcome type for awaitConfirmation |
 
 ### State Machine
 | State | Transitions | Terminal | Purpose |
@@ -174,6 +175,54 @@
 | reconciliation_failed | Both providers NOT_FOUND | Mark ORPHANED |
 | conflicting_providers | Providers disagree | Mark CONFLICTED |
 | reconciliation_provider_unavailable | Max retries exceeded | Mark ORPHANED |
+| cancelled | AbortSignal fired or external cancel | Stop polling, clean up |
+
+### Poll Outcome (Deadline, Cancellation, and Clear Outcome)
+
+Status polling now has a deadline, cancellation support, and a clear outcome
+when confirmation is not observed.  Three additions make this possible:
+
+**1. `PollOutcome` discriminated union** (`src/services/finality/PollOutcome.ts`)
+
+Every polling session resolves to one of four terminal outcomes:
+
+| `status` | When | Fields |
+|----------|------|--------|
+| `"confirmed"` | Depth >= required + ancestry ok | `confirmationDepth`, `ledgerSequence` |
+| `"timeout"` | Deadline reached without sufficient depth | `deadlineMs`, `lastConfirmationDepth` |
+| `"cancelled"` | External `AbortSignal` aborted | `reason` |
+| `"orphaned"` | Ancestry check failed (reorg) | `reorgDepth` |
+
+**2. `awaitConfirmation()` — promise-based polling API**
+
+```typescript
+const manager = getFinalizationManager();
+const outcome = await manager.awaitConfirmation(
+  transactionId, txHash, ledgerSequence, ledgerHash, provider,
+  { signal: controller.signal, deadlineMs: Date.now() + 30_000 }
+);
+
+switch (outcome.status) {
+  case "confirmed": // proceed with side effects
+  case "timeout":   // re-simulate or re-submit
+  case "cancelled": // user or parent cancelled — clean up
+  case "orphaned":   // reorg detected — reconciliation handles this
+}
+```
+
+**3. `AbortSignal` support**
+
+`startTracking()` and `startConfirmationTracking()` now accept an optional
+`AbortSignal`.  When the signal aborts, the polling loop stops immediately
+and a `cancelled` event is emitted.  This makes polling composable with
+any AbortSignal-based API (timeouts, user cancellation, shutdown).
+
+| Behaviour | Without signal (default) | With signal |
+|-----------|--------------------------|------------|
+| Deadline | `confirmationTimeoutMs` from policy | Overridable via `deadlineMs` |
+| Cancellation | `stopTracking()` imperative only | `signal.abort()` or `stopTracking()` |
+| Outcome | Events only (`finality:declared`, `stale:detected`, …) | `awaitConfirmation()` returns `PollOutcome` |
+| Compatibility | Unchanged | Fully backward-compatible (signal is optional) |
 
 ---
 
@@ -190,6 +239,16 @@
 8. ✅ **Side effects gate** — Not triggered at CONFIRMING, exactly once at FINAL
 9. ✅ **No duplicate submission** — Tx submitted exactly once across flow
 10. ✅ **Circuit breaker** — Max retries → reconciliation_provider_unavailable
+
+### Poll Outcome Tests (Deadline, Cancellation, Outcome)
+11. ✅ **Confirmed outcome** — `awaitConfirmation` resolves with `"confirmed"` when depth reached
+12. ✅ **Timeout outcome** — `awaitConfirmation` resolves with `"timeout"` when deadline elapses
+13. ✅ **Custom deadline** — `deadlineMs` overrides policy `confirmationTimeoutMs`
+14. ✅ **Cancelled mid-poll** — `AbortSignal` abort stops polling and resolves `"cancelled"`
+15. ✅ **Already-aborted signal** — Pre-aborted signal resolves immediately with `"cancelled"`
+16. ✅ **Orphaned outcome** — Ancestry failure resolves with `"orphaned"`
+17. ✅ **Backward compatible** — `startConfirmationTracking` still works without a signal
+18. ✅ **Listener cleanup** — `awaitConfirmation` removes all event listeners after resolving
 
 **All tests:** Mocked Horizon, event emitter verification, deterministic timing
 

@@ -4,6 +4,7 @@ import { FinalityPolicy, loadFinalityPolicyFromEnv } from "./FinalityPolicy";
 import { ConfirmationDepthTracker } from "./ConfirmationDepthTracker";
 import { ReconciliationService } from "./ReconciliationService";
 import { ReorgEvent } from "./ReorgEvent";
+import { PollOutcome } from "./PollOutcome";
 import { EventEmitter } from "events";
 
 /**
@@ -26,13 +27,18 @@ export class FinalizationManager extends EventEmitter {
 
   /**
    * Start finality tracking for a transaction observed in a ledger.
+   *
+   * @param signal — optional AbortSignal. When aborted, the confirmation
+   * polling loop stops and a `cancelled` event is emitted.  Existing callers
+   * that do not pass a signal are unaffected.
    */
   async startTracking(
     transactionId: string,
     txHash: string,
     ledgerSequence: number,
     ledgerHash: string,
-    provider: string
+    provider: string,
+    signal?: AbortSignal
   ): Promise<void> {
     logger.info("FinalizationManager: starting tracking", {
       transactionId,
@@ -45,7 +51,53 @@ export class FinalizationManager extends EventEmitter {
       txHash,
       ledgerSequence,
       ledgerHash,
-      provider
+      provider,
+      signal
+    );
+  }
+
+  /**
+   * Start tracking and return a promise that resolves with the terminal
+   * {@link PollOutcome}.
+   *
+   * This is the promise-based alternative to {@link startTracking} + event
+   * listeners.  It resolves when:
+   *  - Finality is declared (`status: "confirmed"`).
+   *  - The deadline is reached without sufficient depth (`status: "timeout"`).
+   *  - An orphan is detected (`status: "orphaned"`).
+   *  - The provided `signal` is aborted (`status: "cancelled"`).
+   *
+   * @param options.signal    — optional AbortSignal for external cancellation.
+   * @param options.deadlineMs — optional deadline (ms since epoch) that
+   *                             overrides the policy's `confirmationTimeoutMs`.
+   *
+   * @example
+   * ```ts
+   * const controller = new AbortController();
+   * const outcome = await manager.awaitConfirmation(
+   *   txId, txHash, ledger, hash, "horizon",
+   *   { signal: controller.signal, deadlineMs: Date.now() + 30_000 }
+   * );
+   * if (outcome.status === "timeout") {
+   *   // re-simulate or re-submit
+   * }
+   * ```
+   */
+  async awaitConfirmation(
+    transactionId: string,
+    txHash: string,
+    ledgerSequence: number,
+    ledgerHash: string,
+    provider: string,
+    options: { signal?: AbortSignal; deadlineMs?: number } = {}
+  ): Promise<PollOutcome> {
+    return this.confirmationTracker.awaitConfirmation(
+      transactionId,
+      txHash,
+      ledgerSequence,
+      ledgerHash,
+      provider,
+      options
     );
   }
 

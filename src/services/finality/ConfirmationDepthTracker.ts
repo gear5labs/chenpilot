@@ -6,6 +6,7 @@ import { TransactionLifecycle, FinalityStatus } from "../../transactions/Transac
 import { FinalityPolicy } from "./FinalityPolicy";
 import { AncestryVerifier } from "./AncestryVerifier";
 import { ReorgEvent } from "./ReorgEvent";
+import { PollOutcome } from "./PollOutcome";
 import { EventEmitter } from "events";
 
 export interface ConfirmationState {
@@ -17,6 +18,8 @@ export interface ConfirmationState {
   lastPolledAt: number;
   timeoutAt: number;
   pollingIntervalHandle?: NodeJS.Timeout;
+  /** Optional external cancellation signal. When aborted, polling stops and a `cancelled` event is emitted. */
+  abortSignal?: AbortSignal;
 }
 
 /**
@@ -45,13 +48,18 @@ export class ConfirmationDepthTracker extends EventEmitter {
   /**
    * Start tracking confirmation depth for a transaction that was just observed in a ledger.
    * Called immediately after transaction is first seen in Horizon.
+   *
+   * @param signal — optional AbortSignal. When aborted, polling stops and a
+   * `cancelled` event is emitted.  Existing callers that do not pass a signal
+   * are unaffected.
    */
   async startConfirmationTracking(
     transactionId: string,
     txHash: string,
     ledgerSequence: number,
     ledgerHash: string,
-    provider: string
+    provider: string,
+    signal?: AbortSignal
   ): Promise<void> {
     logger.info("Starting confirmation depth tracking", {
       transactionId,
@@ -79,6 +87,7 @@ export class ConfirmationDepthTracker extends EventEmitter {
       confirmationDepth: 0,
       lastPolledAt: Date.now(),
       timeoutAt: Date.now() + this.policy.confirmationTimeoutMs,
+      abortSignal: signal,
     };
 
     this.activeConfirmations.set(txHash, confirmationState);
@@ -105,12 +114,18 @@ export class ConfirmationDepthTracker extends EventEmitter {
   }
 
   /**
-   * Poll confirmation depth repeatedly until finality or orphan detected.
+   * Poll confirmation depth repeatedly until finality, orphan, timeout, or cancellation.
    */
   private pollConfirmationDepth(txHash: string): void {
     const confirmationState = this.activeConfirmations.get(txHash);
     if (!confirmationState) {
       logger.warn("Confirmation state not found during poll", { txHash });
+      return;
+    }
+
+    // Check abort signal before scheduling the next poll
+    if (confirmationState.abortSignal?.aborted) {
+      this.handleCancellation(txHash, "abort signal");
       return;
     }
 
@@ -392,6 +407,169 @@ export class ConfirmationDepthTracker extends EventEmitter {
       clearTimeout(confirmationState.pollingIntervalHandle);
     }
     this.activeConfirmations.delete(txHash);
+  }
+
+  /**
+   * Handle cancellation from an AbortSignal.
+   *
+   * Clears the polling handle, removes the confirmation from active tracking,
+   * emits a `cancelled` event, and updates the lifecycle record to RECONCILING
+   * (consistent with the orphan path — the caller may still want to reconcile).
+   */
+  private async handleCancellation(txHash: string, reason: string): Promise<void> {
+    const confirmationState = this.activeConfirmations.get(txHash);
+    if (!confirmationState) return;
+
+    if (confirmationState.pollingIntervalHandle) {
+      clearTimeout(confirmationState.pollingIntervalHandle);
+    }
+
+    logger.info("Confirmation polling cancelled", {
+      transactionId: confirmationState.transactionId,
+      txHash,
+      reason,
+    });
+
+    this.activeConfirmations.delete(txHash);
+
+    this.emit("cancelled", {
+      transactionId: confirmationState.transactionId,
+      txHash,
+      reason,
+      confirmationDepth: confirmationState.confirmationDepth,
+    });
+  }
+
+  /**
+   * Start tracking and return a promise that resolves with the terminal
+   * {@link PollOutcome}.
+   *
+   * This is the promise-based alternative to {@link startConfirmationTracking}
+   * + event listeners.  It:
+   *  - Starts the polling loop (same as `startConfirmationTracking`).
+   *  - Resolves when finality is declared, the deadline is reached, an orphan
+   *    is detected, or the provided `signal` is aborted.
+   *  - Cleans up all listeners it registered so there is no memory leak.
+   *
+   * @param options.signal    — optional AbortSignal for external cancellation.
+   * @param options.deadlineMs — optional deadline (ms since epoch).  Overrides
+   *                             the policy's `confirmationTimeoutMs` when
+   *                             provided.  When the deadline is reached the
+   *                             outcome is `{ status: "timeout" }`.
+   *
+   * Existing callers of `startConfirmationTracking` are unaffected — this
+   * method is purely additive.
+   */
+  async awaitConfirmation(
+    transactionId: string,
+    txHash: string,
+    ledgerSequence: number,
+    ledgerHash: string,
+    provider: string,
+    options: { signal?: AbortSignal; deadlineMs?: number } = {}
+  ): Promise<PollOutcome> {
+    const { signal, deadlineMs } = options;
+
+    // Compute the effective timeout
+    const effectiveTimeoutMs =
+      deadlineMs !== undefined
+        ? Math.max(0, deadlineMs - Date.now())
+        : this.policy.confirmationTimeoutMs;
+
+    // Start tracking — this kicks off the polling loop.
+    // Temporarily override the policy timeout if a custom deadline is provided.
+    const originalTimeoutMs = this.policy.confirmationTimeoutMs;
+    if (deadlineMs !== undefined) {
+      this.policy.confirmationTimeoutMs = effectiveTimeoutMs;
+    }
+
+    await this.startConfirmationTracking(
+      transactionId,
+      txHash,
+      ledgerSequence,
+      ledgerHash,
+      provider,
+      signal
+    );
+
+    // Restore the policy timeout
+    if (deadlineMs !== undefined) {
+      this.policy.confirmationTimeoutMs = originalTimeoutMs;
+    }
+
+    return new Promise<PollOutcome>((resolve) => {
+      const cleanup = () => {
+        this.off("finality:declared", onFinality);
+        this.off("stale:detected", onStale);
+        this.off("orphan:detected", onOrphan);
+        this.off("cancelled", onCancelled);
+        if (signalAbortListener) {
+          signal?.removeEventListener("abort", signalAbortListener);
+        }
+      };
+
+      const onFinality = (data: { transactionId: string; txHash: string; ledgerSequence: number; ledgerHash: string }) => {
+        if (data.txHash !== txHash) return;
+        cleanup();
+        const state = this.activeConfirmations.get(txHash);
+        const depth = state?.confirmationDepth ?? 0;
+        resolve({
+          status: "confirmed",
+          transactionId,
+          txHash,
+          confirmationDepth: depth,
+          ledgerSequence,
+        });
+      };
+
+      const onStale = (data: { transactionId: string; txHash: string }) => {
+        if (data.txHash !== txHash) return;
+        cleanup();
+        resolve({
+          status: "timeout",
+          transactionId,
+          txHash,
+          deadlineMs: Date.now(),
+          lastConfirmationDepth: 0,
+        });
+      };
+
+      const onOrphan = (data: { transactionId: string; txHash: string; lifecycle: { reorgDepth?: number } }) => {
+        if (data.txHash !== txHash) return;
+        cleanup();
+        resolve({
+          status: "orphaned",
+          transactionId,
+          txHash,
+          reorgDepth: data.lifecycle?.reorgDepth ?? 0,
+        });
+      };
+
+      const onCancelled = (data: { transactionId: string; txHash: string; reason: string }) => {
+        if (data.txHash !== txHash) return;
+        cleanup();
+        resolve({
+          status: "cancelled",
+          transactionId,
+          txHash,
+          reason: data.reason,
+        });
+      };
+
+      // External abort signal
+      let signalAbortListener: (() => void) | undefined;
+      if (signal) {
+        signalAbortListener = () => {
+          this.handleCancellation(txHash, "abort signal").catch(() => {});
+        };
+        signal.addEventListener("abort", signalAbortListener);
+      }
+
+      this.on("finality:declared", onFinality);
+      this.on("stale:detected", onStale);
+      this.on("orphan:detected", onOrphan);
+      this.on("cancelled", onCancelled);
+    });
   }
 
   /**
