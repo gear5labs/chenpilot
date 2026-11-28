@@ -1,3 +1,9 @@
+export {
+  parsePublicAmount,
+  parseScaledAmount,
+  serializeScaledAmount,
+  sumAmounts,
+} from "./fixedAmount";
 export * from "./canonical";
 export { canonicalize } from "./canonical";
 export * from "./networkIntelligence";

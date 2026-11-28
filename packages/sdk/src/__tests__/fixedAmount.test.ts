@@ -104,6 +104,28 @@ describe("SDK fixedAmount (#622)", () => {
       }).toThrow(/Invalid amount/);
     });
 
+    it("rejects numbers, exponent notation, and excess precision, and accepts zero", () => {
+      const { parsePublicAmount } = require("../fixedAmount");
+      const { isAmount, isPositiveAmount } = require("../advancedOps/validation");
+      const maxSafe = Number.MAX_SAFE_INTEGER;
+
+      expect(() => parsePublicAmount(maxSafe, 7)).toThrow(/canonical decimal string/);
+      expect(() => parsePublicAmount(maxSafe + 2, 7)).toThrow(/Unsafe numeric amount/);
+      expect(() => parsePublicAmount(0.1, 7)).toThrow(/Unsafe numeric amount/);
+      expect(() => parsePublicAmount("1e7", 7)).toThrow(/exponent notation/);
+      expect(() => parsePublicAmount("0.00000001", 7)).toThrow(/exceeds precision/);
+      expect(parsePublicAmount("0", 7)).toBe(0n);
+      expect(parsePublicAmount("9007199254740993", 0)).toBe(9007199254740993n);
+
+      expect(isAmount(maxSafe)).toBe(false);
+      expect(isAmount("1e7")).toBe(false);
+      expect(isAmount("0")).toBe(true);
+      expect(isPositiveAmount("0")).toBe(false);
+      expect(isPositiveAmount("0.0000001")).toBe(true);
+      expect(isAmount("0.00000001")).toBe(false);
+      expect(isPositiveAmount("9007199254740993")).toBe(true);
+    });
+
     it("accepts valid amounts in SponsorshipWorkflowBuilder.addPayment", () => {
       const { SponsorshipWorkflowBuilder } = require("../sponsorship");
       const builder = new SponsorshipWorkflowBuilder({

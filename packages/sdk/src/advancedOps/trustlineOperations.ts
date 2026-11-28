@@ -15,8 +15,10 @@ import {
   type ValidationIssue,
   type ValidationReport,
 } from "./types";
+import { parseScaledAmount } from "../fixedAmount";
 import {
   MAX_TRUST_LIMIT,
+  STELLAR_AMOUNT_PRECISION,
   error,
   isAccountId,
   isAmount,
@@ -24,6 +26,10 @@ import {
   toReport,
   warning,
 } from "./validation";
+
+function scaled(value: string): bigint {
+  return parseScaledAmount(value, STELLAR_AMOUNT_PRECISION);
+}
 
 type TrustlineKind = TrustlineOperation["kind"];
 
@@ -125,7 +131,7 @@ export function validateTrustlineParams(
   }
 
   if (kind === AdvancedOperationKind.TRUSTLINE_REMOVE) {
-    if (params.limit !== undefined && Number(params.limit) !== 0) {
+    if (params.limit !== undefined && !(isAmount(params.limit) && scaled(params.limit) === 0n)) {
       issues.push(
         error(
           "limit",
@@ -143,7 +149,7 @@ export function validateTrustlineParams(
           "Limit must be a non-negative decimal with at most 7 decimal places"
         )
       );
-    } else if (Number(params.limit) === 0) {
+    } else if (scaled(params.limit) === 0n) {
       issues.push(
         warning(
           "limit",
@@ -151,7 +157,7 @@ export function validateTrustlineParams(
           "A limit of 0 removes the trustline; use removeTrustline to be explicit"
         )
       );
-    } else if (Number(params.limit) > Number(MAX_TRUST_LIMIT)) {
+    } else if (scaled(params.limit) > scaled(MAX_TRUST_LIMIT)) {
       issues.push(
         error(
           "limit",

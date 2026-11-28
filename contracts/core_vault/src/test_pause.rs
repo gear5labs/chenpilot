@@ -12,7 +12,7 @@ use soroban_sdk::{testutils::Address as _, Address, Env};
 fn setup(env: &Env) -> (Address, Address, CoreVaultContractClient<'_>) {
     let admin = Address::generate(env);
     let vault_token = env.register_stellar_asset_contract_v2(admin.clone()).address();
-    let unified_auth = Address::generate(env);
+    let unified_auth = env.register(CoreVaultContract, ());
     let contract_id = env.register(CoreVaultContract, ());
     let client = CoreVaultContractClient::new(env, &contract_id);
     client.init(&admin, &vault_token, &unified_auth);
